@@ -1,25 +1,24 @@
 import React from 'react'
-import { OptionsType } from 'react-select'
+import type { OptionsType } from 'react-select'
 import { googleFontsList } from '../../../../../../assets/google-fonts-list'
 import { identity } from '../../../../../core/shared/utils'
+import type { ExternalResources } from '../../../../../printer-parsers/html/external-resources-parser'
 import {
-  ExternalResources,
   googleFontsResource,
   useExternalResources,
 } from '../../../../../printer-parsers/html/external-resources-parser'
 import utils from '../../../../../utils/utils'
-import { Tooltip, PopupList } from '../../../../../uuiui'
-import { betterReactMemo } from '../../../../../uuiui-deps'
+import { Tooltip, PopupList, UtopiaTheme } from '../../../../../uuiui'
 import { InspectorContextMenuWrapper } from '../../../../context-menu-wrapper'
+import type { WebFontFamilyVariant } from '../../../../navigator/external-resources/google-fonts-utils'
 import {
   defaultWebFontWeightsAndStyles,
   prettyNameForFontVariant,
-  WebFontFamilyVariant,
   webFontFamilyVariant,
 } from '../../../../navigator/external-resources/google-fonts-utils'
 import { addOnUnsetValues } from '../../../common/context-menu-items'
+import type { ParsedValues } from '../../../common/property-path-hooks'
 import {
-  ParsedValues,
   stylePropPathMappingFn,
   useInspectorInfo,
   useInspectorStyleInfo,
@@ -90,7 +89,7 @@ interface FontWeightAndStyleSelectOption {
   value: WebFontFamilyVariant
 }
 
-export const FontVariantSelect = betterReactMemo('FontVariantSelect', () => {
+export const FontVariantSelect = React.memo(() => {
   const { value, controlStyles, onUnsetValues, useSubmitValueFactory } = useInspectorInfo(
     weightAndStylePaths,
     identity,
@@ -104,23 +103,23 @@ export const FontVariantSelect = betterReactMemo('FontVariantSelect', () => {
   const fontWeightAndStyleContextMenuItems = utils.stripNulls([
     controlStyles.unsettable ? addOnUnsetValues(['fontWeight', 'fontStyle'], onUnsetValues) : null,
   ])
-  const fontWeightAndStyleOptions: OptionsType<FontWeightAndStyleSelectOption> = React.useMemo(() => {
-    const variantsToMap =
-      googleFontsList.find((font) => font.name === primaryFont)?.variants ??
-      defaultWebFontWeightsAndStyles
-    return variantsToMap.map((variant) => {
-      return {
-        value: webFontFamilyVariant(primaryFont, variant),
-        label: prettyNameForFontVariant(variant),
-        style: { fontWeight: variant.webFontWeight, fontStyle: variant.webFontStyle },
-      }
-    })
-  }, [primaryFont])
+  const fontWeightAndStyleOptions: OptionsType<FontWeightAndStyleSelectOption> =
+    React.useMemo(() => {
+      const variantsToMap =
+        googleFontsList.find((font) => font.name === primaryFont)?.variants ??
+        defaultWebFontWeightsAndStyles
+      return variantsToMap.map((variant) => {
+        return {
+          value: webFontFamilyVariant(primaryFont, variant),
+          label: prettyNameForFontVariant(variant),
+          style: { fontWeight: variant.webFontWeight, fontStyle: variant.webFontStyle },
+        }
+      })
+    }, [primaryFont])
 
   const { useSubmitValueFactory: useResourcesSubmitValueFactory } = useExternalResources()
-  const [onSubmitNewFontVariantToResources] = useResourcesSubmitValueFactory(
-    updateAddNewFontVariant,
-  )
+  const [onSubmitNewFontVariantToResources] =
+    useResourcesSubmitValueFactory(updateAddNewFontVariant)
   const [onSubmitFontWeightAndStyle] = useSubmitValueFactory(updateFontWeightAndStyle)
   const onSubmitValue = React.useCallback(
     (newValue: FontWeightAndStyleSelectOption) => {
@@ -141,7 +140,6 @@ export const FontVariantSelect = betterReactMemo('FontVariantSelect', () => {
       id='fontWeightAndStyle-context-menu'
       items={fontWeightAndStyleContextMenuItems}
       data={null}
-      style={{ gridColumn: '1' }}
     >
       <Tooltip title='Font Weight and Style' placement='top'>
         <PopupList
@@ -150,6 +148,7 @@ export const FontVariantSelect = betterReactMemo('FontVariantSelect', () => {
           value={selectValue}
           options={fontWeightAndStyleOptions}
           controlStyles={controlStyles}
+          style={{ background: 'transparent' }}
         />
       </Tooltip>
     </InspectorContextMenuWrapper>

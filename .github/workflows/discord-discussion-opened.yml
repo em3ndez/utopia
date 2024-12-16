@@ -3,9 +3,24 @@ on:
   discussion:
     types: [created]
 
+permissions:
+  actions: none
+  checks: none
+  contents: none
+  deployments: none
+  id-token: none
+  issues: none
+  packages: none
+  pages: none
+  pull-requests: none
+  repository-projects: none
+  security-events: none
+  statuses: none
+
 jobs:
   post-to-discord:
     name: Post Notification To Discord
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - name: Build Embeds JSON

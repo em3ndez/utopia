@@ -1,20 +1,17 @@
 import React from 'react'
-import { LoginState, isLoggedIn } from './action-types'
 import { auth0Url } from '../../common/env-vars'
-import { setRedirectUrl } from '../../common/persistence'
-import { useEditorState } from './store/store-hook'
+import { Substores, useEditorState } from './store/store-hook'
 
 import { NotificationBar } from '../common/notices'
-import { NoticeLevel } from '../common/notice'
-import { betterReactMemo } from '../../uuiui-deps'
+import { useGetOnlineStatus } from './online-status'
 
-export const BrowserInfoBar = betterReactMemo('EditorOfflineBar', () => {
+export const BrowserInfoBar = React.memo(() => {
   return (
     <NotificationBar level='INFO' message={`Utopia works best and fastest in Chrome right now`} />
   )
 })
 
-const EditorOfflineBar = betterReactMemo('EditorOfflineBar', () => {
+const EditorOfflineBar = React.memo(() => {
   return (
     <NotificationBar
       level='ERROR'
@@ -23,18 +20,20 @@ const EditorOfflineBar = betterReactMemo('EditorOfflineBar', () => {
   )
 })
 
-export const LoginStatusBar = betterReactMemo('LoginStatusBar', () => {
-  const loginState = useEditorState((store) => store.userState.loginState, 'LoginStatusBar')
-  const saveError = useEditorState(
-    (store) => store.editor.saveError,
-    'EditorComponentInner saveError',
+export const LoginStatusBar = React.memo(() => {
+  const loginState = useEditorState(
+    Substores.restOfStore,
+    (store) => store.userState.loginState,
+    'LoginStatusBar',
   )
+
+  const isOnline = useGetOnlineStatus()
 
   const onClickLoginNewTab = React.useCallback(() => {
     window.open(auth0Url('auto-close'), '_blank')
   }, [])
 
-  if (saveError) {
+  if (!isOnline) {
     return <EditorOfflineBar />
   }
 
@@ -44,16 +43,9 @@ export const LoginStatusBar = betterReactMemo('LoginStatusBar', () => {
     case 'LOGGED_IN':
       return null
     case 'OFFLINE_STATE':
-      return <EditorOfflineBar />
+      return null
     case 'NOT_LOGGED_IN':
-      return (
-        <NotificationBar
-          level='PRIMARY'
-          message={'Welcome to Utopia. Click here to sign in and save your projects.'}
-          onClick={onClickLoginNewTab}
-          style={{ cursor: 'pointer' }}
-        />
-      )
+      return null
     case 'LOGIN_LOST':
       return (
         <NotificationBar

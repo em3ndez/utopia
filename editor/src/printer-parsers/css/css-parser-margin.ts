@@ -1,15 +1,12 @@
+import type { CSSMargin, CSSNumber } from '../../components/inspector/common/css-utils'
 import {
-  CSSMargin,
-  CSSNumber,
   printCSSNumber,
   printCSSNumberWithDefaultUnit,
 } from '../../components/inspector/common/css-utils'
-import { Either, isRight, left, right } from '../../core/shared/either'
-import {
-  emptyComments,
-  JSXAttributeValue,
-  jsxAttributeValue,
-} from '../../core/shared/element-template'
+import type { Either } from '../../core/shared/either'
+import { isRight, left, right } from '../../core/shared/either'
+import type { JSExpressionValue } from '../../core/shared/element-template'
+import { emptyComments, jsExpressionValue } from '../../core/shared/element-template'
 import {
   canUseOneValueSyntax,
   canUseThreeValueSyntax,
@@ -65,7 +62,7 @@ export const parseMargin = (value: unknown): Either<string, CSSMargin> => {
 
 export const printMarginAsAttributeValue = (
   value: CSSMargin,
-): JSXAttributeValue<number | string> => {
+): JSExpressionValue<number | string> => {
   const marginTop = printCSSNumberWithDefaultUnit(value.marginTop, 'px')
   const marginRight = printCSSNumberWithDefaultUnit(value.marginRight, 'px')
   const marginBottom = printCSSNumberWithDefaultUnit(value.marginBottom, 'px')
@@ -73,15 +70,15 @@ export const printMarginAsAttributeValue = (
 
   if (canUseOneValueSyntax(marginTop, marginRight, marginBottom, marginLeft)) {
     const marginValue = printCSSNumber(value.marginTop, 'px')
-    return jsxAttributeValue(marginValue, emptyComments)
+    return jsExpressionValue(marginValue, emptyComments)
   } else if (canUseTwoValueSyntax(marginTop, marginRight, marginBottom, marginLeft)) {
     const marginValue = `${marginTop} ${marginLeft}`
-    return jsxAttributeValue(marginValue, emptyComments)
+    return jsExpressionValue(marginValue, emptyComments)
   } else if (canUseThreeValueSyntax(marginTop, marginRight, marginBottom, marginLeft)) {
     const marginValue = `${marginTop} ${marginLeft} ${marginBottom}`
-    return jsxAttributeValue(marginValue, emptyComments)
+    return jsExpressionValue(marginValue, emptyComments)
   } else {
     const marginValue = `${marginTop} ${marginRight} ${marginBottom} ${marginLeft}`
-    return jsxAttributeValue(marginValue, emptyComments)
+    return jsExpressionValue(marginValue, emptyComments)
   }
 }

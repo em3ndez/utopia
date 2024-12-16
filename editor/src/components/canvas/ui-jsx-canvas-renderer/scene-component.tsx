@@ -1,36 +1,36 @@
 import React from 'react'
 import fastDeepEquals from 'fast-deep-equal'
-import { useContextSelector } from 'use-context-selector'
-import { Scene, SceneProps } from 'utopia-api'
+import type { SceneProps } from 'utopia-api'
+import { Scene } from 'utopia-api'
 import { useColorTheme, UtopiaStyles } from '../../../uuiui'
-import { betterReactMemo } from '../../../uuiui-deps'
-import { RerenderUtopiaCtxAtom } from './ui-jsx-canvas-contexts'
-import { DomWalkerInvalidateScenesCtxAtom, UiJsxCanvasCtxAtom } from '../ui-jsx-canvas'
-import { UTOPIA_SCENE_ID_KEY } from '../../../core/model/utopia-constants'
-import { usePubSubAtomReadOnly } from '../../../core/shared/atom-with-pub-sub'
+import { DomWalkerInvalidatePathsCtxAtom } from '../ui-jsx-canvas'
+import type { UTOPIA_SCENE_ID_KEY } from '../../../core/model/utopia-constants'
+import { AlwaysTrue, usePubSubAtomReadOnly } from '../../../core/shared/atom-with-pub-sub'
+import { SceneContainerName } from '../canvas-types'
 
 type ExtendedSceneProps = SceneProps & { [UTOPIA_SCENE_ID_KEY]: string }
 
-export const SceneComponent = betterReactMemo(
-  'Scene',
+export const SceneComponent = React.memo(
   (props: React.PropsWithChildren<ExtendedSceneProps>) => {
     const colorTheme = useColorTheme()
-    const canvasIsLive = usePubSubAtomReadOnly(RerenderUtopiaCtxAtom).canvasIsLive
-    const updateInvalidatedScenes = usePubSubAtomReadOnly(DomWalkerInvalidateScenesCtxAtom)
+    const updateInvalidatedPaths = usePubSubAtomReadOnly(
+      DomWalkerInvalidatePathsCtxAtom,
+      AlwaysTrue,
+    )
 
     const { style, ...remainingProps } = props
 
     const sceneStyle: React.CSSProperties = {
+      container: `${SceneContainerName} / inline-size`,
       position: 'relative',
       backgroundColor: colorTheme.emphasizedBackground.value,
-      boxShadow: canvasIsLive
-        ? UtopiaStyles.scene.live.boxShadow
-        : UtopiaStyles.scene.editing.boxShadow,
+      boxShadow: UtopiaStyles.shadowStyles.grounded.boxShadow,
+      ...UtopiaStyles.backgrounds.checkerboardBackground,
       ...style,
     }
 
     // TODO right now we don't actually change the invalidated paths, just let the dom-walker know it should walk again
-    updateInvalidatedScenes((current) => current, 'invalidate')
+    updateInvalidatedPaths((current) => current)
 
     return (
       <Scene {...remainingProps} style={sceneStyle}>

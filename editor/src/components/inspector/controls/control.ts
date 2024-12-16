@@ -1,10 +1,11 @@
-import { OptionChainOption } from './option-chain-control'
-import { DEPRECATEDOptionControlOptions } from './option-control'
-import { DEPRECATEDSelectControlOptions, SelectOption } from './select-control'
-import { DEPRECATEDSliderControlOptions } from './slider-control'
-import { ControlStatus, ControlStyles } from '../common/control-status'
-import { UnknownOrEmptyInput, EmptyInputValue } from '../common/css-utils'
-import { StringControlOptions } from './string-control'
+import type { OptionChainOption } from './option-chain-control'
+import type { DEPRECATEDOptionControlOptions } from './option-control'
+import type { DEPRECATEDSelectControlOptions, SelectOption } from './select-control'
+import type { DEPRECATEDSliderControlOptions } from './slider-control'
+import type { ControlStyles } from '../common/control-styles'
+import type { ControlStatus } from '../common/control-status'
+import type { UnknownOrEmptyInput, EmptyInputValue } from '../common/css-utils'
+import type { StringControlOptions } from './string-control'
 
 export interface DEPRECATEDGenericControlOptions {
   tooltip?: React.ReactElement<any> | string
@@ -16,6 +17,11 @@ export type OnSubmitValueOrEmpty<T> = (value: T | EmptyInputValue, transient?: b
 export type OnSubmitValueOrUnknownOrEmpty<T> = (
   value: UnknownOrEmptyInput<T>,
   transient?: boolean,
+) => void
+
+export type OnSubmitValueOrUnknownOrEmptyMaybeTransient<T> = (
+  value: UnknownOrEmptyInput<T>,
+  transient: boolean,
 ) => void
 
 export interface DEPRECATEDControlProps<T> {
@@ -31,6 +37,7 @@ export interface DEPRECATEDControlProps<T> {
   readOnly?: boolean
   selected?: boolean
   options?: ReadonlyArray<SelectOption> | ReadonlyArray<OptionChainOption<T>>
+  onUnsetValues?: () => void
   DEPRECATED_controlOptions?:
     | DEPRECATEDGenericControlOptions
     | DEPRECATEDOptionControlOptions
@@ -47,6 +54,8 @@ export interface DEPRECATEDControlProps<T> {
   style?: React.CSSProperties
   onFocus?: (e: React.FocusEvent<HTMLInputElement>) => void
   onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void
+  onDragStart?: () => void
+  onDragEnd?: () => void
 }
 
 export interface InspectorControlProps {
@@ -56,4 +65,5 @@ export interface InspectorControlProps {
   className?: string
   controlStatus?: ControlStatus
   DEPRECATED_labelBelow?: React.ReactChild
+  pasteHandler?: boolean
 }

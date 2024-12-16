@@ -1,8 +1,9 @@
-import * as TS from 'typescript'
-import { JSXElement, TopLevelElement } from '../../shared/element-template'
-import { fixUtopiaElement } from '../../shared/uid-utils'
+import * as TS from 'typescript-for-the-editor'
+import type { JSXElement, JSXElementLike } from '../../shared/element-template'
+import { TopLevelElement, UtopiaJSXComponent } from '../../shared/element-template'
+import { fixUtopiaElement, UIDMappings, WithUIDMappings } from '../../shared/uid-utils'
 import { fastForEach } from '../../shared/utils'
-import { RawSourceMap } from '../ts/ts-typings/RawSourceMap'
+import type { RawSourceMap } from '../ts/ts-typings/RawSourceMap'
 import { SourceMapConsumer, SourceNode } from 'source-map'
 
 // Checks if the first value is greater than the second one.
@@ -26,19 +27,19 @@ export interface NodesBounds {
 
 export function getBoundsOfNodes(
   sourceFile: TS.SourceFile,
-  node: TS.Node | Array<TS.Node>,
-): NodesBounds {
+  nodeOrNodes: TS.Node | Array<TS.Node>,
+): NodesBounds | null {
   let workingStart: TS.LineAndCharacter | null = null as TS.LineAndCharacter | null
   let workingEnd: TS.LineAndCharacter | null = null as TS.LineAndCharacter | null
 
   let nodes: Array<TS.Node> = []
-  if (Array.isArray(node)) {
-    if (node.length === 0) {
-      throw new Error('Cannot get bounds of empty node array.')
+  if (Array.isArray(nodeOrNodes)) {
+    if (nodeOrNodes.length === 0) {
+      return null
     }
-    nodes = node
+    nodes = nodeOrNodes
   } else {
-    nodes = [node]
+    nodes = [nodeOrNodes]
   }
   fastForEach(nodes, (n) => {
     const start = TS.getLineAndCharacterOfPosition(sourceFile, n.getStart(sourceFile))
@@ -58,21 +59,6 @@ export function getBoundsOfNodes(
       end: workingEnd,
     }
   }
-}
-
-export function guaranteeUniqueUidsFromTopLevel(
-  topLevelElements: Array<TopLevelElement>,
-): Array<TopLevelElement> {
-  return topLevelElements.map((tle) => {
-    if (tle.type === 'UTOPIA_JSX_COMPONENT') {
-      return {
-        ...tle,
-        rootElement: fixUtopiaElement(tle.rootElement, []),
-      }
-    } else {
-      return tle
-    }
-  })
 }
 
 export interface CodeWithMap {
@@ -104,7 +90,28 @@ export function wrapCodeInParensWithMap(
   const node = SourceNode.fromStringWithSourceMap(wrappedCode, consumer)
   node.setSourceContent(sourceFileName, sourceFileText)
   const result = node.toStringWithSourceMap({ file: sourceFileName })
-  return { code: result.code, sourceMap: result.map }
+  return { code: result.code, sourceMap: result.map.toJSON() }
+}
+
+function wrapCodeInAnonFunction(code: string): string {
+  return `(() => {${removeTrailingSemicolon(code)}})()`
+}
+
+export function wrapCodeInAnonFunctionWithMap(
+  sourceFileName: string,
+  sourceFileText: string,
+  code: string,
+  sourceMap: RawSourceMap,
+): CodeWithMap {
+  // Used for when we wish to transpile and / or operate on e.g. the contents of a
+  // function without wanting to pass in the entire function itself
+  const wrappedCode = wrapCodeInAnonFunction(code)
+
+  const consumer = new SourceMapConsumer(sourceMap)
+  const node = SourceNode.fromStringWithSourceMap(wrappedCode, consumer)
+  node.setSourceContent(sourceFileName, sourceFileText)
+  const result = node.toStringWithSourceMap({ file: sourceFileName })
+  return { code: result.code, sourceMap: result.map.toJSON() }
 }
 
 export function prependToSourceString(
@@ -122,13 +129,13 @@ export function prependToSourceString(
   const { code, map } = node.toStringWithSourceMap({ file: sourceFileName })
   return {
     code: code,
-    sourceMap: JSON.parse(map.toString()),
+    sourceMap: map.toJSON(),
   }
 }
 
 interface ElementWithinInPosition {
   uid: string
-  element: JSXElement
+  element: JSXElementLike
   startLine: number
   startColumn: number
 }

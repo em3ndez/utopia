@@ -1,17 +1,20 @@
-import { MapLike } from 'typescript'
+import type { MapLike } from 'typescript'
 import { replaceAll } from './string-utils'
-const urljoin = require('url-join')
+import urljoin from 'url-join'
 import { appendHash } from './dom-utils'
+import type { Either } from './either'
+import { flatMapEither, left, mapEither, right } from './either'
 
 // This file shouldn't import anything as it is for exporting simple shared utility functions between various projects
 export const EditorID = 'utopia-editor-root'
 export const PortalTargetID = 'portal-target'
 export const CanvasContextMenuPortalTargetID = 'canvas-contextmenu-portal-target'
+export const BodyMenuOpenClass = 'context-menu-open'
 
 export const RETURN_TO_PREPEND = 'return '
 
 // eslint-disable-next-line @typescript-eslint/no-empty-function
-export const NO_OP = () => {}
+export function NO_OP() {}
 
 export type ValueOf<T> = T[keyof T]
 
@@ -21,7 +24,7 @@ export function identity<T>(t: T): T {
   return t
 }
 
-export function fastForEach<T>(a: readonly T[], fn: (t: T, index: number) => void) {
+export function fastForEach<T>(a: readonly T[], fn: (t: T, index: number) => void): void {
   for (var i = 0, len = a.length; i < len; i++) {
     if (i in a) {
       fn(a[i]!, i)
@@ -29,11 +32,31 @@ export function fastForEach<T>(a: readonly T[], fn: (t: T, index: number) => voi
   }
 }
 
-export function arrayEquals<T>(a: Array<T>, b: Array<T>, eq?: (l: T, r: T) => boolean): boolean {
+export function arrayEqualsByReference<T>(a: Array<T>, b: Array<T>): boolean {
   if (a === b) {
     return true
   } else {
-    const equals = eq == null ? (l: T, r: T) => l === r : eq
+    if (a.length === b.length) {
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) {
+          return false
+        }
+      }
+      return true
+    } else {
+      return false
+    }
+  }
+}
+
+export function arrayEqualsByValue<T>(
+  a: Array<T>,
+  b: Array<T>,
+  equals: (l: T, r: T) => boolean,
+): boolean {
+  if (a === b) {
+    return true
+  } else {
     if (a.length === b.length) {
       for (let i = 0; i < a.length; i++) {
         if (!equals(a[i], b[i])) {
@@ -141,4 +164,53 @@ export function unknownObjectProperty(o: unknown, key: string): any {
 
 export function createIframeUrl(base: string, assetName: string): string {
   return appendHash(urljoin(base, 'editor', assetName))
+}
+
+export function assertNever(n: never): never {
+  throw new Error(`Expected \`never\`, got ${JSON.stringify(n)}`)
+}
+
+export function projectIdFromURL(projectURL: string): Either<string, string> {
+  try {
+    const url = new URL(projectURL)
+    const projectIDMatch = url.pathname.match(/^\/(p|project)\/([A-Za-z0-9]+)/)
+    if (projectIDMatch == null) {
+      return left(`URL does not appear to have the project ID or be for a project.`)
+    } else {
+      return right(projectIDMatch[2])
+    }
+  } catch (error) {
+    return left(`Invalid value passed that isn't a URL.`)
+  }
+}
+
+export interface ContentsAndProjectRootResult {
+  contentsURL: string
+  projectRootURL: string
+}
+
+export function contentsJSONURLFromProjectURL(
+  projectURL: string,
+): Either<string, ContentsAndProjectRootResult> {
+  try {
+    return mapEither((projectID) => {
+      const contentsURL = new URL(projectURL)
+      contentsURL.pathname = `/v1/project/${projectID}/contents.json`
+      const projectRootURL = new URL(projectURL)
+      projectRootURL.pathname = `/project/${projectID}`
+      return {
+        contentsURL: contentsURL.toString(),
+        projectRootURL: projectRootURL.toString(),
+      }
+    }, projectIdFromURL(projectURL))
+  } catch (error) {
+    return left(`Invalid value passed that isn't a URL.`)
+  }
+}
+
+const imgPattern = /\.(jpe?g|png|gif|bmp|svg)(\?.*)?$/i
+
+export function isImage(str: string): boolean {
+  const lowerCaseStr = str.toLowerCase()
+  return imgPattern.test(lowerCaseStr) || lowerCaseStr.startsWith('data:image/')
 }

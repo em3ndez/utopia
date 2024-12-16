@@ -1,7 +1,7 @@
-import { PropertyControls } from 'utopia-api'
+import type { PropertyControls } from '../../components/custom-code/internal-property-controls'
 
 export const HtmlElementStyleObjectProps: PropertyControls = {
   style: {
-    type: 'styleobject',
+    control: 'style-controls',
   },
 }

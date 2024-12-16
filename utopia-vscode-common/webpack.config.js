@@ -1,14 +1,16 @@
 const path = require('path')
-const nodeExternals = require('webpack-node-externals')
 
 module.exports = {
   context: __dirname,
   mode: 'development',
-  entry: './src/index.ts',
+  target: 'web',
+  entry: {
+    utopiaVscodeCommon: './src/index.ts',
+  },
   resolve: {
+    mainFields: ['main'],
     extensions: ['.ts', '.js'],
   },
-  externals: [nodeExternals()],
   module: {
     rules: [
       {
@@ -20,7 +22,7 @@ module.exports = {
             options: {
               compilerOptions: {
                 sourceMap: true,
-                declaration: true,
+                declaration: false,
               },
             },
           },
@@ -32,9 +34,9 @@ module.exports = {
     hints: false,
   },
   output: {
-    filename: 'index.js',
-    path: path.join(__dirname, 'dist'),
-    libraryTarget: 'commonjs',
+    filename: 'utopia-vscode-common.js',
+    path: path.join(__dirname, 'dist', 'browser'),
+    libraryTarget: 'umd',
   },
   devtool: 'source-map',
 }

@@ -1,54 +1,58 @@
 import React from 'react'
-import {
+import type {
   ComputedStyle,
-  isJSXElement,
-  isUtopiaJSXComponent,
   JSXAttributes,
   StyleAttributeMetadata,
 } from '../../../core/shared/element-template'
-import { isParseSuccess, ElementPath } from '../../../core/shared/project-file-types'
+import { isJSXElement, isUtopiaJSXComponent } from '../../../core/shared/element-template'
+import type { ElementPath } from '../../../core/shared/project-file-types'
+import { isParseSuccess } from '../../../core/shared/project-file-types'
 import { NO_OP } from '../../../core/shared/utils'
 import { testParseCode } from '../../../core/workers/parser-printer/parser-printer.test-utils'
 import { InspectorCallbackContext, InspectorPropsContext } from './property-path-hooks'
 
-export const makeInspectorHookContextProvider = (
-  selectedViews: Array<ElementPath>,
-  multiselectAttributes: JSXAttributes[],
-  targetPath: string[],
-  spiedProps: Array<{ [key: string]: any }>,
-  computedStyles: Array<ComputedStyle>,
-  attributeMetadatas: Array<StyleAttributeMetadata>,
-) => ({ children }: any) => {
-  const spiedPropsWrappedInTargetPath = spiedProps.map((realInnerValue) => {
-    return targetPath.reduceRight((working, pathPart) => {
-      return {
-        [pathPart]: working,
-      }
-    }, realInnerValue)
-  })
-  return (
-    <InspectorCallbackContext.Provider
-      value={{
-        selectedViewsRef: { current: selectedViews },
-        onSubmitValue: NO_OP,
-        onUnsetValue: NO_OP,
-      }}
-    >
-      <InspectorPropsContext.Provider
+export const makeInspectorHookContextProvider =
+  (
+    selectedViews: Array<ElementPath>,
+    multiselectAttributes: JSXAttributes[],
+    targetPath: string[],
+    spiedProps: Array<{ [key: string]: any }>,
+    computedStyles: Array<ComputedStyle>,
+    attributeMetadatas: Array<StyleAttributeMetadata>,
+  ) =>
+  ({ children }: any) => {
+    const spiedPropsWrappedInTargetPath = spiedProps.map((realInnerValue) => {
+      return targetPath.reduceRight((working, pathPart) => {
+        return {
+          [pathPart]: working,
+        }
+      }, realInnerValue)
+    })
+    return (
+      <InspectorCallbackContext.Provider
         value={{
-          selectedViews: selectedViews,
-          editedMultiSelectedProps: multiselectAttributes,
-          targetPath,
-          spiedProps: spiedPropsWrappedInTargetPath,
-          computedStyles: computedStyles,
-          selectedAttributeMetadatas: attributeMetadatas,
+          selectedViewsRef: { current: selectedViews },
+          onSubmitValue: NO_OP,
+          onUnsetValue: NO_OP,
+          collectActionsToSubmitValue: () => [],
+          collectActionsToUnsetValue: () => [],
         }}
       >
-        {children}
-      </InspectorPropsContext.Provider>
-    </InspectorCallbackContext.Provider>
-  )
-}
+        <InspectorPropsContext.Provider
+          value={{
+            selectedViews: selectedViews,
+            editedMultiSelectedProps: multiselectAttributes,
+            targetPath,
+            spiedProps: spiedPropsWrappedInTargetPath,
+            computedStyles: computedStyles,
+            selectedAttributeMetadatas: attributeMetadatas,
+          }}
+        >
+          {children}
+        </InspectorPropsContext.Provider>
+      </InspectorCallbackContext.Provider>
+    )
+  }
 
 export function getPropsForStyleProp(
   targetPropExpression: string,
@@ -88,15 +92,15 @@ export function getPropsForStyleProp(
 
   const parseResult = testParseCode(code)
   if (!isParseSuccess(parseResult)) {
-    fail('expected parseResult to be Right')
+    throw new Error('expected parseResult to be Right')
   }
   const appComponent = parseResult.topLevelElements.find(isUtopiaJSXComponent)
 
   if (appComponent == null || !isUtopiaJSXComponent(appComponent) || appComponent.name !== `App`) {
-    fail('expected the second topLevelElement to be the App component')
+    throw new Error('expected the second topLevelElement to be the App component')
   }
   if (!isJSXElement(appComponent.rootElement)) {
-    fail(`expected the App component's root element to be a JSXElement`)
+    throw new Error(`expected the App component's root element to be a JSXElement`)
   }
 
   return appComponent.rootElement.props

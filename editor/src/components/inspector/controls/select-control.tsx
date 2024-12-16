@@ -1,13 +1,18 @@
 import React from 'react'
-import Select, { components, createFilter, FormatOptionLabelMeta, InputProps } from 'react-select'
-import CreatableSelect, { Props as SelectProps } from 'react-select/creatable'
-import { IndicatorProps } from 'react-select/src/components/indicators'
+import type { InputProps } from 'react-select'
+import Select, { components, createFilter } from 'react-select'
+import type { Props as SelectProps } from 'react-select/creatable'
+import CreatableSelect from 'react-select/creatable'
+import type { IndicatorProps } from 'react-select/src/components/indicators'
 import Utils from '../../../utils/utils'
-import { DEPRECATEDControlProps, DEPRECATEDGenericControlOptions } from './control'
-import { getControlStyles, ControlStatus, isControlledStatus } from '../common/control-status'
-import { ValueType } from 'react-select/src/types'
+import type { DEPRECATEDControlProps, DEPRECATEDGenericControlOptions } from './control'
+import { isControlledStatus } from '../common/control-status'
+import { getControlStyles } from '../common/control-styles'
+import type { ValueType } from 'react-select/src/types'
 import { PortalTargetID } from '../../../core/shared/utils'
-import { IcnProps, Icons, useColorTheme, UtopiaTheme } from '../../../uuiui'
+import type { IcnProps } from '../../../uuiui'
+import { Icons, useColorTheme, UtopiaTheme } from '../../../uuiui'
+import { styleStringInArray } from '../../../utils/common-constants'
 
 export interface DEPRECATEDSelectControlOptions extends DEPRECATEDGenericControlOptions {
   creatable?: boolean
@@ -21,17 +26,20 @@ export interface DEPRECATEDSelectControlOptions extends DEPRECATEDGenericControl
   onKeyDown?: (e: React.KeyboardEvent<HTMLElement>) => void
 }
 
-export interface SelectOption {
-  value: any
-  icon?: IcnProps
-  label?: string
+export interface SelectOption<T = any> {
+  value: T
+  icon?: Omit<IcnProps, 'color' | 'width' | 'height'>
+  label?: string | React.ReactElement
   style?: React.CSSProperties
-  options?: SelectOption[]
+  options?: SelectOption<any>[]
+  disabled?: boolean
+  tooltip?: string
+  invalid?: boolean
 }
 
-const DropdownIndicator: React.FunctionComponent<IndicatorProps<SelectOption>> = (
-  indicatorProps,
-) => {
+const DropdownIndicator: React.FunctionComponent<
+  React.PropsWithChildren<IndicatorProps<SelectOption>>
+> = (indicatorProps) => {
   return components.DropdownIndicator == null ? null : (
     <components.DropdownIndicator {...indicatorProps}>
       <Icons.ExpansionArrow />
@@ -39,9 +47,9 @@ const DropdownIndicator: React.FunctionComponent<IndicatorProps<SelectOption>> =
   )
 }
 
-const ControlledDropdownIndicator: React.FunctionComponent<IndicatorProps<SelectOption>> = (
-  indicatorProps,
-) => {
+const ControlledDropdownIndicator: React.FunctionComponent<
+  React.PropsWithChildren<IndicatorProps<SelectOption>>
+> = (indicatorProps) => {
   return components.DropdownIndicator == null ? null : (
     <components.DropdownIndicator {...indicatorProps}>
       <Icons.ExpansionArrowControlled />
@@ -86,7 +94,9 @@ export const CustomReactSelectInput = (props: InputProps) => {
   )
 }
 
-export const SelectControl: React.StatelessComponent<DEPRECATEDControlProps<any>> = (props) => {
+export const SelectControl: React.FunctionComponent<
+  React.PropsWithChildren<DEPRECATEDControlProps<any>>
+> = (props) => {
   const colorTheme = useColorTheme()
   const options = props.options != null ? (props.options as Array<SelectOption>) : []
   const controlOptions = {
@@ -181,7 +191,7 @@ export const SelectControl: React.StatelessComponent<DEPRECATEDControlProps<any>
       }),
       option: (base: React.CSSProperties, state: any) => {
         const optionStyle = Utils.path(
-          ['style'],
+          styleStringInArray,
           options.find((option) => option.value === state.value),
         )
         return {
@@ -256,55 +266,5 @@ export const SelectControl: React.StatelessComponent<DEPRECATEDControlProps<any>
         <Select {...selectProperties} ref={controlOptions.selectRegularRef} />
       )}
     </div>
-  )
-}
-
-interface BasicSelectControlParams {
-  value: string
-  id: string
-  testId: string
-  options: Array<SelectOption>
-  onSubmitValue: DEPRECATEDControlProps<any>['onSubmitValue']
-  onTransientSubmitValue?: DEPRECATEDControlProps<any>['onTransientSubmitValue']
-  onForcedSubmitValue?: DEPRECATEDControlProps<any>['onForcedSubmitValue']
-  controlOptions?: DEPRECATEDSelectControlOptions
-  controlClassName?: string
-  htmlFor?: string
-  style?: React.CSSProperties
-  placeholder?: string
-  inputRef?: React.RefObject<HTMLInputElement>
-}
-
-export const BasicSelectControl = ({
-  value,
-  id,
-  testId,
-  options,
-  onSubmitValue,
-  onTransientSubmitValue,
-  onForcedSubmitValue,
-  controlOptions,
-  controlClassName = '',
-  htmlFor = '',
-  style = {},
-  inputRef,
-}: BasicSelectControlParams) => {
-  return (
-    <SelectControl
-      id={id}
-      key={id}
-      testId={testId}
-      controlClassName={controlClassName}
-      onSubmitValue={onSubmitValue}
-      onTransientSubmitValue={onTransientSubmitValue}
-      onForcedSubmitValue={onForcedSubmitValue}
-      value={value}
-      DEPRECATED_controlOptions={controlOptions}
-      controlStatus={'simple'}
-      controlStyles={getControlStyles('simple')}
-      htmlFor={htmlFor}
-      style={style}
-      options={options}
-    />
   )
 }

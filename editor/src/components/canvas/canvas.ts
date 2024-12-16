@@ -1,21 +1,28 @@
 import { MetadataUtils } from '../../core/model/element-metadata-utils'
-import {
-  ElementInstanceMetadata,
-  ElementInstanceMetadataMap,
-} from '../../core/shared/element-template'
-import { ElementPath } from '../../core/shared/project-file-types'
-import { KeyCharacter } from '../../utils/keyboard'
+import type { ElementInstanceMetadataMap } from '../../core/shared/element-template'
+import type { ElementPath } from '../../core/shared/project-file-types'
+import type { KeyCharacter } from '../../utils/keyboard'
 import Utils from '../../utils/utils'
+import type { CanvasPoint, CanvasRectangle } from '../../core/shared/math-utils'
 import {
-  CanvasPoint,
-  CanvasRectangle,
   rectangleIntersection,
   canvasRectangle,
+  isInfinityRectangle,
 } from '../../core/shared/math-utils'
-import { EditorAction } from '../editor/action-types'
-import * as EditorActions from '../editor/actions/action-creators'
-import { DerivedState, EditorState } from '../editor/store/editor-state'
+import type { EditorAction } from '../editor/action-types'
+import type {
+  AllElementProps,
+  DerivedState,
+  EditorState,
+  LockedElements,
+} from '../editor/store/editor-state'
 import * as EP from '../../core/shared/element-path'
+import type { ElementPathTree, ElementPathTrees } from '../../core/shared/element-path-tree'
+import { forEachElementPathTreeChild, getSubTree } from '../../core/shared/element-path-tree'
+import { assertNever, fastForEach } from '../../core/shared/utils'
+import { memoize } from '../../core/shared/memoize'
+import { maybeToArray } from '../../core/shared/optional-utils'
+import { getAllLockedElementPaths, unlockedParent } from '../../core/shared/element-locking'
 
 export enum TargetSearchType {
   ParentsOfSelected = 'ParentsOfSelected',
@@ -31,6 +38,97 @@ type FrameWithPath = {
   frame: CanvasRectangle
 }
 
+function getFramesInCanvasContextUncached(
+  allElementProps: AllElementProps,
+  metadata: ElementInstanceMetadataMap,
+  elementPathTree: ElementPathTrees,
+  useBoundingFrames: boolean,
+): Array<FrameWithPath> {
+  const projectTree = elementPathTree
+
+  function recurseChildren(componentTree: ElementPathTree): {
+    boundingRect: CanvasRectangle | null
+    frames: Array<FrameWithPath>
+  } {
+    const component = MetadataUtils.findElementByElementPath(metadata, componentTree.path)
+    if (component == null) {
+      return {
+        boundingRect: null,
+        frames: [],
+      }
+    }
+    const globalFrame = useBoundingFrames
+      ? component.specialSizeMeasurements.globalFrameWithTextContent ?? component.globalFrame
+      : component.globalFrame
+    if (globalFrame != null && isInfinityRectangle(globalFrame)) {
+      // TODO Will this work for the storyboard?
+      return {
+        boundingRect: null,
+        frames: [],
+      }
+    }
+
+    const overflows = MetadataUtils.overflows(allElementProps, componentTree.path)
+    const includeClippedNext = useBoundingFrames && overflows
+
+    let children: Array<ElementPathTree> = []
+    let unfurledComponents: Array<ElementPathTree> = []
+    forEachElementPathTreeChild(componentTree, (childTree) => {
+      if (EP.isRootElementOfInstance(childTree.path)) {
+        unfurledComponents.push(childTree)
+      } else {
+        children.push(childTree)
+      }
+    })
+
+    const childFrames = children.map((child) => {
+      const recurseResults = recurseChildren(child)
+      const rectToBoundWith =
+        includeClippedNext || globalFrame == null ? recurseResults.boundingRect : globalFrame
+      return { boundingRect: rectToBoundWith, frames: recurseResults.frames }
+    })
+    const unfurledFrames = unfurledComponents.map((unfurledElement) => {
+      const recurseResults = recurseChildren(unfurledElement)
+      const rectToBoundWith =
+        includeClippedNext || globalFrame == null ? recurseResults.boundingRect : globalFrame
+      return { boundingRect: rectToBoundWith, frames: recurseResults.frames }
+    })
+    const allFrames = [...childFrames, ...unfurledFrames]
+    const allChildrenBounds = Utils.boundingRectangleArray(Utils.pluck(allFrames, 'boundingRect'))
+    if (allFrames.length > 0 && allChildrenBounds != null) {
+      const allChildrenFrames = Utils.pluck(allFrames, 'frames').flat()
+      const boundingRect =
+        globalFrame == null
+          ? allChildrenBounds
+          : Utils.boundingRectangle(globalFrame, allChildrenBounds)
+      const toAppend: FrameWithPath = { path: component.elementPath, frame: boundingRect }
+      return {
+        boundingRect: boundingRect,
+        frames: [toAppend].concat(allChildrenFrames),
+      }
+    } else {
+      const boundingRect = globalFrame
+      const toAppend: FrameWithPath | null =
+        boundingRect == null ? null : { path: component.elementPath, frame: boundingRect }
+      return { boundingRect: boundingRect, frames: maybeToArray(toAppend) }
+    }
+  }
+
+  const storyboardChildren = MetadataUtils.getAllStoryboardChildrenPathsOrdered(
+    metadata,
+    elementPathTree,
+  )
+  return storyboardChildren.flatMap((storyboardChild) => {
+    const subTree = getSubTree(projectTree, storyboardChild)
+    if (subTree == null) {
+      return []
+    } else {
+      return recurseChildren(subTree).frames
+    }
+  })
+}
+
+// eslint-disable-next-line object-shorthand
 const Canvas = {
   parentsAndSiblings: [
     TargetSearchType.SelectedElements,
@@ -43,77 +141,27 @@ const Canvas = {
     TargetSearchType.SiblingsOfSelected,
     TargetSearchType.ParentsOfSelected,
   ],
-  getFramesInCanvasContext(
+  getFramesInCanvasContext: memoize(getFramesInCanvasContextUncached, { maxSize: 2 }),
+  jumpToParent(
+    selectedViews: Array<ElementPath>,
     metadata: ElementInstanceMetadataMap,
-    useBoundingFrames: boolean,
-  ): Array<FrameWithPath> {
-    function recurseChildren(
-      component: ElementInstanceMetadata,
-    ): { boundingRect: CanvasRectangle | null; frames: Array<FrameWithPath> } {
-      const globalFrame = component.globalFrame
-      if (globalFrame == null) {
-        return {
-          boundingRect: null,
-          frames: [],
-        }
-      }
-
-      const overflows = MetadataUtils.overflows(component)
-      const includeClippedNext = useBoundingFrames && overflows
-      const {
-        children,
-        unfurledComponents,
-      } = MetadataUtils.getAllChildrenElementsIncludingUnfurledFocusedComponents(
-        component.elementPath,
-        metadata,
-      )
-      const childFrames = children.map((child) => {
-        const recurseResults = recurseChildren(child)
-        const rectToBoundWith = includeClippedNext ? recurseResults.boundingRect : globalFrame
-        return { boundingRect: rectToBoundWith, frames: recurseResults.frames }
-      })
-      const unfurledFrames = unfurledComponents.map((unfurledElement) => {
-        const recurseResults = recurseChildren(unfurledElement)
-        const rectToBoundWith = includeClippedNext ? recurseResults.boundingRect : globalFrame
-        return { boundingRect: rectToBoundWith, frames: recurseResults.frames }
-      })
-      const allFrames = [...childFrames, ...unfurledFrames]
-      const allChildrenBounds = Utils.boundingRectangleArray(Utils.pluck(allFrames, 'boundingRect'))
-      if (allFrames.length > 0 && allChildrenBounds != null) {
-        const allChildrenFrames = Utils.pluck(allFrames, 'frames').flat()
-        const boundingRect = Utils.boundingRectangle(globalFrame, allChildrenBounds)
-        const toAppend: FrameWithPath = { path: component.elementPath, frame: boundingRect }
-        return {
-          boundingRect: boundingRect,
-          frames: [toAppend].concat(allChildrenFrames),
-        }
-      } else {
-        const boundingRect = globalFrame
-        const toAppend = { path: component.elementPath, frame: boundingRect }
-        return { boundingRect: boundingRect, frames: [toAppend] }
-      }
-    }
-
-    const storyboardChildren = MetadataUtils.getAllStoryboardChildren(metadata)
-    return storyboardChildren.flatMap((storyboardChild) => {
-      return recurseChildren(storyboardChild).frames
-    })
-  },
-  jumpToParent(selectedViews: Array<ElementPath>): ElementPath | 'CLEAR' | null {
+    pathTrees: ElementPathTrees,
+    lockedElements: LockedElements,
+  ): ElementPath | 'CLEAR' | null {
     switch (selectedViews.length) {
       case 0:
         // Nothing is selected, so do nothing.
         return null
       case 1:
         // Only a single element is selected...
-        const parentPath = EP.parentPath(selectedViews[0])
-        if (parentPath == null) {
+        const parentPath = unlockedParent(metadata, pathTrees, lockedElements, selectedViews[0])
+        if (parentPath == null || EP.isEmptyPath(parentPath)) {
           // ...the selected element is a top level one, so deselect.
           return 'CLEAR'
-        } else {
-          // ...the selected element has a parent, so select that.
-          return parentPath
         }
+        // ...the selected element has a parent, so select that.
+        return parentPath
+
       default:
         // Multiple elements are selected so select the topmost element amongst them.
         const newSelection: ElementPath | null = selectedViews.reduce(
@@ -136,6 +184,7 @@ const Canvas = {
   jumpToSibling(
     selectedViews: Array<ElementPath>,
     components: ElementInstanceMetadataMap,
+    pathTrees: ElementPathTrees,
     forwards: boolean,
   ): ElementPath | null {
     switch (selectedViews.length) {
@@ -143,7 +192,11 @@ const Canvas = {
         return null
       case 1:
         const singleSelectedElement = selectedViews[0]
-        const siblings = MetadataUtils.getSiblings(components, singleSelectedElement)
+        const siblings = MetadataUtils.getSiblingsOrdered(
+          components,
+          pathTrees,
+          singleSelectedElement,
+        )
         const pathsToStep = siblings.map((s) => s.elementPath)
         return Utils.stepInArray(
           EP.pathsEqual,
@@ -173,11 +226,16 @@ const Canvas = {
   getFirstChild(
     selectedViews: Array<ElementPath>,
     components: ElementInstanceMetadataMap,
+    pathTrees: ElementPathTrees,
   ): ElementPath | null {
     if (selectedViews.length !== 1) {
       return null
     } else {
-      const children = MetadataUtils.getImmediateChildren(components, selectedViews[0])
+      const children = MetadataUtils.getImmediateChildrenOrdered(
+        components,
+        pathTrees,
+        selectedViews[0],
+      )
       return children.length > 0 ? children[0].elementPath : null
     }
   },
@@ -234,46 +292,66 @@ const Canvas = {
             return true
           }
         default:
-          const _exhaustiveCheck: never = searchType
-          throw new Error(`Unknown search type ${JSON.stringify(searchType)}`)
+          assertNever(searchType)
       }
     })
   },
-  getAllTargetsAtPoint(
+  getMousePositionCanvasArea(canvasPosition: CanvasPoint | null): CanvasRectangle | null {
+    if (canvasPosition == null) {
+      return null
+    }
+    return canvasRectangle({
+      x: canvasPosition.x - 1,
+      y: canvasPosition.y - 1,
+      width: 1,
+      height: 1,
+    })
+  },
+  getAllTargetsUnderArea(
     componentMetadata: ElementInstanceMetadataMap,
     selectedViews: Array<ElementPath>,
     hiddenInstances: Array<ElementPath>,
-    canvasPosition: CanvasPoint,
+    canvasArea: CanvasRectangle,
     searchTypes: Array<TargetSearchType>,
     useBoundingFrames: boolean,
     looseTargetingForZeroSizedElements: 'strict' | 'loose',
+    elementPathTree: ElementPathTrees,
+    allElementProps: AllElementProps,
   ): Array<{ elementPath: ElementPath; canBeFilteredOut: boolean }> {
     const looseReparentThreshold = 5
     const targetFilters = Canvas.targetFilter(selectedViews, searchTypes)
-    const framesWithPaths = Canvas.getFramesInCanvasContext(componentMetadata, useBoundingFrames)
+    const framesWithPaths = Canvas.getFramesInCanvasContext(
+      allElementProps,
+      componentMetadata,
+      elementPathTree,
+      useBoundingFrames,
+    )
     const filteredFrames = framesWithPaths.filter((frameWithPath) => {
       const shouldUseLooseTargeting =
         looseTargetingForZeroSizedElements === 'loose' &&
         (frameWithPath.frame.width <= 0 || frameWithPath.frame.height <= 0)
 
-      return targetFilters.some((filter) => filter(frameWithPath.path)) &&
-        !hiddenInstances.some((hidden) => EP.isDescendantOfOrEqualTo(frameWithPath.path, hidden)) &&
-        shouldUseLooseTargeting
+      if (
+        hiddenInstances.some((hidden) => EP.isDescendantOfOrEqualTo(frameWithPath.path, hidden))
+      ) {
+        return false
+      }
+      return targetFilters.some((filter) => filter(frameWithPath.path)) && shouldUseLooseTargeting
         ? rectangleIntersection(
             canvasRectangle({
               x: frameWithPath.frame.x,
               y: frameWithPath.frame.y,
-              width: frameWithPath.frame.width ?? 1,
-              height: frameWithPath.frame.height ?? 1,
+              width: frameWithPath.frame.width === 0 ? 1 : frameWithPath.frame.width,
+              height: frameWithPath.frame.height === 0 ? 1 : frameWithPath.frame.height,
             }),
             canvasRectangle({
-              x: canvasPosition.x - looseReparentThreshold,
-              y: canvasPosition.y - looseReparentThreshold,
-              width: 2 * looseReparentThreshold,
-              height: 2 * looseReparentThreshold,
+              x: canvasArea.x - looseReparentThreshold,
+              y: canvasArea.y - looseReparentThreshold,
+              width: canvasArea.width + 2 * looseReparentThreshold,
+              height: canvasArea.height + 2 * looseReparentThreshold,
             }),
           ) != null
-        : Utils.rectContainsPoint(frameWithPath.frame, canvasPosition)
+        : rectangleIntersection(frameWithPath.frame, canvasArea)
     })
     filteredFrames.reverse()
 
@@ -286,26 +364,39 @@ const Canvas = {
     })
     return targets
   },
-  getNextTarget(current: Array<ElementPath>, targetStack: Array<ElementPath>): ElementPath | null {
-    if (current.length <= 1) {
-      const currentIndex =
-        current.length === 0
-          ? -1
-          : targetStack.findIndex((target) => EP.pathsEqual(target, current[0]))
-      const endOrNotFound = currentIndex === -1 || currentIndex === targetStack.length - 1
-      if (endOrNotFound) {
-        return targetStack[0]
-      } else {
-        return targetStack[currentIndex + 1]
+  getNextTarget(
+    componentMetadata: ElementInstanceMetadataMap,
+    elementPathTree: ElementPathTrees,
+    lockedElements: LockedElements,
+    current: Array<ElementPath>,
+    targetStack: Array<ElementPath>,
+  ): ElementPath | null {
+    const allLockedElementPaths = getAllLockedElementPaths(
+      componentMetadata,
+      elementPathTree,
+      lockedElements,
+    )
+    const filteredTargetStack = targetStack.filter((stackEntry) => {
+      return !allLockedElementPaths.some((lockedPath) => EP.pathsEqual(lockedPath, stackEntry))
+    })
+    if (filteredTargetStack.length > 0) {
+      if (current.length <= 1) {
+        const currentIndex =
+          current.length === 0
+            ? -1
+            : filteredTargetStack.findIndex((target) => EP.pathsEqual(target, current[0]))
+        const endOrNotFound = currentIndex === -1 || currentIndex === filteredTargetStack.length - 1
+        if (endOrNotFound) {
+          return filteredTargetStack[0]
+        } else {
+          return filteredTargetStack[currentIndex + 1]
+        }
       }
-    } else {
-      return null
     }
+    return null
   },
   handleKeyUp(key: KeyCharacter, editor: EditorState, derived: DerivedState): Array<EditorAction> {
     switch (key) {
-      case 'z':
-        return [EditorActions.setHighlightsEnabled(true)]
       default:
         return []
     }

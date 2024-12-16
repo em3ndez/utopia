@@ -1,64 +1,74 @@
 // FIXME This file shouldn't live under the inspector, and shouldn't be defining types
 import Chroma from 'chroma-js'
 import fastDeepEqual from 'fast-deep-equal'
-import { Property } from 'csstype'
+import type { Property } from 'csstype'
+import type { FramePin } from 'utopia-api/core'
 import {
   FlexAlignment,
-  FlexDirection,
   FlexJustifyContent,
   FlexWrap,
-  FramePin,
-  isPercentPin,
   LayoutSystem,
   UtopiaUtils,
-} from 'utopia-api'
-import { LayoutPropertyTypes, StyleLayoutProp } from '../../../core/layout/layout-helpers-new'
+} from 'utopia-api/core'
+import type { LayoutPropertyTypes, StyleLayoutProp } from '../../../core/layout/layout-helpers-new'
 import { findLastIndex } from '../../../core/shared/array-utils'
+import type { Either, Right as EitherRight } from '../../../core/shared/either'
 import {
   bimapEither,
-  Either,
   eitherToMaybe,
   flatMapEither,
   isLeft,
   isRight,
   left,
   mapEither,
-  Right as EitherRight,
   right,
   traverseEither,
 } from '../../../core/shared/either'
-import {
-  emptyComments,
-  isJSXAttributeFunctionCall,
-  isJSXAttributeNotFound,
-  isPartOfJSXAttributeValue,
-  isRegularJSXAttribute,
-  JSXAttribute,
-  jsxAttributeFunctionCall,
+import type {
+  JSExpression,
   JSXAttributes,
-  jsxAttributeValue,
-  JSXAttributeValue,
+  JSExpressionValue,
   JSXElement,
+  GridPosition,
+  GridRange,
+  GridAutoOrTemplateBase,
+  GridContainerProperties,
+  GridSpan,
 } from '../../../core/shared/element-template'
 import {
-  getJSXAttributeAtPath,
-  getJSXAttributeAtPathInner,
-  getModifiableJSXAttributeAtPath,
+  emptyComments,
+  modifiableAttributeIsAttributeFunctionCall,
+  modifiableAttributeIsAttributeNotFound,
+  modifiableAttributeIsPartOfAttributeValue,
+  isRegularJSXAttribute,
+  jsExpressionFunctionCall,
+  jsExpressionValue,
+  gridPositionValue,
+  gridRange,
+  gridSpanArea,
+  gridSpanNumeric,
+} from '../../../core/shared/element-template'
+import type { ModifiableAttribute } from '../../../core/shared/jsx-attributes'
+import {
+  getJSExpressionAtPath,
   jsxFunctionAttributeToRawValue,
-  jsxSimpleAttributeToValue,
-  ModifiableAttribute,
-  setJSXValueAtPath,
-  setJSXValueInAttributeAtPath,
 } from '../../../core/shared/jsx-attributes'
 import {
-  NumberOrPercent,
+  getJSXAttributesAtPath,
+  getModifiableJSXAttributeAtPath,
+  jsxSimpleAttributeToValue,
+  setJSXValueAtPath,
+  setJSXValueInAttributeAtPath,
+} from '../../../core/shared/jsx-attribute-utils'
+import type { NumberOrPercent } from '../../../core/shared/math-utils'
+import {
   numberOrPercentToNumber,
   parseNumber,
   parseNumberOrPercent,
 } from '../../../core/shared/math-utils'
-import { PropertyPath } from '../../../core/shared/project-file-types'
+import type { PropertyPath } from '../../../core/shared/project-file-types'
 import * as PP from '../../../core/shared/property-path'
-import { PrimitiveType, ValueOf } from '../../../core/shared/utils'
+import { assertNever, type PrimitiveType, type ValueOf } from '../../../core/shared/utils'
 import { parseBackgroundSize } from '../../../printer-parsers/css/css-parser-background-size'
 import { parseBorder } from '../../../printer-parsers/css/css-parser-border'
 import Utils from '../../../utils/utils'
@@ -72,6 +82,10 @@ import {
   printMarginAsAttributeValue,
 } from '../../../printer-parsers/css/css-parser-margin'
 import { parseFlex, printFlexAsAttributeValue } from '../../../printer-parsers/css/css-parser-flex'
+import { memoize } from '../../../core/shared/memoize'
+import * as csstree from 'css-tree'
+import type { IcnProps } from '../../../uuiui'
+import { cssNumberEqual } from '../../canvas/controls/select-mode/controls-common'
 
 var combineRegExp = function (regexpList: Array<RegExp | string>, flags?: string) {
   let source: string = ''
@@ -138,12 +152,18 @@ export const RegExpLibrary = (function GenerateRegExpLib() {
   const searchFlags = 'gi' // ignore case for angles, "rgb" etc
   const angle = /(?:[+-]?\d*\.?\d+)(?:deg|grad|rad|turn)/ // Angle +ive, -ive and angle types
   const colorHex = /\#(?:[A-Fa-f0-9]{8}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{3})/ // #RGB #RGBA #RRGGBB #RRGGBBAA
-  const colorHexOptionalOctothorp = /(\#?)([A-Fa-f0-9]{8}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{3})/ // #RGB #RGBA #RRGGBB #RRGGBBAA RGB RGBA RRGGBB RRGGBBAA
-  const colorHSLaComponents = /hsla?(\((\d*\.?\d+)(deg|grad|rad|turn)?\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%(\s*,\s*(\d*\.?\d+%?))?\)|\((\d*\.?\d+)(deg|grad|rad|turn)?\s*([\d.]+)%\s*([\d.]+)%(\s*\/\s*(\d*\.?\d+%?))?\))/
-  const colorHSLa = /hsla?(?:\((?:\d*\.?\d+)(?:deg|grad|rad|turn)?\s*,\s*(?:[\d.]+)%\s*,\s*(?:[\d.]+)%(?:\s*,\s*(?:\d*\.?\d+%?))?\)|\((?:\d*\.?\d+)(?:deg|grad|rad|turn)?\s*(?:[\d.]+)%\s*(?:[\d.]+)%(?:\s*\/\s*(?:\d*\.?\d+%?))?\))/
-  const colorRGBaComponents = /rgba?(?:\((\d*\.?\d+)\s*,\s*(\d*\.?\d+)\s*,\s*(\d*\.?\d+)\s*(?:,\s*(\d*\.?\d+%?))?\)|\((\d*\.?\d+)\s*(\d*\.?\d+)\s*(\d*\.?\d+)\s*(?:\/\s*(\d*\.?\d+%?))?\)|\((\d*\.?\d+%)\s*,\s*(\d*\.?\d+%)\s*,\s*(\d*\.?\d+%)(?:\s*,\s*(\d*\.?\d+%?))?\))/
-  const colorRGBa = /rgba?(?:\((?:\d*\.?\d+)\s*,\s*(?:\d*\.?\d+)\s*,\s*(?:\d*\.?\d+)\s*(?:,\s*(?:\d*\.?\d+%?))?\)|\((?:\d*\.?\d+)\s*(?:\d*\.?\d+)\s*(?:\d*\.?\d+)\s*(?:\/\s*(?:\d*\.?\d+%?))?\)|\((?:\d*\.?\d+%)\s*,\s*(?:\d*\.?\d+%)\s*,\s*(?:\d*\.?\d+%)(?:\s*,\s*(?:\d*\.?\d+%?))?\))/
-  const colorKeyword = /(?:aliceblue|antiquewhite|aqua|aquamarine|azure|beige|bisque|black|blanchedalmond|blue|blueviolet|brown|burlywood|cadetblue|chartreuse|chocolate|coral|cornflowerblue|cornsilk|crimson|cyan|darkblue|darkcyan|darkgoldenrod|darkgray|darkgreen|darkgrey|darkkhaki|darkmagenta|darkolivegreen|darkorange|darkorchid|darkred|darksalmon|darkseagreen|darkslateblue|darkslategray|darkslategrey|darkturquoise|darkviolet|deeppink|deepskyblue|dimgray|dimgrey|dodgerblue|firebrick|floralwhite|forestgreen|fuchsia|gainsboro|ghostwhite|gold|goldenrod|gray|green|greenyellow|grey|honeydew|hotpink|indianred|indigo|ivory|khaki|lavender|lavenderblush|lawngreen|lemonchiffon|lightblue|lightcoral|lightcyan|lightgoldenrodyellow|lightgray|lightgreen|lightgrey|lightpink|lightsalmon|lightseagreen|lightskyblue|lightslategray|lightslategrey|lightsteelblue|lightyellow|lime|limegreen|linen|magenta|maroon|mediumaquamarine|mediumblue|mediumorchid|mediumpurple|mediumseagreen|mediumslateblue|mediumspringgreen|mediumturquoise|mediumvioletred|midnightblue|mintcream|mistyrose|moccasin|navajowhite|navy|oldlace|olive|olivedrab|orange|orangered|orchid|palegoldenrod|palegreen|paleturquoise|palevioletred|papayawhip|peachpuff|peru|pink|plum|powderblue|purple|rebeccapurple|red|rosybrown|royalblue|saddlebrown|salmon|sandybrown|seagreen|seashell|sienna|silver|skyblue|slateblue|slategray|slategrey|snow|springgreen|steelblue|tan|teal|thistle|tomato|turquoise|violet|wheat|white|whitesmoke|yellow|yellowgreen)/
+  const colorHexOptionalOctothorp =
+    /(\#?)([A-Fa-f0-9]{8}|[A-Fa-f0-9]{6}|[A-Fa-f0-9]{4}|[A-Fa-f0-9]{3})/ // #RGB #RGBA #RRGGBB #RRGGBBAA RGB RGBA RRGGBB RRGGBBAA
+  const colorHSLaComponents =
+    /hsla?(\((\d*\.?\d+)(deg|grad|rad|turn)?\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%(\s*,\s*(\d*\.?\d+%?))?\)|\((\d*\.?\d+)(deg|grad|rad|turn)?\s*([\d.]+)%\s*([\d.]+)%(\s*\/\s*(\d*\.?\d+%?))?\))/
+  const colorHSLa =
+    /hsla?(?:\((?:\d*\.?\d+)(?:deg|grad|rad|turn)?\s*,\s*(?:[\d.]+)%\s*,\s*(?:[\d.]+)%(?:\s*,\s*(?:\d*\.?\d+%?))?\)|\((?:\d*\.?\d+)(?:deg|grad|rad|turn)?\s*(?:[\d.]+)%\s*(?:[\d.]+)%(?:\s*\/\s*(?:\d*\.?\d+%?))?\))/
+  const colorRGBaComponents =
+    /rgba?(?:\((\d*\.?\d+)\s*,\s*(\d*\.?\d+)\s*,\s*(\d*\.?\d+)\s*(?:,\s*(\d*\.?\d+%?))?\)|\((\d*\.?\d+)\s*(\d*\.?\d+)\s*(\d*\.?\d+)\s*(?:\/\s*(\d*\.?\d+%?))?\)|\((\d*\.?\d+%)\s*,\s*(\d*\.?\d+%)\s*,\s*(\d*\.?\d+%)(?:\s*,\s*(\d*\.?\d+%?))?\))/
+  const colorRGBa =
+    /rgba?(?:\((?:\d*\.?\d+)\s*,\s*(?:\d*\.?\d+)\s*,\s*(?:\d*\.?\d+)\s*(?:,\s*(?:\d*\.?\d+%?))?\)|\((?:\d*\.?\d+)\s*(?:\d*\.?\d+)\s*(?:\d*\.?\d+)\s*(?:\/\s*(?:\d*\.?\d+%?))?\)|\((?:\d*\.?\d+%)\s*,\s*(?:\d*\.?\d+%)\s*,\s*(?:\d*\.?\d+%)(?:\s*,\s*(?:\d*\.?\d+%?))?\))/
+  const colorKeyword =
+    /(?:aliceblue|antiquewhite|aqua|aquamarine|azure|beige|bisque|black|blanchedalmond|blue|blueviolet|brown|burlywood|cadetblue|chartreuse|chocolate|coral|cornflowerblue|cornsilk|crimson|cyan|darkblue|darkcyan|darkgoldenrod|darkgray|darkgreen|darkgrey|darkkhaki|darkmagenta|darkolivegreen|darkorange|darkorchid|darkred|darksalmon|darkseagreen|darkslateblue|darkslategray|darkslategrey|darkturquoise|darkviolet|deeppink|deepskyblue|dimgray|dimgrey|dodgerblue|firebrick|floralwhite|forestgreen|fuchsia|gainsboro|ghostwhite|gold|goldenrod|gray|green|greenyellow|grey|honeydew|hotpink|indianred|indigo|ivory|khaki|lavender|lavenderblush|lawngreen|lemonchiffon|lightblue|lightcoral|lightcyan|lightgoldenrodyellow|lightgray|lightgreen|lightgrey|lightpink|lightsalmon|lightseagreen|lightskyblue|lightslategray|lightslategrey|lightsteelblue|lightyellow|lime|limegreen|linen|magenta|maroon|mediumaquamarine|mediumblue|mediumorchid|mediumpurple|mediumseagreen|mediumslateblue|mediumspringgreen|mediumturquoise|mediumvioletred|midnightblue|mintcream|mistyrose|moccasin|navajowhite|navy|oldlace|olive|olivedrab|orange|orangered|orchid|palegoldenrod|palegreen|paleturquoise|palevioletred|papayawhip|peachpuff|peru|pink|plum|powderblue|purple|rebeccapurple|red|rosybrown|royalblue|saddlebrown|salmon|sandybrown|seagreen|seashell|sienna|silver|skyblue|slateblue|slategray|slategrey|snow|springgreen|steelblue|tan|teal|thistle|tomato|turquoise|violet|wheat|white|whitesmoke|yellow|yellowgreen)/
   // prettier-ignore
   const color = combineRegExp([
     '(',
@@ -463,6 +483,7 @@ export const RegExpLibrary = (function GenerateRegExpLib() {
 export type PercentUnit = '%'
 
 export type CSSNumberType =
+  | 'Px'
   | 'Angle'
   | 'AnglePercent'
   | 'Length'
@@ -474,12 +495,18 @@ export type CSSNumberType =
   | 'Unitless'
   | 'UnitlessPercent'
   | 'AnyValid'
+  | 'Grid'
 
 // https://developer.mozilla.org/en-US/docs/Web/CSS/length
 export type FontRelativeLengthUnit = 'cap' | 'ch' | 'em' | 'ex' | 'ic' | 'lh' | 'rem' | 'rlh'
 export type ViewportPercentageLengthUnit = 'vh' | 'vw' | 'vi' | 'vb' | 'vmin' | 'vmax'
 export type AbsoluteLengthUnit = 'px' | 'cm' | 'mm' | 'Q' | 'in' | 'pc' | 'pt'
-export type LengthUnit = FontRelativeLengthUnit | ViewportPercentageLengthUnit | AbsoluteLengthUnit
+export type FlexibleLengthUnit = 'fr' // https://www.w3.org/TR/css3-grid-layout/#fr-unit
+export type LengthUnit =
+  | FontRelativeLengthUnit
+  | ViewportPercentageLengthUnit
+  | AbsoluteLengthUnit
+  | FlexibleLengthUnit
 
 const FontRelativeLengthUnits: Array<FontRelativeLengthUnit> = [
   'cap',
@@ -499,16 +526,26 @@ const ViewportPercentageLengthUnits: Array<ViewportPercentageLengthUnit> = [
   'vmin',
   'vmax',
 ]
-const AbsoluteLengthUnits: Array<AbsoluteLengthUnit> = ['px', 'cm', 'mm', 'Q', 'in', 'pc', 'pt']
+export const AbsoluteLengthUnits: Array<AbsoluteLengthUnit> = [
+  'px',
+  'cm',
+  'mm',
+  'Q',
+  'in',
+  'pc',
+  'pt',
+]
+export const FlexibleLengthUnits: Array<FlexibleLengthUnit> = ['fr']
 export const LengthUnits: Array<LengthUnit> = [
   ...FontRelativeLengthUnits,
   ...ViewportPercentageLengthUnits,
   ...AbsoluteLengthUnits,
+  ...FlexibleLengthUnits,
 ]
 
 // https://developer.mozilla.org/en-US/docs/Web/CSS/length-percentage
 export type LengthPercentUnit = LengthUnit | PercentUnit
-const LengthPercentUnits: Array<LengthPercentUnit> = [...LengthUnits, '%']
+export const LengthPercentUnits: Array<LengthPercentUnit> = [...LengthUnits, '%']
 
 // https://developer.mozilla.org/en-US/docs/Web/CSS/angle
 export type AngleUnit = 'deg' | 'grad' | 'rad' | 'turn'
@@ -539,9 +576,222 @@ const CSSNumberUnits: Array<CSSNumberUnit> = [
   '%',
 ]
 
+export function isFR(unit: CSSNumberUnit): unit is 'fr' {
+  return unit === 'fr'
+}
+
 export interface CSSNumber {
   value: number
   unit: CSSNumberUnit | null
+}
+
+export type GridCSSNumberUnit = LengthUnit | ResolutionUnit | PercentUnit | 'fr'
+const GridCSSNumberUnits: Array<GridCSSNumberUnit> = [...LengthUnits, ...ResolutionUnits, '%', 'fr']
+
+type BaseGridDimension = {
+  lineName: string | null
+}
+
+export type GridCSSNumber = BaseGridDimension & {
+  type: 'NUMBER'
+  value: CSSNumber
+}
+
+export type GridCSSKeyword = BaseGridDimension & {
+  type: 'KEYWORD'
+  value: CSSKeyword<ValidGridDimensionKeyword>
+}
+
+export function gridDimensionsAreEqual(a: GridDimension, b: GridDimension): boolean {
+  switch (a.type) {
+    case 'KEYWORD':
+      if (a.type !== b.type) {
+        return false
+      }
+      return a.value.type === b.value.type && a.value.value === b.value.value
+    case 'NUMBER':
+      if (a.type !== b.type) {
+        return false
+      }
+      return cssNumberEqual(a.value, b.value)
+    case 'MINMAX':
+      if (a.type !== b.type) {
+        return false
+      }
+      return gridDimensionsAreEqual(a.min, b.min) && gridDimensionsAreEqual(a.max, b.max)
+    case 'REPEAT':
+      if (a.type !== b.type) {
+        return false
+      }
+      return (
+        a.times === b.times &&
+        a.value.length === b.value.length &&
+        a.value.every((value, index) => gridDimensionsAreEqual(value, b.value[index]))
+      )
+    default:
+      assertNever(a)
+  }
+}
+
+type BaseGridCSSRepeat = {
+  type: 'REPEAT'
+  value: Array<GridDimension>
+  lineName: string | null
+}
+
+function baseGridCSSRepeat(
+  value: Array<GridDimension>,
+  lineName: string | null,
+): BaseGridCSSRepeat {
+  return {
+    type: 'REPEAT',
+    value: value,
+    lineName: lineName,
+  }
+}
+
+type GridCSSRepeatStatic = BaseGridCSSRepeat & {
+  times: number
+}
+
+function gridCSSRepeatStatic(
+  times: number,
+  value: Array<GridDimension>,
+  lineName: string | null,
+): GridCSSRepeatStatic {
+  return {
+    ...baseGridCSSRepeat(value, lineName),
+    times: times,
+  }
+}
+
+type GridCSSRepeatDynamic = BaseGridCSSRepeat & {
+  times: CSSKeyword<'auto-fill' | 'auto-fit'>
+}
+
+function gridCSSRepeatDynamic(
+  times: CSSKeyword<'auto-fill' | 'auto-fit'>,
+  value: Array<GridDimension>,
+  lineName: string | null,
+): GridCSSRepeatDynamic {
+  return {
+    ...baseGridCSSRepeat(value, lineName),
+    times: times,
+  }
+}
+
+export type GridCSSRepeat = GridCSSRepeatStatic | GridCSSRepeatDynamic
+
+type GridCSSRepeatTimes = GridCSSRepeat['times']
+
+export function isStaticGridRepeat(dim: GridDimension): dim is GridCSSRepeatStatic {
+  return isGridCSSRepeat(dim) && !isCSSKeyword(dim.times)
+}
+
+export function isDynamicGridRepeat(dim: GridDimension): dim is GridCSSRepeatDynamic {
+  return isGridCSSRepeat(dim) && isCSSKeyword(dim.times)
+}
+
+export type GridCSSMinmax = BaseGridDimension & {
+  type: 'MINMAX'
+  min: GridCSSNumber | GridCSSKeyword
+  max: GridCSSNumber | GridCSSKeyword
+}
+
+export function parseGridCSSMinmaxOrRepeat(input: string): GridCSSMinmax | GridCSSRepeat | null {
+  const parsed = csstree.parse(input, { context: 'value' })
+  if (parsed.type === 'Value') {
+    const parsedDimensions = parseGridChildren(parsed.children)
+    if (
+      isRight(parsedDimensions) &&
+      parsedDimensions.value.length === 1 &&
+      (isGridCSSMinmax(parsedDimensions.value[0]) || isGridCSSRepeat(parsedDimensions.value[0]))
+    ) {
+      return parsedDimensions.value[0]
+    }
+  }
+  return null
+}
+
+export function isGridCSSKeyword(dim: GridDimension): dim is GridCSSKeyword {
+  return dim.type === 'KEYWORD'
+}
+
+export function gridCSSKeyword(
+  value: CSSKeyword<ValidGridDimensionKeyword>,
+  lineName: string | null,
+): GridCSSKeyword {
+  return {
+    type: 'KEYWORD',
+    value: value,
+    lineName: lineName,
+  }
+}
+
+export function gridCSSRepeat(
+  times: GridCSSRepeatTimes,
+  value: GridDimension[],
+  lineName: string | null,
+): GridCSSRepeat {
+  if (typeof times === 'number') {
+    return gridCSSRepeatStatic(times, value, lineName)
+  } else {
+    return gridCSSRepeatDynamic(times, value, lineName)
+  }
+}
+
+export function isGridCSSNumber(dim: GridDimension): dim is GridCSSNumber {
+  return dim.type === 'NUMBER'
+}
+
+export function isGridCSSRepeat(dim: GridDimension): dim is GridCSSRepeat {
+  return dim.type === 'REPEAT'
+}
+
+export function isGridCSSMinmax(dim: GridDimension): dim is GridCSSMinmax {
+  return dim.type === 'MINMAX'
+}
+
+export function gridCSSMinmax(
+  min: GridCSSNumber | GridCSSKeyword,
+  max: GridCSSNumber | GridCSSKeyword,
+  lineName: string | null,
+): GridCSSMinmax {
+  return {
+    type: 'MINMAX',
+    min: min,
+    max: max,
+    lineName: lineName,
+  }
+}
+
+export function gridCSSNumber(value: CSSNumber, lineName: string | null): GridCSSNumber {
+  return {
+    type: 'NUMBER',
+    value: value,
+    lineName: lineName,
+  }
+}
+
+export type GridDiscreteDimension = GridCSSNumber | GridCSSKeyword | GridCSSMinmax
+export type GridDimension = GridDiscreteDimension | GridCSSRepeat
+
+export function printGridCSSNumber(dim: GridDimension): string {
+  switch (dim.type) {
+    case 'KEYWORD':
+      return dim.value.value
+    case 'NUMBER':
+      return `${dim.value.value}${dim.value.unit ?? ''}`
+    case 'REPEAT':
+      if (dim.value.length === 0) {
+        return ''
+      }
+      return dim.value.map(printGridCSSNumber).join(' ')
+    case 'MINMAX':
+      return `minmax(${printGridCSSNumber(dim.min)}, ${printGridCSSNumber(dim.max)})`
+    default:
+      assertNever(dim)
+  }
 }
 
 export function cssNumber(value: number, unit: CSSNumberUnit | null = null): CSSNumber {
@@ -565,6 +815,39 @@ export function getCSSNumberUnit(current: CSSNumber | null): CSSNumberUnit | nul
   return current == null ? null : current.unit
 }
 
+export function isFixedSize(value: CSSNumber): boolean {
+  if (value.unit == null) {
+    return true
+  } else {
+    switch (value.unit) {
+      case 'px':
+      case 'cm':
+      case 'mm':
+      case 'Q':
+      case 'in':
+      case 'pc':
+      case 'pt':
+        return true
+      default:
+        return false
+    }
+  }
+}
+
+export function isCssNumberAndFixedSize(value: unknown): boolean {
+  if (!isCSSNumber(value)) {
+    return false
+  }
+  return isFixedSize(value)
+}
+
+export function isCssNumberAndPercentage(value: unknown): boolean {
+  if (!isCSSNumber(value)) {
+    return false
+  }
+  return value.unit === '%'
+}
+
 function parseCSSNumberUnit(
   input: string,
   units: Array<CSSNumberUnit>,
@@ -580,6 +863,7 @@ const parseCSSLengthUnit = (input: string) => parseCSSNumberUnit(input, LengthUn
 const parseCSSLengthPercentUnit = (input: string) => parseCSSNumberUnit(input, LengthPercentUnits)
 const parseCSSAngleUnit = (input: string) => parseCSSNumberUnit(input, AngleUnits)
 const parseCSSAnglePercentUnit = (input: string) => parseCSSNumberUnit(input, AnglePercentUnits)
+const parseCSSPxUnit = (input: string) => parseCSSNumberUnit(input, ['px'])
 const parseCSSPercentUnit = (input: string) => parseCSSNumberUnit(input, ['%'])
 const parseCSSTimeUnit = (input: string) => parseCSSNumberUnit(input, TimeUnits)
 const parseCSSTimePercentUnit = (input: string) => parseCSSNumberUnit(input, TimePercentUnits)
@@ -587,6 +871,7 @@ const parseCSSResolutionUnit = (input: string) => parseCSSNumberUnit(input, Reso
 const parseCSSUnitlessUnit = (_: string) => left<string, never>(`No unit expected`)
 const parseCSSUnitlessPercentUnit = (input: string) => parseCSSNumberUnit(input, ['%'])
 const parseCSSAnyValidNumberUnit = (input: string) => parseCSSNumberUnit(input, CSSNumberUnits)
+const parseCSSGridUnit = (input: string) => parseCSSNumberUnit(input, GridCSSNumberUnits)
 
 function unitParseFnForType(
   numberType: CSSNumberType,
@@ -600,6 +885,8 @@ function unitParseFnForType(
       return parseCSSLengthUnit
     case 'LengthPercent':
       return parseCSSLengthPercentUnit
+    case 'Px':
+      return parseCSSPxUnit
     case 'Percent':
       return parseCSSPercentUnit
     case 'Resolution':
@@ -614,6 +901,8 @@ function unitParseFnForType(
       return parseCSSUnitlessPercentUnit
     case 'AnyValid':
       return parseCSSAnyValidNumberUnit
+    case 'Grid':
+      return parseCSSGridUnit
     default:
       const _exhaustiveCheck: never = numberType
       throw new Error(`Unable to parse CSSNumber of type ${numberType}`)
@@ -640,7 +929,7 @@ function parseCSSNumericTypeString(
     return flatMapEither((value) => {
       const maybeUnit = matches[2]
       if (maybeUnit == null || maybeUnit === '') {
-        return right({ value, unit: defaultUnit })
+        return right({ value: value, unit: defaultUnit })
       } else {
         const parsedUnit = parseUnit(maybeUnit)
         return mapEither((unit) => cssNumber(value, unit), parsedUnit)
@@ -662,6 +951,60 @@ export function printCSSNumber(
     return fixNumber(value)
   } else {
     return `${fixNumber(value)}${unit}`
+  }
+}
+
+export function printGridDimensionCSS(dimension: GridDimension): string {
+  const lineName = dimension.lineName != null ? `[${dimension.lineName}] ` : ''
+  return lineName + stringifyGridDimension(dimension)
+}
+
+export function stringifyGridDimension(dimension: GridDimension): string {
+  switch (dimension.type) {
+    case 'KEYWORD': {
+      return dimension.value.value
+    }
+    case 'NUMBER': {
+      return `${printCSSNumber(dimension.value, null)}`
+    }
+    case 'REPEAT': {
+      const times = isCSSKeyword(dimension.times) ? dimension.times.value : dimension.times
+      const values = dimension.value.map(printGridDimensionCSS).join(' ')
+      return `repeat(${times}, ${values})`
+    }
+    case 'MINMAX': {
+      const min = stringifyGridDimension(dimension.min)
+      const max = stringifyGridDimension(dimension.max)
+      return `minmax(${min}, ${max})`
+    }
+    default:
+      assertNever(dimension)
+  }
+}
+
+export function printArrayGridDimensions(array: Array<GridDimension>): string {
+  return array.map(printGridDimensionCSS).join(' ')
+}
+
+export function printGridAutoOrTemplateBase(input: GridAutoOrTemplateBase): string {
+  switch (input.type) {
+    case 'DIMENSIONS':
+      return printArrayGridDimensions(input.dimensions)
+    case 'FALLBACK':
+      return input.value
+    default:
+      assertNever(input)
+  }
+}
+
+export function printCSSNumberOrKeyword(
+  input: CSSNumber | CSSKeyword,
+  defaultUnitToSkip: string | null,
+): string | number {
+  if (isCSSKeyword(input)) {
+    return input.value
+  } else {
+    return printCSSNumber(input, defaultUnitToSkip)
   }
 }
 
@@ -692,6 +1035,7 @@ export const parseCSSLengthPercentNone = (
 }
 export const parseCSSAngle = (input: unknown) => parseCSSNumber(input, 'Angle')
 export const parseCSSAnglePercent = (input: unknown) => parseCSSNumber(input, 'AnglePercent')
+export const parseCSSPx = (input: unknown) => parseCSSNumber(input, 'Px')
 export const parseCSSPercent = (input: unknown) => parseCSSNumber(input, 'Percent', '%')
 export const parseCSSResolution = (input: unknown) => parseCSSNumber(input, 'Resolution')
 export const parseCSSTime = (input: unknown) => parseCSSNumber(input, 'Time')
@@ -699,6 +1043,16 @@ export const parseCSSTimePercent = (input: unknown) => parseCSSNumber(input, 'Ti
 export const parseCSSUnitless = (input: unknown) => parseCSSNumber(input, 'Unitless')
 export const parseCSSUnitlessPercent = (input: unknown) => parseCSSNumber(input, 'UnitlessPercent')
 export const parseCSSAnyValidNumber = (input: unknown) => parseCSSNumber(input, 'AnyValid')
+export const parseCSSGrid = (input: unknown): Either<string, GridDimension> => {
+  const maybeNumber = parseCSSNumber(input, 'Grid')
+  if (isRight(maybeNumber)) {
+    return right(gridCSSNumber(maybeNumber.value, null))
+  }
+  if (isValidGridDimensionKeyword(input)) {
+    return right(gridCSSKeyword(cssKeyword(input), null))
+  }
+  return left('invalid css grid dimension')
+}
 export const parseCSSUnitlessAsNumber = (input: unknown): Either<string, number> => {
   const parsed = parseCSSNumber(input, 'Unitless')
   if (isRight(parsed)) {
@@ -708,12 +1062,56 @@ export const parseCSSUnitlessAsNumber = (input: unknown): Either<string, number>
   }
 }
 
+const validGridDimensionKeywords = [
+  'auto',
+  'min-content',
+  'max-content',
+  'none',
+  'inherit',
+  'initial',
+  'unset',
+  'subgrid',
+  'auto-fit',
+  'auto-fill',
+] as const
+
+export type ValidGridDimensionKeyword = (typeof validGridDimensionKeywords)[number]
+
+export function isValidGridDimensionKeyword(value: unknown): value is ValidGridDimensionKeyword {
+  return validGridDimensionKeywords.includes(value as ValidGridDimensionKeyword)
+}
+
+const gridCSSTemplateNumberRegex = /^\[(.+)\]\s*(.+)$/
+
+export function parseToCSSGridDimension(input: unknown): Either<string, GridDimension> {
+  function getParts() {
+    if (typeof input === 'string') {
+      const match = input.match(gridCSSTemplateNumberRegex)
+      if (match != null) {
+        return {
+          lineName: match[1],
+          inputToParse: match[2],
+        }
+      }
+    }
+    return { lineName: null, inputToParse: input }
+  }
+  const { lineName: lineName, inputToParse } = getParts()
+
+  return mapEither((value) => {
+    return {
+      ...value,
+      lineName: value.type === 'REPEAT' ? null : lineName,
+    } as GridDimension
+  }, parseCSSGrid(inputToParse))
+}
+
 export const parseCSSNumber = (
   input: unknown,
   numberType: CSSNumberType,
   defaultUnit: CSSNumberUnit | null = null,
 ): Either<string, CSSNumber> => {
-  if (typeof input === 'number') {
+  if (typeof input === 'number' && (defaultUnit == null || defaultUnit === 'px')) {
     return right(cssNumber(input, defaultUnit))
   } else if (typeof input === 'string') {
     const unitParseFn = unitParseFnForType(numberType)
@@ -721,6 +1119,232 @@ export const parseCSSNumber = (
   } else {
     return left(`Unable to parse invalid number`)
   }
+}
+
+export function parseGridPosition(
+  container: GridContainerProperties,
+  axis: 'row' | 'column',
+  edge: 'start' | 'end',
+  shorthand: GridPosition | null,
+  input: unknown,
+): Either<string, GridPosition> {
+  if (input === 'auto') {
+    return right(cssKeyword('auto'))
+  } else if (typeof input === 'string') {
+    const referenceTemplate =
+      axis === 'row' ? container.gridTemplateRows : container.gridTemplateColumns
+    if (referenceTemplate?.type === 'DIMENSIONS') {
+      const maybeArea = referenceTemplate.dimensions.findIndex((dim) => dim.lineName === input)
+      if (maybeArea >= 0) {
+        let value = gridPositionValue(maybeArea + 1)
+        if (
+          edge === 'end' &&
+          shorthand != null &&
+          !isCSSKeyword(shorthand) &&
+          shorthand.numericalPosition === value.numericalPosition
+        ) {
+          value.numericalPosition = (value.numericalPosition ?? 0) + 1
+        }
+        return right(value)
+      }
+    }
+
+    const asNumber = parseNumber(input)
+    return mapEither(gridPositionValue, asNumber)
+  } else if (typeof input === 'number') {
+    return right(gridPositionValue(input))
+  } else {
+    return left('Not a valid grid position.')
+  }
+}
+
+export const GridAutoFlowValues = ['column', 'column dense', 'row', 'row dense', 'dense'] as const
+export type GridAutoFlow = (typeof GridAutoFlowValues)[number]
+
+export function gridAutoFlowIcon(value: GridAutoFlow): IcnProps {
+  switch (value) {
+    case 'column':
+    case 'column dense':
+      return {
+        category: 'inspector-element',
+        type: 'arrowDown',
+        color: 'black',
+        width: 16,
+        height: 16,
+      }
+    case 'dense':
+    case 'row':
+    case 'row dense':
+      return {
+        category: 'inspector-element',
+        type: 'arrowRight',
+        color: 'black',
+        width: 16,
+        height: 16,
+      }
+    default:
+      assertNever(value)
+  }
+}
+
+export function parseGridAutoFlow(rawValue: string): GridAutoFlow | null {
+  if (GridAutoFlowValues.some((v) => v === rawValue)) {
+    return rawValue as GridAutoFlow
+  }
+
+  return null
+}
+
+export function parseGridRange(
+  container: GridContainerProperties,
+  axis: 'row' | 'column',
+  input: unknown,
+): Either<string, GridRange> {
+  if (typeof input !== 'string') {
+    return left('invalid grid item')
+  }
+
+  const parsed = csstree.parse(input, { context: 'value' })
+  if (parsed.type !== 'Value') {
+    return left('invalid grid item value')
+  }
+
+  const children = parsed.children.toArray()
+  const slashIndex = children.findIndex((c) => c.type === 'Operator' && c.value === '/')
+
+  const isRange = slashIndex >= 0
+  const start = isRange ? children.slice(0, slashIndex) : children
+  const end = isRange ? children.slice(slashIndex + 1) : []
+
+  if (start.length === 0) {
+    return left('invalid grid item start')
+  }
+
+  const maybeStart = maybeParseGridSpan(start) ?? maybeParseGridLine(start, axis, container)
+  if (maybeStart == null) {
+    return left('missing grid item start')
+  }
+
+  const maybeEnd = maybeParseGridSpan(end) ?? maybeParseGridLine(end, axis, container)
+
+  return right(gridRange(maybeStart, maybeEnd))
+}
+
+export function parseGridAutoOrTemplateBase(
+  input: unknown,
+): Either<string, GridAutoOrTemplateBase> {
+  if (typeof input === 'string') {
+    const parsed = csstree.parse(input, { context: 'value' })
+    if (parsed.type === 'Value') {
+      const dimensions = parseGridChildren(parsed.children)
+      if (isRight(dimensions)) {
+        return right({ type: 'DIMENSIONS', dimensions: dimensions.value })
+      }
+
+      console.warn(`Invalid grid template, falling back: ${dimensions.value}.`)
+      return right({ type: 'FALLBACK', value: input })
+    }
+  }
+  return left('Invalid grid template input.')
+}
+
+export function parseGridChildren(
+  children: csstree.List<csstree.CssNode>,
+): Either<string, GridDimension[]> {
+  let nextLineName: string | null = null
+
+  function getLineName() {
+    const currentLineName = nextLineName != null ? `${nextLineName}` : null
+    nextLineName = null
+    return currentLineName
+  }
+
+  let dimensions: GridDimension[] = []
+  for (const child of children) {
+    switch (child.type) {
+      case 'Dimension': {
+        const parsedDimension = parseCSSNumber(`${child.value}${child.unit}`, 'AnyValid')
+        if (isRight(parsedDimension)) {
+          dimensions.push(gridCSSNumber(parsedDimension.value, getLineName()))
+        } else {
+          return left('Invalid grid CSS dimension.')
+        }
+        break
+      }
+      case 'Identifier': {
+        if (isValidGridDimensionKeyword(child.name)) {
+          dimensions.push(gridCSSKeyword(cssKeyword(child.name), getLineName()))
+        } else {
+          return left('Invalid grid CSS keyword.')
+        }
+        break
+      }
+      case 'Function': {
+        const functionName = child.name.toLowerCase()
+        switch (functionName) {
+          case 'repeat': {
+            const [firstChild, ...otherChildren] = child.children.toArray()
+            const times = parseRepeatTimes(firstChild)
+            if (times == null) {
+              return left('Invalid grid CSS repeat times.')
+            }
+
+            const lineName = getLineName()
+
+            const values = new csstree.List<csstree.CssNode>().fromArray(
+              otherChildren.filter(
+                (c) =>
+                  c.type === 'Dimension' ||
+                  c.type === 'Identifier' ||
+                  c.type === 'Brackets' ||
+                  c.type === 'Function',
+              ),
+            )
+            const parsedDimensions = parseGridChildren(values)
+            if (isRight(parsedDimensions)) {
+              dimensions.push(gridCSSRepeat(times, parsedDimensions.value, lineName))
+            } else {
+              return left('Invalid grid CSS repeat values.')
+            }
+            break
+          }
+          case 'minmax': {
+            const values = new csstree.List<csstree.CssNode>().fromArray(
+              child.children
+                .toArray()
+                .filter((c) => c.type === 'Dimension' || c.type === 'Identifier'),
+            )
+            const parsedDimensions = parseGridChildren(values)
+            if (isRight(parsedDimensions)) {
+              const min = parsedDimensions.value[0]
+              const max = parsedDimensions.value[1]
+              if (
+                min == null ||
+                !(min.type === 'NUMBER' || min.type === 'KEYWORD') ||
+                max == null ||
+                !(max.type === 'NUMBER' || max.type === 'KEYWORD')
+              ) {
+                return left('Invalid minmax arguments.')
+              }
+              dimensions.push(gridCSSMinmax(min, max, getLineName()))
+            }
+            break
+          }
+          default:
+            console.warn(`unknown css grid function ${functionName}`)
+        }
+        break
+      }
+      case 'Brackets': {
+        // The next child will get this line name
+        nextLineName = child.children.toArray().find((c) => c.type === 'Identifier')?.name ?? null
+        break
+      }
+      default:
+        return left(`invalid grid child type ${child.type}`)
+    }
+  }
+  return right(dimensions)
 }
 
 export function parseDisplay(input: unknown): Either<string, string> {
@@ -900,7 +1524,7 @@ function cssBoxShadow(
 export type CSSBoxShadows = ReadonlyArray<CSSBoxShadow>
 
 export const cssLineWidthKeywordValues = ['thin', 'medium', 'thick'] as const
-export type CSSLineWidthKeywordValue = NonNullable<typeof cssLineWidthKeywordValues[number]>
+export type CSSLineWidthKeywordValue = NonNullable<(typeof cssLineWidthKeywordValues)[number]>
 export type CSSLineWidthValue = CSSNumber | CSSKeyword<CSSLineWidthKeywordValue>
 export interface CSSLineWidth {
   type: 'line-width'
@@ -932,7 +1556,7 @@ export const cssLineStyleKeywordValues = [
   'inset',
   'outset',
 ] as const
-export type CSSLineStyleKeywordValue = NonNullable<typeof cssLineStyleKeywordValues[number]>
+export type CSSLineStyleKeywordValue = NonNullable<(typeof cssLineStyleKeywordValues)[number]>
 export type CSSLineStyleValue = CSSKeyword<CSSLineStyleKeywordValue>
 
 export interface CSSLineStyle {
@@ -966,6 +1590,33 @@ export const emptyCSSBorder: CSSBorder = {
   type: 'border',
 }
 
+export const emptyCssBorderDefault: CSSBorder = {
+  type: 'border',
+  width: {
+    type: 'line-width',
+    value: {
+      value: 0,
+      unit: 'px',
+    },
+  },
+  style: {
+    type: 'line-style',
+    value: {
+      type: 'keyword',
+      value: 'none',
+    },
+  },
+  color: {
+    type: 'RGB',
+    r: 0,
+    g: 0,
+    b: 0,
+    a: 1,
+    percentageAlpha: false,
+    percentagesUsed: false,
+  },
+}
+
 export const defaultCSSBorder: Complete<CSSBorder> = {
   type: 'border',
   style: cssLineStyle(cssKeyword('solid')),
@@ -973,7 +1624,7 @@ export const defaultCSSBorder: Complete<CSSBorder> = {
   color: { ...blackHexCSSColor },
 }
 
-function printBorder(value: CSSBorder): JSXAttributeValue<string> {
+function printBorder(value: CSSBorder): JSExpressionValue<string> {
   const color: string | null = value.color != null ? printColor(value.color) : null
   const width: string | null = (() => {
     if (value.width == null) {
@@ -986,7 +1637,7 @@ function printBorder(value: CSSBorder): JSXAttributeValue<string> {
   })()
   const style: CSSLineStyleKeywordValue | null = value.style?.value.value ?? null
 
-  return jsxAttributeValue(Utils.stripNulls([width, style, color]).join(' '), emptyComments)
+  return jsExpressionValue(Utils.stripNulls([width, style, color]).join(' '), emptyComments)
 }
 
 export declare type Complete<T> = {
@@ -1014,9 +1665,9 @@ export const defaultBoxShadows: CSSBoxShadows = [{ ...defaultBoxShadow }]
 
 export const disabledFunctionName = UtopiaUtils.disabled.name
 
-export function printBoxShadow(boxShadows: CSSBoxShadows): JSXAttributeValue<string> {
+export function printBoxShadow(boxShadows: CSSBoxShadows): JSExpressionValue<string> {
   const indexOfLastEnabledLayer = findLastIndex(isLayerEnabled, boxShadows)
-  return jsxAttributeValue(
+  return jsExpressionValue(
     [...boxShadows]
       .map((boxShadow, i) => {
         const comma = indexOfLastEnabledLayer > i && boxShadow.enabled
@@ -1058,7 +1709,7 @@ export function parseBoxShadow(boxShadow: unknown): Either<string, CSSBoxShadows
         isRight(parsedSpreadRadius) ? parsedSpreadRadius.value : { ...cssPixelLengthZero },
         !isRight(parsedSpreadRadius),
       )
-      const parsedColor = parseColor(matches[7])
+      const parsedColor = parseColor(matches[7], 'hex-hash-optional')
       if (isRight(parsedOffsetX) && isRight(parsedOffsetY) && isRight(parsedColor)) {
         const offsetX = parsedOffsetX.value
         const offsetY = parsedOffsetY.value
@@ -1616,8 +2267,8 @@ function printCSSTransformItem(cssTransform: CSSTransformItem): string {
   }
 }
 
-function printTransform(cssTransforms: CSSTransforms): JSXAttributeValue<Property.Transform> {
-  return jsxAttributeValue(cssTransforms.map(printCSSTransformItem).join(' '), emptyComments)
+function printTransform(cssTransforms: CSSTransforms): JSExpressionValue<Property.Transform> {
+  return jsExpressionValue(cssTransforms.map(printCSSTransformItem).join(' '), emptyComments)
 }
 
 export enum CSSTransformOriginStringValueX {
@@ -1795,9 +2446,10 @@ export function normalisedCSSTransformOriginValueToCSSTransformValue(
   }
 }
 
-export function cssTransformOriginToNormalisedValue(
-  cssTransformOrigin: CSSTransformOrigin,
-): { x: number; y: number } {
+export function cssTransformOriginToNormalisedValue(cssTransformOrigin: CSSTransformOrigin): {
+  x: number
+  y: number
+} {
   const x =
     typeof cssTransformOrigin.x === 'string'
       ? cssTransformOriginStringValueToPercentage(cssTransformOrigin.x)
@@ -1822,8 +2474,8 @@ function printTransformOriginComponent(
   }
 }
 
-function printTransformOrigin(transformOrigin: CSSTransformOrigin): JSXAttributeValue<string> {
-  return jsxAttributeValue(
+function printTransformOrigin(transformOrigin: CSSTransformOrigin): JSExpressionValue<string> {
+  return jsExpressionValue(
     `${printTransformOriginComponent(transformOrigin.x)} ${printTransformOriginComponent(
       transformOrigin.y,
     )}`,
@@ -1831,7 +2483,7 @@ function printTransformOrigin(transformOrigin: CSSTransformOrigin): JSXAttribute
   )
 }
 
-type CSSOverflow = boolean
+export type CSSOverflow = boolean
 
 function parseOverflow(overflow: unknown): Either<string, CSSOverflow> {
   if (typeof overflow === 'string') {
@@ -1841,8 +2493,8 @@ function parseOverflow(overflow: unknown): Either<string, CSSOverflow> {
   }
 }
 
-function printOverflow(overflow: CSSOverflow): JSXAttributeValue<string> {
-  return jsxAttributeValue(overflow ? 'visible' : 'hidden', emptyComments)
+function printOverflow(overflow: CSSOverflow): JSExpressionValue<string> {
+  return jsExpressionValue(overflow ? 'visible' : 'hidden', emptyComments)
 }
 
 export interface CSSBorderRadiusIndividual {
@@ -1921,12 +2573,12 @@ export function parseBorderRadius(borderRadius: unknown): Either<string, CSSBord
 
 export function printBorderRadius(
   borderRadius: CSSBorderRadius,
-): JSXAttributeValue<string | number> {
+): JSExpressionValue<string | number> {
   if (isLeft(borderRadius)) {
     return printCSSNumberAsAttributeValue('px')(borderRadius.value)
   } else {
     const { tl, tr, br, bl } = borderRadius.value
-    return jsxAttributeValue(
+    return jsExpressionValue(
       `${printCSSNumber(tl, null)} ${printCSSNumber(tr, null)} ${printCSSNumber(
         br,
         null,
@@ -2155,7 +2807,7 @@ export function parseBackgroundColor(color?: unknown): Either<string, CSSDefault
     let parsed: Either<string, CSSColor>
     const matches = color.match(solidColorRegExp)
     if (matches != null) {
-      parsed = parseColor(matches[2])
+      parsed = parseColor(matches[2], 'hex-hash-optional')
       const enabled = matches[1] === undefined && matches[3] === undefined
       if (isRight(parsed)) {
         const underlyingColor = cssSolidColor(parsed.value, enabled)
@@ -2169,8 +2821,8 @@ export function parseBackgroundColor(color?: unknown): Either<string, CSSDefault
   return left('No background color found')
 }
 
-function printBackgroundColor(value: CSSDefault<CSSSolidColor>): JSXAttributeValue<string> {
-  return jsxAttributeValue(
+function printBackgroundColor(value: CSSDefault<CSSSolidColor>): JSExpressionValue<string> {
+  return jsExpressionValue(
     printEnabled(printColor(value.value.color), value.value.enabled),
     emptyComments,
   )
@@ -2178,13 +2830,42 @@ function printBackgroundColor(value: CSSDefault<CSSSolidColor>): JSXAttributeVal
 
 const matchColorKeyword = combineRegExp(['^', '(', RegExpLibrary.colorKeyword, ')', '$'])
 const matchColorHex = combineRegExp(['^', RegExpLibrary.colorHexOptionalOctothorp, '$'])
+const matchColorHexStrict = combineRegExp(['^', RegExpLibrary.colorHex, '$'])
 
-export function parseColor(color: unknown): Either<string, CSSColor> {
+function parseHexColor(
+  color: string,
+  strictHash: 'hex-hash-required' | 'hex-hash-optional',
+): Either<string, CSSColor> {
+  if (strictHash === 'hex-hash-required') {
+    const matchedHex = color.match(matchColorHexStrict)
+    if (Array.isArray(matchedHex)) {
+      return right({
+        type: 'Hex',
+        hex: matchedHex[0],
+      })
+    }
+  } else {
+    const matchedHex = color.match(matchColorHex)
+    if (Array.isArray(matchedHex) && matchedHex[2] != null) {
+      return right({
+        type: 'Hex',
+        hex: '#' + matchedHex[2],
+      })
+    }
+  }
+
+  return left('Not a valid hex color.')
+}
+
+export function parseColor(
+  color: unknown,
+  strictHash: 'hex-hash-required' | 'hex-hash-optional',
+): Either<string, CSSColor> {
   if (color == null) {
     return left('No color value provided.')
   }
   if (typeof color !== 'string') {
-    return left('Invalid value for color provided.')
+    return left('Value not valid.')
   }
   const trimmed = color.trim()
 
@@ -2196,12 +2877,9 @@ export function parseColor(color: unknown): Either<string, CSSColor> {
     return flatMapEither(parseHSLColor, separateParams(trimmed))
   }
 
-  const matchedHex = trimmed.match(matchColorHex)
-  if (Array.isArray(matchedHex) && matchedHex[2] != null) {
-    return right({
-      type: 'Hex',
-      hex: '#' + matchedHex[2],
-    })
+  const parsedHex = parseHexColor(trimmed, strictHash)
+  if (isRight(parsedHex)) {
+    return parsedHex
   }
 
   if (trimmed === 'transparent') {
@@ -2220,12 +2898,14 @@ export function parseColor(color: unknown): Either<string, CSSColor> {
   return left('No valid color found.')
 }
 
-export function printColorToJsx(color: CSSColor | undefined): JSXAttributeValue<string> {
-  return jsxAttributeValue(color != null ? printColor(color) : '', emptyComments)
+const parseColorHexHashOptional = (color: unknown) => parseColor(color, 'hex-hash-optional')
+
+export function printColorToJsx(color: CSSColor | undefined): JSExpressionValue<string> {
+  return jsExpressionValue(color != null ? printColor(color) : '', emptyComments)
 }
 
 export function cssColor(value: string, defaultColor: CSSColor = { ...defaultCSSColor }): CSSColor {
-  const parsedColor = parseColor(value)
+  const parsedColor = parseColor(value, 'hex-hash-optional')
   if (isRight(parsedColor)) {
     return parsedColor.value
   } else {
@@ -2271,7 +2951,7 @@ export function parseAlphaFromCSSColor(color: CSSColor): number {
       return color.a
     default:
       const _exhaustiveCheck: never = color
-      throw new Error('Unknown color, cannot parse alpha channel')
+      throw new Error('No valid alpha.')
   }
 }
 
@@ -2319,7 +2999,7 @@ export function giveCSSColorNewAlpha(newAlpha: number, color: CSSColor): CSSColo
       } as CSSColorRGB
     default:
       const _exhaustiveCheck: never = color
-      throw new Error('Unknown color, cannot parse alpha channel')
+      throw new Error('No valid alpha.')
   }
 }
 
@@ -2387,7 +3067,7 @@ export type CSSBackgroundLayerType =
   | GradientBackgroundLayerType
 
 export const cssBGSizeKeywordValueValues = ['contain', 'cover'] as const
-export type CSSBGSizeKeywordValueValue = NonNullable<typeof cssBGSizeKeywordValueValues[number]>
+export type CSSBGSizeKeywordValueValue = NonNullable<(typeof cssBGSizeKeywordValueValues)[number]>
 export type CSSBGSizeKeywordValue = CSSKeyword<CSSBGSizeKeywordValueValue>
 export type CSSBGSizeCurlyBraceValueValue = CSSNumber | CSSKeyword<'auto'>
 export type CSSBGSizeCurlyBraceValue = ParsedCurlyBrace<CSSBGSizeCurlyBraceValueValue>
@@ -2859,7 +3539,7 @@ const emptyHTMLImageElementMetadata: HTMLImageElementMetadata = {
 
 export interface CSSUnknownFunctionParameters<T> {
   type: 'unknown-helper-function-parameters'
-  value: JSXAttributeValue<T>
+  value: JSExpressionValue<T>
 }
 
 export function isCSSUnknownFunctionParameters<T>(
@@ -2875,7 +3555,7 @@ export function isCSSUnknownFunctionParameters<T>(
 export function cssUnknownFunctionParameters<T>(value: T): CSSUnknownFunctionParameters<T> {
   return {
     type: 'unknown-helper-function-parameters',
-    value: jsxAttributeValue(value, emptyComments),
+    value: jsExpressionValue(value, emptyComments),
   }
 }
 
@@ -3054,7 +3734,7 @@ function parseGradientStops(gradient: string): Either<string, Array<CSSGradientS
   RegExpLibrary.gradientColorStopValues.lastIndex = 0
   let stopMatches = RegExpLibrary.gradientColorStopValues.exec(gradient)
   while (stopMatches != null) {
-    const parsedColor = parseColor(stopMatches[1])
+    const parsedColor = parseColor(stopMatches[1], 'hex-hash-optional')
     const parsedPosition = parseCSSLengthPercent(stopMatches[27]) // TODO: make solids not have any position
     if (isRight(parsedColor) && isRight(parsedPosition)) {
       const stopResult: CSSGradientStop = {
@@ -3221,7 +3901,8 @@ export function parseConicGradient(match: string): Either<string, CSSConicGradie
   return left('No conic-gradient found')
 }
 
-const backgroundImageRegExp = /(\/\*)?(?:(?:((?:url|(?:linear|radial|conic)-gradient)\((?:\([^\)]*\)|[^\)\(]*)*\)),?)|((?:(?:repeating-linear|repeating-radial|repeating-conic)-gradient|image-set)\(.+\)))(\*\/)?/g
+const backgroundImageRegExp =
+  /(\/\*)?(?:(?:((?:url|(?:linear|radial|conic)-gradient)\((?:\([^\)]*\)|[^\)\(]*)*\)),?)|((?:(?:repeating-linear|repeating-radial|repeating-conic)-gradient|image-set)\(.+\)))(\*\/)?/g
 
 export function parseBackgroundImage(backgroundImage?: unknown): Either<string, CSSBackgrounds> {
   if (typeof backgroundImage === 'string') {
@@ -3280,7 +3961,7 @@ function isLayerEnabled<T extends { enabled: boolean }>(layer: T): boolean {
 
 export function printBackgroundImage(
   cssBackgroundImages: CSSBackgrounds,
-): JSXAttributeValue<string> {
+): JSExpressionValue<string> {
   const indexOfLastEnabledLayer = findLastIndex(isLayerEnabled, cssBackgroundImages)
   const backgroundImageStrings = cssBackgroundImages.map((backgroundImage, i) => {
     const enabled = backgroundImage.enabled
@@ -3323,13 +4004,13 @@ export function printBackgroundImage(
       }
     }
   })
-  return jsxAttributeValue(backgroundImageStrings.join(' '), emptyComments)
+  return jsExpressionValue(backgroundImageStrings.join(' '), emptyComments)
 }
 
-export function printBackgroundSize(value: CSSBackgroundSize): JSXAttributeValue<string> {
+export function printBackgroundSize(value: CSSBackgroundSize): JSExpressionValue<string> {
   const indexOfLastEnabledLayer = findLastIndex(isLayerEnabled, value)
 
-  return jsxAttributeValue(
+  return jsExpressionValue(
     value
       .map((bgSize, i) => {
         const comma = indexOfLastEnabledLayer > i && bgSize.enabled
@@ -3384,7 +4065,9 @@ export type CSSFontSize = CSSNumber
 
 export type CSSTextAlign = 'left' | 'right' | 'center' | 'justify' | 'start' | 'end'
 
-export type CSSTextDecorationLine = 'underline' | 'overline' | 'line-through' | 'none'
+export type CSSDirection = 'ltr' | 'rtl'
+
+export type CSSTextDecorationLine = string
 
 export type CSSTextDecorationStyle = 'solid' | 'double' | 'dotted' | 'dashed' | 'wavy'
 
@@ -3412,7 +4095,7 @@ export type CSSFontProperty =
   | CSSLetterSpacing
   | CSSLineHeight
 
-export type FontSettings = {
+export interface FontSettings {
   color: CSSColor
   fontFamily: CSSFontFamily
   fontWeightAndStyle: CSSFontWeightAndStyle
@@ -3421,6 +4104,28 @@ export type FontSettings = {
   textDecorationLine: CSSTextDecorationLine
   letterSpacing: CSSLetterSpacing
   lineHeight: CSSLineHeight
+}
+
+export function fontSettings(
+  color: CSSColor,
+  fontFamily: CSSFontFamily,
+  fontWeightAndStyle: CSSFontWeightAndStyle,
+  fontSize: CSSFontSize,
+  textAlign: CSSTextAlign,
+  textDecorationLine: CSSTextDecorationLine,
+  letterSpacing: CSSLetterSpacing,
+  lineHeight: CSSLineHeight,
+): FontSettings {
+  return {
+    color: color,
+    fontFamily: fontFamily,
+    fontWeightAndStyle: fontWeightAndStyle,
+    fontSize: fontSize,
+    textAlign: textAlign,
+    textDecorationLine: textDecorationLine,
+    letterSpacing: letterSpacing,
+    lineHeight: lineHeight,
+  }
 }
 
 export interface CSSTextShadow {
@@ -3455,7 +4160,7 @@ export function parseTextShadow(textShadow: unknown): Either<string, CSSTextShad
         isRight(parsedBlurRadius) ? parsedBlurRadius.value : { ...cssPixelLengthZero },
         !isRight(parsedBlurRadius),
       )
-      const parsedColor = parseColor(matches[5])
+      const parsedColor = parseColor(matches[5], 'hex-hash-optional')
       if (isRight(parsedOffsetX) && isRight(parsedOffsetY) && isRight(parsedColor)) {
         const offsetX = parsedOffsetX.value
         const offsetY = parsedOffsetY.value
@@ -3477,9 +4182,9 @@ export function parseTextShadow(textShadow: unknown): Either<string, CSSTextShad
   return left('No text shadows found')
 }
 
-function printTextShadow(textShadows: CSSTextShadows): JSXAttributeValue<string> {
+function printTextShadow(textShadows: CSSTextShadows): JSExpressionValue<string> {
   const indexOfLastEnabledLayer = findLastIndex(isLayerEnabled, textShadows)
-  return jsxAttributeValue(
+  return jsExpressionValue(
     [...textShadows]
       .map((textShadow, i) => {
         const comma = indexOfLastEnabledLayer > i && textShadow.enabled
@@ -3510,8 +4215,8 @@ function parseFontFamily(fontFamily: unknown): Either<string, CSSFontFamily> {
   }
 }
 
-function printFontFamily(cssFontFamily: CSSFontFamily): JSXAttributeValue<string> {
-  return jsxAttributeValue(fontFamilyArrayToCSSFontFamilyString(cssFontFamily), emptyComments)
+function printFontFamily(cssFontFamily: CSSFontFamily): JSExpressionValue<string> {
+  return jsExpressionValue(fontFamilyArrayToCSSFontFamilyString(cssFontFamily), emptyComments)
 }
 
 function parseFontWeight(fontWeight: unknown): Either<string, CSSFontWeight> {
@@ -3528,14 +4233,14 @@ function parseFontWeight(fontWeight: unknown): Either<string, CSSFontWeight> {
   }
 }
 
-function printFontWeight(cssFontFamily: CSSFontWeight): JSXAttributeValue<Property.FontWeight> {
-  return jsxAttributeValue(cssFontFamily, emptyComments)
+function printFontWeight(cssFontFamily: CSSFontWeight): JSExpressionValue<Property.FontWeight> {
+  return jsExpressionValue(cssFontFamily, emptyComments)
 }
 
 const parseFontStyle = isOneOfTheseParser<CSSFontStyle>(['normal', 'italic'])
 
-function printFontStyle(cssFontStyle: CSSFontStyle): JSXAttributeValue<Property.FontStyle> {
-  return jsxAttributeValue(cssFontStyle, emptyComments)
+function printFontStyle(cssFontStyle: CSSFontStyle): JSExpressionValue<Property.FontStyle> {
+  return jsExpressionValue(cssFontStyle, emptyComments)
 }
 
 const parseTextAlign = isOneOfTheseParser<CSSTextAlign>([
@@ -3547,21 +4252,18 @@ const parseTextAlign = isOneOfTheseParser<CSSTextAlign>([
   'end',
 ])
 
-function printTextAlign(cssTextAlign: CSSTextAlign): JSXAttributeValue<Property.TextAlign> {
-  return jsxAttributeValue(cssTextAlign, emptyComments)
+export const parseDirection = isOneOfTheseParser<CSSDirection>(['ltr', 'rtl'])
+
+function printTextAlign(cssTextAlign: CSSTextAlign): JSExpressionValue<Property.TextAlign> {
+  return jsExpressionValue(cssTextAlign, emptyComments)
 }
 
-const parseTextDecorationLine = isOneOfTheseParser<CSSTextDecorationLine>([
-  'underline',
-  'overline',
-  'line-through',
-  'none',
-])
+const parseTextDecorationLine = parseString
 
 function printTextDecorationLine(
   cssTextDecorationLine: CSSTextDecorationLine,
-): JSXAttributeValue<Property.TextDecorationLine> {
-  return jsxAttributeValue(cssTextDecorationLine, emptyComments)
+): JSExpressionValue<Property.TextDecorationLine> {
+  return jsExpressionValue(cssTextDecorationLine, emptyComments)
 }
 
 const parseTextDecorationStyle = isOneOfTheseParser<CSSTextDecorationStyle>([
@@ -3574,8 +4276,8 @@ const parseTextDecorationStyle = isOneOfTheseParser<CSSTextDecorationStyle>([
 
 function printTextDecorationStyle(
   cssTextDecorationStyle: CSSTextDecorationStyle,
-): JSXAttributeValue<Property.TextDecorationStyle> {
-  return jsxAttributeValue(cssTextDecorationStyle, emptyComments)
+): JSExpressionValue<Property.TextDecorationStyle> {
+  return jsExpressionValue(cssTextDecorationStyle, emptyComments)
 }
 
 function parseLetterSpacing(letterSpacing: unknown): Either<string, CSSLetterSpacing> {
@@ -3588,9 +4290,9 @@ function parseLetterSpacing(letterSpacing: unknown): Either<string, CSSLetterSpa
 
 function printLetterSpacing(
   cssLetterSpacing: CSSLetterSpacing,
-): JSXAttributeValue<Property.LetterSpacing<string | number>> {
+): JSExpressionValue<Property.LetterSpacing<string | number>> {
   if (cssLetterSpacing === 'normal') {
-    return jsxAttributeValue(cssLetterSpacing, emptyComments)
+    return jsExpressionValue(cssLetterSpacing, emptyComments)
   } else {
     return printCSSNumberAsAttributeValue(null)(cssLetterSpacing)
   }
@@ -3606,23 +4308,23 @@ function parseLineHeight(lineHeight: unknown): Either<string, CSSLineHeight> {
 
 function printLineHeight(
   cssLineHeight: CSSLineHeight,
-): JSXAttributeValue<Property.LineHeight<string | number>> {
+): JSExpressionValue<Property.LineHeight<string | number>> {
   if (cssLineHeight === 'normal') {
-    return jsxAttributeValue(cssLineHeight, emptyComments)
+    return jsExpressionValue(cssLineHeight, emptyComments)
   } else {
     return printCSSNumberAsAttributeValue(null)(cssLineHeight)
   }
 }
 
 export function toggleSimple(attribute: ModifiableAttribute): ModifiableAttribute {
-  if (isJSXAttributeFunctionCall(attribute)) {
+  if (modifiableAttributeIsAttributeFunctionCall(attribute)) {
     const result = jsxFunctionAttributeToRawValue(attribute)
     if (isRight(result) && result.value.functionName === disabledFunctionName) {
       const params = result.value.parameters
       if (params.length === 1) {
         const originalValueSimple = jsxSimpleAttributeToValue(params[0])
         if (isRight(originalValueSimple)) {
-          return jsxAttributeValue(originalValueSimple.value, emptyComments)
+          return jsExpressionValue(originalValueSimple.value, emptyComments)
         } else {
           return params[0]
         }
@@ -3634,25 +4336,25 @@ export function toggleSimple(attribute: ModifiableAttribute): ModifiableAttribut
   } else {
     const simpleValue = jsxSimpleAttributeToValue(attribute)
     if (isRight(simpleValue)) {
-      return jsxAttributeFunctionCall(disabledFunctionName, [
-        jsxAttributeValue(simpleValue.value, emptyComments),
+      return jsExpressionFunctionCall(disabledFunctionName, [
+        jsExpressionValue(simpleValue.value, emptyComments),
       ])
     } else if (isRegularJSXAttribute(attribute)) {
-      return jsxAttributeFunctionCall(disabledFunctionName, [attribute])
+      return jsExpressionFunctionCall(disabledFunctionName, [attribute])
     } else {
       return attribute
     }
   }
 }
 
-const backgroundColorPathWithoutStyle = PP.create(['backgroundColor'])
-const backgroundImagePathWithoutStyle = PP.create(['backgroundImage'])
+const backgroundColorPathWithoutStyle = PP.create('backgroundColor')
+const backgroundImagePathWithoutStyle = PP.create('backgroundImage')
 
 const updateBackgroundImageLayersWithNewValues = (
   backgroundImageAttribute: ModifiableAttribute,
   newValueForAll: boolean | undefined,
-  attributes: JSXAttribute,
-): Either<string, JSXAttribute> => {
+  attributes: JSExpression,
+): Either<string, JSExpression> => {
   let workingNewValueForAll = newValueForAll
   const simpleBackgroundImage = jsxSimpleAttributeToValue(backgroundImageAttribute)
   if (isRight(simpleBackgroundImage) && typeof simpleBackgroundImage.value === 'string') {
@@ -3678,22 +4380,22 @@ const updateBackgroundImageLayersWithNewValues = (
   return left('backgroundImage could not be parsed as valid backgroundImage string')
 }
 
-export function toggleBackgroundLayers(styleAttribute: JSXAttribute): JSXAttribute {
-  let workingStyleProp: Either<string, JSXAttribute> = right(styleAttribute) as EitherRight<
-    JSXAttribute
-  >
-  const backgroundColorResult = getJSXAttributeAtPathInner(
+export function toggleBackgroundLayers(styleAttribute: JSExpression): JSExpression {
+  let workingStyleProp: Either<string, JSExpression> = right(
+    styleAttribute,
+  ) as EitherRight<JSExpression>
+  const backgroundColorResult = getJSExpressionAtPath(
     styleAttribute,
     backgroundColorPathWithoutStyle,
   )
-  const backgroundImageResult = getJSXAttributeAtPathInner(
+  const backgroundImageResult = getJSExpressionAtPath(
     styleAttribute,
     backgroundImagePathWithoutStyle,
   )
   // If backgroundColor is set
   if (
     backgroundColorResult.remainingPath == null &&
-    !isJSXAttributeNotFound(backgroundColorResult.attribute)
+    !modifiableAttributeIsAttributeNotFound(backgroundColorResult.attribute)
   ) {
     const simpleBackgroundColor = jsxSimpleAttributeToValue(backgroundColorResult.attribute)
     if (isRight(simpleBackgroundColor) && typeof simpleBackgroundColor.value === 'string') {
@@ -3713,7 +4415,7 @@ export function toggleBackgroundLayers(styleAttribute: JSXAttribute): JSXAttribu
           // If backgroundImage is also set…
           if (
             backgroundImageResult.remainingPath == null &&
-            !isJSXAttributeNotFound(backgroundImageResult.attribute)
+            !modifiableAttributeIsAttributeNotFound(backgroundImageResult.attribute)
           ) {
             // …set all of its values to the new value
             workingStyleProp = updateBackgroundImageLayersWithNewValues(
@@ -3731,7 +4433,7 @@ export function toggleBackgroundLayers(styleAttribute: JSXAttribute): JSXAttribu
     // …but backgroundImage is set…
     if (
       backgroundImageResult.remainingPath == null &&
-      !isJSXAttributeNotFound(backgroundImageResult.attribute)
+      !modifiableAttributeIsAttributeNotFound(backgroundImageResult.attribute)
     ) {
       // …toggle backgroundImage
       workingStyleProp = updateBackgroundImageLayersWithNewValues(
@@ -3752,7 +4454,7 @@ export function toggleBackgroundLayers(styleAttribute: JSXAttribute): JSXAttribu
   return isRight(workingStyleProp) ? workingStyleProp.value : styleAttribute
 }
 
-export function toggleBorder(attribute: ModifiableAttribute): JSXAttributeValue<string> {
+export function toggleBorder(attribute: ModifiableAttribute): JSExpressionValue<string> {
   const simpleValue = jsxSimpleAttributeToValue(attribute)
   if (isRight(simpleValue) && typeof simpleValue.value === 'string') {
     const parsed = parseBorder(simpleValue.value)
@@ -3763,7 +4465,7 @@ export function toggleBorder(attribute: ModifiableAttribute): JSXAttributeValue<
   return printBorder({ ...defaultCSSBorder })
 }
 
-export function toggleShadow(attribute: ModifiableAttribute): JSXAttributeValue<string> {
+export function toggleShadow(attribute: ModifiableAttribute): JSExpressionValue<string> {
   const simpleValue = jsxSimpleAttributeToValue(attribute)
   if (isRight(simpleValue) && typeof simpleValue.value === 'string') {
     const parsed = parseBoxShadow(simpleValue.value)
@@ -3784,7 +4486,8 @@ export function toggleStylePropPath(
       const attributeValue = attributeResult.value
       const updatedAttribute = toggleFn(attributeValue)
       const props: Either<string, JSXAttributes> =
-        isJSXAttributeNotFound(updatedAttribute) || isPartOfJSXAttributeValue(updatedAttribute)
+        modifiableAttributeIsAttributeNotFound(updatedAttribute) ||
+        modifiableAttributeIsPartOfAttributeValue(updatedAttribute)
           ? left(`Unable to set value of type ${updatedAttribute.type}`)
           : setJSXValueAtPath(element.props, path, updatedAttribute)
       if (isLeft(props)) {
@@ -3801,13 +4504,13 @@ export function toggleStylePropPath(
 }
 
 export function toggleStylePropPaths(
-  toggleFn: (attribute: JSXAttribute) => JSXAttribute,
+  toggleFn: (attribute: JSExpression) => JSExpression,
 ): (element: JSXElement) => JSXElement {
   return (element: JSXElement): JSXElement => {
-    const styleProp = getJSXAttributeAtPath(element.props, PP.create(['style']))
+    const styleProp = getJSXAttributesAtPath(element.props, PP.create('style'))
     const attribute = styleProp.attribute
     if (styleProp.remainingPath == null && isRegularJSXAttribute(attribute)) {
-      const newProps = setJSXValueAtPath(element.props, PP.create(['style']), toggleFn(attribute))
+      const newProps = setJSXValueAtPath(element.props, PP.create('style'), toggleFn(attribute))
       if (isRight(newProps)) {
         return { ...element, props: newProps.value }
       }
@@ -3819,27 +4522,35 @@ export function toggleStylePropPaths(
 
 function printCSSNumberAsAttributeValue(
   defaultUnitToSkip: string | null,
-): (value: CSSNumber) => JSXAttributeValue<string | number> {
+): (value: CSSNumber) => JSExpressionValue<string | number> {
   return (value: CSSNumber) =>
-    jsxAttributeValue(printCSSNumber(value, defaultUnitToSkip), emptyComments)
+    jsExpressionValue(printCSSNumber(value, defaultUnitToSkip), emptyComments)
 }
 
 function printCSSNumberOrUndefinedAsAttributeValue(
   defaultUnitToSkip: string | null,
-): (value: CSSNumber | undefined) => JSXAttributeValue<string | number | undefined> {
+): (value: CSSNumber | undefined) => JSExpressionValue<string | number | undefined> {
   return (value: CSSNumber | undefined) => {
     return value != null
       ? printCSSNumberAsAttributeValue(defaultUnitToSkip)(value)
-      : jsxAttributeValue(undefined, emptyComments)
+      : jsExpressionValue(undefined, emptyComments)
   }
+}
+
+const printCSSNumberUnitlessOrUndefinedAsAttributeValue = (
+  value: CSSNumber | undefined,
+): JSExpressionValue<string | number | undefined> => {
+  return value != null
+    ? jsExpressionValue(fixNumber(value.value), emptyComments)
+    : jsExpressionValue(undefined, emptyComments)
 }
 
 function parseString(value: unknown): Either<string, string> {
   return typeof value === 'string' ? right(value) : left(`${value} is not a string`)
 }
 
-function printStringAsAttributeValue(value: string): JSXAttributeValue<string> {
-  return jsxAttributeValue(value, emptyComments)
+function printStringAsAttributeValue(value: string): JSExpressionValue<string> {
+  return jsExpressionValue(value, emptyComments)
 }
 
 type CSSMixBlendMode = 'normal' | 'multiply' | 'screen' | 'darken'
@@ -3851,8 +4562,8 @@ const parseMixBlendMode = isOneOfTheseParser<CSSMixBlendMode>([
   'darken',
 ])
 
-function printMixBlendMode(blendMode: CSSMixBlendMode): JSXAttributeValue<string> {
-  return jsxAttributeValue(blendMode, emptyComments)
+function printMixBlendMode(blendMode: CSSMixBlendMode): JSExpressionValue<string> {
+  return jsExpressionValue(blendMode, emptyComments)
 }
 
 type CSSObjectFit = 'fill' | 'contain' | 'cover' | 'none' | 'scale-down'
@@ -3868,8 +4579,8 @@ const parseCSSObjectFit = isOneOfTheseParser<CSSObjectFit>([
 
 type ImageURL = string
 
-function printCSSObjectFit(value: CSSObjectFit): JSXAttributeValue<string> {
-  return jsxAttributeValue(value, emptyComments)
+function printCSSObjectFit(value: CSSObjectFit): JSExpressionValue<string> {
+  return jsExpressionValue(value, emptyComments)
 }
 
 function parseFramePin(
@@ -3900,12 +4611,23 @@ const flexWrapParser: Parser<FlexWrap> = isOneOfTheseParser([
   FlexWrap.WrapReverse,
 ])
 
-const flexDirectionParser: Parser<FlexDirection> = isOneOfTheseParser([
-  FlexDirection.Column,
-  FlexDirection.ColumnReverse,
-  FlexDirection.Row,
-  FlexDirection.RowReverse,
-])
+export type Direction = 'horizontal' | 'vertical'
+export type ForwardOrReverse = 'forward' | 'reverse'
+
+export interface SimpleFlexDirection {
+  direction: Direction
+  forwardOrReverse: ForwardOrReverse
+}
+
+export type FlexDirection = 'row' | 'row-reverse' | 'column' | 'column-reverse'
+export const AllFlexDirections: Array<FlexDirection> = [
+  'row',
+  'row-reverse',
+  'column',
+  'column-reverse',
+]
+
+export const parseFlexDirection: Parser<FlexDirection> = isOneOfTheseParser(AllFlexDirections)
 
 const flexAlignmentsParser: Parser<FlexAlignment> = isOneOfTheseParser([
   FlexAlignment.Auto,
@@ -3913,6 +4635,11 @@ const flexAlignmentsParser: Parser<FlexAlignment> = isOneOfTheseParser([
   FlexAlignment.Center,
   FlexAlignment.FlexEnd,
   FlexAlignment.Stretch,
+  FlexAlignment.Baseline,
+  FlexAlignment.FirstBaseline,
+  FlexAlignment.LastBaseline,
+  FlexAlignment.SafeCenter,
+  FlexAlignment.UnsafeCenter,
 ])
 
 const flexJustifyContentParser: Parser<FlexJustifyContent> = isOneOfTheseParser([
@@ -3922,6 +4649,10 @@ const flexJustifyContentParser: Parser<FlexJustifyContent> = isOneOfTheseParser(
   FlexJustifyContent.SpaceAround,
   FlexJustifyContent.SpaceBetween,
   FlexJustifyContent.SpaceEvenly,
+  FlexJustifyContent.Stretch,
+  FlexJustifyContent.Normal,
+  FlexJustifyContent.SafeCenter,
+  FlexJustifyContent.UnsafeCenter,
 ])
 
 export type CSSPosition = '-webkit-sticky' | 'absolute' | 'fixed' | 'relative' | 'static' | 'sticky'
@@ -3943,7 +4674,7 @@ function isNumberParser(simpleValue: unknown): Either<string, number> {
   }
 }
 
-type DOMEventHandlerMetadata = JSXAttribute
+type DOMEventHandlerMetadata = JSExpression
 
 export function parseDOMEventHandlerMetadata(
   _: unknown,
@@ -3959,7 +4690,7 @@ export function parseDOMEventHandlerMetadata(
   }
 }
 
-export function printDOMEventHandlerMetadata(value: JSXAttribute): JSXAttribute {
+export function printDOMEventHandlerMetadata(value: JSExpression): JSExpression {
   return value
 }
 
@@ -3969,6 +4700,10 @@ export interface ParsedCSSProperties {
   backgroundSize: CSSBackgroundSize
   border: CSSBorder
   borderRadius: CSSBorderRadius
+  borderTopLeftRadius: CSSNumber
+  borderTopRightRadius: CSSNumber
+  borderBottomLeftRadius: CSSNumber
+  borderBottomRightRadius: CSSNumber
   boxShadow: CSSBoxShadows
   color: CSSColor
   fontFamily: CSSFontFamily
@@ -4003,14 +4738,15 @@ export interface ParsedCSSProperties {
   flexWrap: FlexWrap
   flexDirection: FlexDirection
   alignItems: FlexAlignment
-  alignContent: FlexAlignment
+  justifyItems: FlexAlignment
+  alignContent: FlexJustifyContent
   justifyContent: FlexJustifyContent
   alignSelf: FlexAlignment
   position: CSSPosition
-  left: CSSNumber
-  top: CSSNumber
-  right: CSSNumber
-  bottom: CSSNumber
+  left: CSSNumber | undefined
+  top: CSSNumber | undefined
+  right: CSSNumber | undefined
+  bottom: CSSNumber | undefined
   minWidth: CSSNumber | undefined
   maxWidth: CSSNumber | undefined
   minHeight: CSSNumber | undefined
@@ -4019,6 +4755,14 @@ export interface ParsedCSSProperties {
   flexGrow: number
   flexShrink: number
   display: string
+  width: CSSNumber | undefined
+  height: CSSNumber | undefined
+  flexBasis: CSSNumber | undefined
+  gap: CSSNumber
+  zIndex: CSSNumber | undefined
+  rowGap: CSSNumber
+  columnGap: CSSNumber
+  gridAutoFlow: GridAutoFlow | null
 }
 
 export type ParsedCSSPropertiesKeys = keyof ParsedCSSProperties
@@ -4049,6 +4793,22 @@ export const cssEmptyValues: ParsedCSSProperties = {
       value: 0,
       unit: 'px',
     },
+  },
+  borderTopLeftRadius: {
+    value: 0,
+    unit: 'px',
+  },
+  borderTopRightRadius: {
+    value: 0,
+    unit: 'px',
+  },
+  borderBottomLeftRadius: {
+    value: 0,
+    unit: 'px',
+  },
+  borderBottomRightRadius: {
+    value: 0,
+    unit: 'px',
   },
   boxShadow: [],
   color: {
@@ -4087,9 +4847,10 @@ export const cssEmptyValues: ParsedCSSProperties = {
   objectFit: 'fill',
 
   flexWrap: FlexWrap.NoWrap,
-  flexDirection: FlexDirection.Row,
+  flexDirection: 'row',
   alignItems: FlexAlignment.FlexStart,
-  alignContent: FlexAlignment.FlexStart,
+  justifyItems: FlexAlignment.FlexStart,
+  alignContent: FlexJustifyContent.FlexStart,
   justifyContent: FlexJustifyContent.FlexStart,
   padding: {
     paddingTop: {
@@ -4192,20 +4953,50 @@ export const cssEmptyValues: ParsedCSSProperties = {
   flexGrow: 0,
   flexShrink: 1,
   display: 'block',
+  gap: {
+    value: 0,
+    unit: null,
+  },
+  width: {
+    value: 0,
+    unit: null,
+  },
+  height: {
+    value: 0,
+    unit: null,
+  },
+  flexBasis: {
+    value: 0,
+    unit: null,
+  },
+  zIndex: undefined,
+  rowGap: {
+    value: 0,
+    unit: null,
+  },
+  columnGap: {
+    value: 0,
+    unit: null,
+  },
+  gridAutoFlow: null,
 }
 
 type CSSParsers = {
   [key in keyof ParsedCSSProperties]: Parser<ParsedCSSProperties[key]>
 }
 
-const cssParsers: CSSParsers = {
+export const cssParsers: CSSParsers = {
   backgroundColor: parseBackgroundColor,
   backgroundImage: parseBackgroundImage,
   backgroundSize: parseBackgroundSize,
   border: parseBorder,
   borderRadius: parseBorderRadius,
+  borderTopLeftRadius: parseCSSLengthPercent,
+  borderTopRightRadius: parseCSSLengthPercent,
+  borderBottomLeftRadius: parseCSSLengthPercent,
+  borderBottomRightRadius: parseCSSLengthPercent,
   boxShadow: parseBoxShadow,
-  color: parseColor,
+  color: parseColorHexHashOptional,
   fontFamily: parseFontFamily,
   fontSize: parseCSSLengthPercent,
   fontStyle: parseFontStyle,
@@ -4216,7 +5007,7 @@ const cssParsers: CSSParsers = {
   opacity: parseCSSUnitlessPercent,
   overflow: parseOverflow,
   textAlign: parseTextAlign,
-  textDecorationColor: parseColor,
+  textDecorationColor: parseColorHexHashOptional,
   textDecorationLine: parseTextDecorationLine,
   textDecorationStyle: parseTextDecorationStyle,
   textShadow: parseTextShadow,
@@ -4226,9 +5017,10 @@ const cssParsers: CSSParsers = {
   objectFit: parseCSSObjectFit,
 
   flexWrap: flexWrapParser,
-  flexDirection: flexDirectionParser,
+  flexDirection: parseFlexDirection,
   alignItems: flexAlignmentsParser,
-  alignContent: flexAlignmentsParser,
+  justifyItems: flexAlignmentsParser,
+  alignContent: flexJustifyContentParser,
   justifyContent: flexJustifyContentParser,
   padding: parsePadding,
   paddingTop: parseCSSLengthPercent,
@@ -4255,13 +5047,21 @@ const cssParsers: CSSParsers = {
   flexGrow: parseCSSUnitlessAsNumber,
   flexShrink: parseCSSUnitlessAsNumber,
   display: parseDisplay,
+  gap: parseCSSLengthPercent,
+  width: parseCSSLengthPercent,
+  height: parseCSSLengthPercent,
+  flexBasis: parseCSSLengthPercent,
+  zIndex: parseCSSUnitless,
+  rowGap: parseCSSLengthPercent,
+  columnGap: parseCSSLengthPercent,
+  gridAutoFlow: parseGridAutoFlowValue,
 }
 
 type CSSPrinters = {
   [key in keyof ParsedCSSProperties]: Printer<ParsedCSSProperties[key]>
 }
 
-const jsxAttributeValueWithNoComments = (value: unknown) => jsxAttributeValue(value, emptyComments)
+const jsxAttributeValueWithNoComments = (value: unknown) => jsExpressionValue(value, emptyComments)
 
 const cssPrinters: CSSPrinters = {
   backgroundColor: printBackgroundColor,
@@ -4270,6 +5070,10 @@ const cssPrinters: CSSPrinters = {
   mixBlendMode: printMixBlendMode,
   border: printBorder,
   borderRadius: printBorderRadius,
+  borderTopLeftRadius: printCSSNumberAsAttributeValue('px'),
+  borderTopRightRadius: printCSSNumberAsAttributeValue('px'),
+  borderBottomLeftRadius: printCSSNumberAsAttributeValue('px'),
+  borderBottomRightRadius: printCSSNumberAsAttributeValue('px'),
   boxShadow: printBoxShadow,
   color: printColorToJsx,
   fontFamily: printFontFamily,
@@ -4293,6 +5097,7 @@ const cssPrinters: CSSPrinters = {
   flexWrap: jsxAttributeValueWithNoComments,
   flexDirection: jsxAttributeValueWithNoComments,
   alignItems: jsxAttributeValueWithNoComments,
+  justifyItems: jsxAttributeValueWithNoComments,
   alignContent: jsxAttributeValueWithNoComments,
   justifyContent: jsxAttributeValueWithNoComments,
   padding: printPaddingAsAttributeValue,
@@ -4320,6 +5125,14 @@ const cssPrinters: CSSPrinters = {
   flexGrow: jsxAttributeValueWithNoComments,
   flexShrink: jsxAttributeValueWithNoComments,
   display: printStringAsAttributeValue,
+  width: printCSSNumberOrUndefinedAsAttributeValue('px'),
+  height: printCSSNumberOrUndefinedAsAttributeValue('px'),
+  flexBasis: printCSSNumberOrUndefinedAsAttributeValue('px'),
+  gap: printCSSNumberAsAttributeValue('px'),
+  zIndex: printCSSNumberUnitlessOrUndefinedAsAttributeValue,
+  rowGap: printCSSNumberAsAttributeValue('px'),
+  columnGap: printCSSNumberAsAttributeValue('px'),
+  gridAutoFlow: jsxAttributeValueWithNoComments,
 }
 
 export interface UtopianElementProperties {
@@ -4494,7 +5307,7 @@ export const DOMEventHandlerNames = [
   'onTransitionEnd',
   'onTransitionEndCapture',
 ] as const
-export type DOMEventHandler = NonNullable<typeof DOMEventHandlerNames[number]>
+export type DOMEventHandler = NonNullable<(typeof DOMEventHandlerNames)[number]>
 
 type DOMEventAttributeProperties = {
   [key in DOMEventHandler]: DOMEventHandlerMetadata
@@ -4508,9 +5321,16 @@ export interface ParsedElementProperties
 export type ParsedElementPropertiesKeys = keyof ParsedElementProperties
 
 export const DOMEventHandlerEmptyValues = DOMEventHandlerNames.reduce((current, item) => {
-  current[item] = jsxAttributeValue(undefined, emptyComments)
+  current[item] = jsExpressionValue(undefined, emptyComments)
   return current
 }, {} as DOMEventAttributeProperties)
+
+const elementPropertiesEmptyValuesExcludingEvents: UtopianElementProperties &
+  DOMIMGAttributeProperties = {
+  alt: '',
+  src: '/',
+  className: '',
+}
 
 const elementPropertiesEmptyValues: ParsedElementProperties = {
   alt: '',
@@ -4552,7 +5372,6 @@ const elementPropertiesPrinters: MetadataPrinters = {
 }
 
 interface ParsedLayoutProperties {
-  layoutSystem: LayoutSystem | undefined
   pinLeft: CSSNumber | undefined
   pinRight: CSSNumber | undefined
   centerX: CSSNumber | undefined
@@ -4561,13 +5380,11 @@ interface ParsedLayoutProperties {
   pinBottom: CSSNumber | undefined
   centerY: CSSNumber | undefined
   height: CSSNumber | undefined
-  gapMain: number
+  gapMain: CSSNumber
   flexBasis: CSSNumber | undefined
-  crossBasis: CSSNumber | undefined
 }
 
 export const layoutEmptyValues: ParsedLayoutProperties = {
-  layoutSystem: undefined,
   pinLeft: undefined,
   pinRight: undefined,
   centerX: undefined,
@@ -4576,9 +5393,8 @@ export const layoutEmptyValues: ParsedLayoutProperties = {
   pinBottom: undefined,
   centerY: undefined,
   height: undefined,
-  gapMain: 0,
+  gapMain: { value: 0, unit: null },
   flexBasis: undefined,
-  crossBasis: undefined,
 }
 
 type LayoutParsers = {
@@ -4586,7 +5402,6 @@ type LayoutParsers = {
 }
 
 const layoutParsers: LayoutParsers = {
-  layoutSystem: layoutSystemParser,
   pinLeft: parseFramePin,
   pinRight: parseFramePin,
   centerX: parseFramePin,
@@ -4595,9 +5410,8 @@ const layoutParsers: LayoutParsers = {
   pinBottom: parseFramePin,
   centerY: parseFramePin,
   height: parseFramePin,
-  gapMain: isNumberParser,
+  gapMain: parseCSSLengthPercent,
   flexBasis: parseFramePin,
-  crossBasis: parseFramePin,
 }
 
 type LayoutPrinters = {
@@ -4605,7 +5419,6 @@ type LayoutPrinters = {
 }
 
 const layoutPrinters: LayoutPrinters = {
-  layoutSystem: jsxAttributeValueWithNoComments,
   pinLeft: jsxAttributeValueWithNoComments,
   pinRight: jsxAttributeValueWithNoComments,
   centerX: jsxAttributeValueWithNoComments,
@@ -4616,25 +5429,19 @@ const layoutPrinters: LayoutPrinters = {
   height: jsxAttributeValueWithNoComments,
   gapMain: jsxAttributeValueWithNoComments,
   flexBasis: jsxAttributeValueWithNoComments,
-  crossBasis: jsxAttributeValueWithNoComments,
 }
 
 const layoutEmptyValuesNew: LayoutPropertyTypes = {
-  LayoutSystem: undefined,
+  width: undefined,
+  height: undefined,
 
-  Width: undefined,
-  Height: undefined,
-
-  FlexGap: 0,
+  gap: { value: 0, unit: null },
   flexBasis: undefined,
-  FlexCrossBasis: undefined,
 
-  PinnedLeft: undefined,
-  PinnedTop: undefined,
-  PinnedRight: undefined,
-  PinnedBottom: undefined,
-  PinnedCenterX: undefined,
-  PinnedCenterY: undefined,
+  left: undefined,
+  top: undefined,
+  right: undefined,
+  bottom: undefined,
 }
 
 type LayoutParsersNew = {
@@ -4642,21 +5449,16 @@ type LayoutParsersNew = {
 }
 
 const layoutParsersNew: LayoutParsersNew = {
-  LayoutSystem: layoutSystemParser,
+  width: parseFramePin,
+  height: parseFramePin,
 
-  Width: parseFramePin,
-  Height: parseFramePin,
-
-  FlexGap: isNumberParser,
+  gap: parseCSSLengthPercent,
   flexBasis: parseFramePin,
-  FlexCrossBasis: parseFramePin,
 
-  PinnedLeft: parseFramePin,
-  PinnedTop: parseFramePin,
-  PinnedRight: parseFramePin,
-  PinnedBottom: parseFramePin,
-  PinnedCenterX: parseFramePin,
-  PinnedCenterY: parseFramePin,
+  left: parseFramePin,
+  top: parseFramePin,
+  right: parseFramePin,
+  bottom: parseFramePin,
 }
 
 type LayoutPrintersNew = {
@@ -4664,21 +5466,16 @@ type LayoutPrintersNew = {
 }
 
 const layoutPrintersNew: LayoutPrintersNew = {
-  LayoutSystem: jsxAttributeValueWithNoComments,
+  width: printCSSNumberOrUndefinedAsAttributeValue('px'),
+  height: printCSSNumberOrUndefinedAsAttributeValue('px'),
 
-  Width: printCSSNumberOrUndefinedAsAttributeValue('px'),
-  Height: printCSSNumberOrUndefinedAsAttributeValue('px'),
-
-  FlexGap: jsxAttributeValueWithNoComments,
+  gap: printCSSNumberOrUndefinedAsAttributeValue('px'),
   flexBasis: printCSSNumberOrUndefinedAsAttributeValue('px'),
-  FlexCrossBasis: printCSSNumberOrUndefinedAsAttributeValue('px'),
 
-  PinnedLeft: printCSSNumberOrUndefinedAsAttributeValue('px'),
-  PinnedTop: printCSSNumberOrUndefinedAsAttributeValue('px'),
-  PinnedRight: printCSSNumberOrUndefinedAsAttributeValue('px'),
-  PinnedBottom: printCSSNumberOrUndefinedAsAttributeValue('px'),
-  PinnedCenterX: printCSSNumberOrUndefinedAsAttributeValue('px'),
-  PinnedCenterY: printCSSNumberOrUndefinedAsAttributeValue('px'),
+  left: printCSSNumberOrUndefinedAsAttributeValue('px'),
+  top: printCSSNumberOrUndefinedAsAttributeValue('px'),
+  right: printCSSNumberOrUndefinedAsAttributeValue('px'),
+  bottom: printCSSNumberOrUndefinedAsAttributeValue('px'),
 }
 
 export interface ParsedProperties
@@ -4698,7 +5495,16 @@ export const emptyValues: ParsedProperties = {
   ...layoutEmptyValuesNew,
 }
 
-type Parser<T> = (simpleValue: unknown, rawValue: ModifiableAttribute | null) => Either<string, T>
+export const computedStyleKeys: Array<string> = Object.keys({
+  ...elementPropertiesEmptyValuesExcludingEvents,
+  ...cssEmptyValues,
+  ...layoutEmptyValuesNew,
+})
+
+export type Parser<T> = (
+  simpleValue: unknown,
+  rawValue: ModifiableAttribute | null,
+) => Either<string, T>
 
 type ParseFunction<T, K extends keyof T> = (
   prop: K,
@@ -4706,22 +5512,24 @@ type ParseFunction<T, K extends keyof T> = (
   maybeRawValue: ModifiableAttribute | null,
 ) => Either<string, ValueOf<T>>
 
-function parseValueFactory<T, K extends keyof T>(
-  parserMap: { [key in keyof T]: Parser<T[key]> },
-): ParseFunction<T, K> {
+function parseValueFactory<T, K extends keyof T>(parserMap: {
+  [key in keyof T]: Parser<T[key]>
+}): ParseFunction<T, K> {
   return (prop: K, maybeValue: unknown, maybeRawValue: ModifiableAttribute | null) => {
     try {
       return parserMap[prop](maybeValue, maybeRawValue)
     } catch (e) {
-      return left(`Failed to parse value for property ${prop}: ${e}`)
+      return left(`Failed to parse value for property ${JSON.stringify(prop)}: ${e}`)
     }
   }
 }
 
-const parseMetadataValue = parseValueFactory(elementPropertiesParsers)
-const parseCSSValue = parseValueFactory(cssParsers)
-const parseOldLayoutValue = parseValueFactory(layoutParsers)
-const parseNewLayoutValue = parseValueFactory(layoutParsersNew)
+const parseMetadataValue = memoize(parseValueFactory(elementPropertiesParsers), {
+  maxSize: 1000,
+})
+const parseCSSValue = memoize(parseValueFactory(cssParsers), { maxSize: 1000 })
+const parseOldLayoutValue = memoize(parseValueFactory(layoutParsers), { maxSize: 1000 })
+const parseNewLayoutValue = memoize(parseValueFactory(layoutParsersNew), { maxSize: 1000 })
 
 function isMetadataProp(prop: unknown): prop is keyof ParsedElementProperties {
   return typeof prop === 'string' && prop in elementPropertiesEmptyValues
@@ -4763,8 +5571,16 @@ export function parseAnyParseableValue<K extends keyof ParsedProperties>(
   }
 }
 
+function parseGridAutoFlowValue(value: unknown): Either<string, GridAutoFlow> {
+  const maybeParsedValue = typeof value !== 'string' ? null : parseGridAutoFlow(value)
+  if (maybeParsedValue == null) {
+    return left(`${value} is not a valid grid-auto-flow value`)
+  }
+  return right(maybeParsedValue)
+}
+
 // hmmmm
-type PrintedValue = JSXAttribute
+type PrintedValue = JSExpression
 
 type Printer<V extends ValueOf<ParsedProperties>> = (value: V) => PrintedValue
 
@@ -4797,13 +5613,33 @@ export function maybePrintCSSValue(prop: string, value: unknown): PrintedValue |
   }
 }
 
-const LayoutPropertyList = [
+export const StyleProperties = [
+  'backgroundColor',
+  'backgroundImage',
+  'backgroundSize',
+  'border',
+  'borderRadius',
+  'boxShadow',
+  'color',
+  'opacity',
+  'fontFamily',
+  'fontSize',
+  'fontStyle',
+  'fontWeight',
+  'lineHeight',
+  'textDecoration',
+  'textAlign',
+  'textShadow',
+]
+
+export const LayoutPropertyList = [
   'left',
   'right',
   'top',
   'bottom',
   'width',
   'height',
+  'position',
   'float',
   'min-width',
   'min-height',
@@ -4833,19 +5669,23 @@ const LayoutPropertyList = [
   'overflow',
   'box-sizing',
   'display',
-  'flex',
-  'flex-direction',
-  'flex-wrap',
-  'flex-flow',
-  'justify-content',
-  'align-items',
-  'align-content',
   'order',
+  'flex',
   'flex-grow',
   'flex-shrink',
   'flex-basis',
-  'flex',
+  'flex-direction',
+  'flex-wrap',
+  'flex-flow',
+  'align-items',
+  'align-content',
   'align-self',
+  'justify-content',
+  'justify-items',
+  'justify-self',
+  'gap',
+  'row-gap',
+  'column-gap',
   'grid-template-rows',
   'grid-template-columns',
   'grid-template-areas',
@@ -4880,7 +5720,7 @@ interface NonTrivialKeyword {
 const nontrivial: NonTrivialKeyword = { trivial: false }
 
 type ParsedPropertiesWithNonTrivial = {
-  [Property in keyof ParsedProperties]: ParsedProperties[Property] | NonTrivialKeyword
+  [Prop in keyof ParsedProperties]: ParsedProperties[Prop] | NonTrivialKeyword
 }
 
 export const trivialDefaultValues: ParsedPropertiesWithNonTrivial = {
@@ -4888,13 +5728,29 @@ export const trivialDefaultValues: ParsedPropertiesWithNonTrivial = {
   backgroundColor: cssDefault(emptyBackgroundColor),
   backgroundImage: [],
   backgroundSize: [],
-  border: emptyCSSBorder,
+  border: emptyCssBorderDefault,
   borderRadius: {
     type: 'LEFT',
     value: {
       value: 0,
       unit: 'px',
     },
+  },
+  borderTopLeftRadius: {
+    value: 0,
+    unit: 'px',
+  },
+  borderTopRightRadius: {
+    value: 0,
+    unit: 'px',
+  },
+  borderBottomLeftRadius: {
+    value: 0,
+    unit: 'px',
+  },
+  borderBottomRightRadius: {
+    value: 0,
+    unit: 'px',
   },
   boxShadow: [],
   color: nontrivial,
@@ -4921,9 +5777,10 @@ export const trivialDefaultValues: ParsedPropertiesWithNonTrivial = {
   objectFit: 'fill',
 
   flexWrap: FlexWrap.NoWrap,
-  flexDirection: FlexDirection.Row,
+  flexDirection: 'row',
   alignItems: FlexAlignment.FlexStart,
-  alignContent: FlexAlignment.FlexStart,
+  justifyItems: FlexAlignment.FlexStart,
+  alignContent: FlexJustifyContent.FlexStart,
   justifyContent: FlexJustifyContent.FlexStart,
   padding: nontrivial,
   paddingTop: {
@@ -4944,22 +5801,10 @@ export const trivialDefaultValues: ParsedPropertiesWithNonTrivial = {
   },
   alignSelf: FlexAlignment.Auto,
   position: 'relative',
-  left: {
-    value: 0,
-    unit: 'px',
-  },
-  top: {
-    value: 0,
-    unit: 'px',
-  },
-  right: {
-    value: 0,
-    unit: 'px',
-  },
-  bottom: {
-    value: 0,
-    unit: 'px',
-  },
+  left: nontrivial, // nontrivial means we will never treat these props as "do not show if it equals default value"
+  top: nontrivial,
+  right: nontrivial,
+  bottom: nontrivial,
   minWidth: {
     value: 0,
     unit: 'px',
@@ -4999,7 +5844,6 @@ export const trivialDefaultValues: ParsedPropertiesWithNonTrivial = {
   className: '',
 
   // ParsedLayoutProperties
-  layoutSystem: undefined,
   pinLeft: undefined,
   pinRight: undefined,
   centerX: undefined,
@@ -5008,22 +5852,22 @@ export const trivialDefaultValues: ParsedPropertiesWithNonTrivial = {
   pinBottom: undefined,
   centerY: undefined,
   height: undefined,
-  gapMain: 0,
+  gapMain: { value: 0, unit: null },
   flexBasis: undefined,
-  crossBasis: undefined,
-
-  // LayoutPropertyTypes
-  LayoutSystem: undefined,
-  Width: undefined,
-  Height: undefined,
-  FlexGap: 0,
-  FlexCrossBasis: undefined,
-  PinnedLeft: undefined,
-  PinnedTop: undefined,
-  PinnedRight: undefined,
-  PinnedBottom: undefined,
-  PinnedCenterX: undefined,
-  PinnedCenterY: undefined,
+  gap: {
+    value: 0,
+    unit: 'px',
+  },
+  zIndex: undefined,
+  rowGap: {
+    value: 0,
+    unit: 'px',
+  },
+  columnGap: {
+    value: 0,
+    unit: 'px',
+  },
+  gridAutoFlow: null,
 }
 
 export function isTrivialDefaultValue(
@@ -5041,8 +5885,13 @@ export function toggleBorderEnabled(_: null, oldValue: CSSBorder): CSSBorder {
     delete workingNewValue.style
     return workingNewValue
   } else {
+    const widthValue =
+      oldValue.width != null && isCSSNumber(oldValue.width.value) && oldValue.width.value.value > 0
+        ? oldValue.width
+        : cssLineWidth(cssNumber(1, 'px'))
     return {
       ...oldValue,
+      width: widthValue,
       style: cssLineStyle(cssKeyword('solid')),
     }
   }
@@ -5052,4 +5901,82 @@ export function toggleShadowEnabled(oldValue: CSSBoxShadow): CSSBoxShadow {
   const newValue = { ...oldValue }
   newValue.enabled = !newValue.enabled
   return newValue
+}
+
+function parseRepeatTimes(firstChild: csstree.CssNode) {
+  switch (firstChild.type) {
+    case 'Number':
+      return parseInt(firstChild.value) ?? '0'
+    case 'Identifier':
+      return firstChild.name === 'auto-fill' || firstChild.name === 'auto-fit'
+        ? cssKeyword(firstChild.name)
+        : null
+    default:
+      return null
+  }
+}
+
+export function maybeParseGridSpan(nodes: csstree.CssNode[]): GridSpan | null {
+  if (nodes.length !== 2) {
+    return null
+  }
+
+  const spanIndex = nodes.findIndex((node) => node.type === 'Identifier' && node.name === 'span')
+  if (spanIndex < 0) {
+    return null
+  }
+
+  const valueNodes = nodes.slice(0, spanIndex).concat(nodes.slice(spanIndex + 1))
+
+  const numericValue: csstree.NumberNode | null =
+    valueNodes.find((node) => node.type === 'Number') ?? null
+  const areaValue: csstree.Identifier | null =
+    valueNodes.find((node) => node.type === 'Identifier') ?? null
+
+  if (numericValue != null) {
+    return gridSpanNumeric(parseInt(numericValue.value))
+  } else if (areaValue != null) {
+    return gridSpanArea(areaValue.name)
+  } else {
+    return null
+  }
+}
+
+export function maybeParseGridLine(
+  nodes: csstree.CssNode[],
+  axis: 'row' | 'column',
+  container: GridContainerProperties,
+): GridPosition | null {
+  if (nodes.length !== 1) {
+    return null
+  }
+
+  const firstNode = nodes[0]
+  switch (firstNode.type) {
+    case 'Number':
+      return gridPositionValue(parseInt(firstNode.value))
+    case 'Identifier':
+      // the identifier can either be a keyword…
+      if (isValidGridDimensionKeyword(firstNode.name)) {
+        return cssKeyword(firstNode.name)
+      }
+
+      // …or a line name, in which case look it up in the template and return its index
+      const targetTracks =
+        axis === 'column' ? container.gridTemplateColumns : container.gridTemplateRows
+      // TODO important! this behavior is currently incorrect, as this needs to find the _first_ lineName (in case of repeats)
+      // or otherwise relative (even backwards).
+      const maybeLineFromName =
+        targetTracks?.type === 'DIMENSIONS'
+          ? targetTracks.dimensions.findIndex((dim) => dim.lineName === firstNode.name)
+          : null
+      if (maybeLineFromName == null || maybeLineFromName < 0) {
+        // line name not found
+        return null
+      }
+
+      return gridPositionValue(maybeLineFromName + 1) // tracks are 1-indexed
+    default:
+      return null
+  }
 }

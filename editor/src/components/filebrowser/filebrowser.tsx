@@ -1,58 +1,42 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 /** @jsxFrag React.Fragment */
 import { jsx } from '@emotion/react'
 import React from 'react'
-import {
-  jsxAttributeValue,
-  JSXElement,
-  jsxElement,
-  jsxElementName,
-  JSXAttributes,
-  setJSXAttributesAttribute,
-  jsxAttributesFromMap,
-} from '../../core/shared/element-template'
-import { getAllUniqueUids } from '../../core/model/element-template-utils'
-import { generateUID } from '../../core/shared/uid-utils'
-import {
-  getUtopiaJSXComponentsFromSuccess,
-  isModifiedFile,
-} from '../../core/model/project-file-utils'
-import { ErrorMessage } from '../../core/shared/error-messages'
-import {
-  isParseSuccess,
-  ProjectFileType,
-  importDetails,
-  importAlias,
-} from '../../core/shared/project-file-types'
-import { ProjectContentTreeRoot, walkContentsTree } from '../assets'
+import { isModifiedFile } from '../../core/model/project-file-utils'
+import type { ErrorMessage } from '../../core/shared/error-messages'
+import type { ProjectFileType, ImageFile } from '../../core/shared/project-file-types'
+import type { ProjectContentTreeRoot } from '../assets'
+import { walkContentsTree } from '../assets'
 import { setFocus } from '../common/actions'
-import { CodeResultCache, isJavascriptOrTypescript } from '../custom-code/code-file'
+import type { CodeResultCache } from '../custom-code/code-file'
+import { isJavascriptOrTypescript } from '../custom-code/code-file'
 import * as EditorActions from '../editor/actions/action-creators'
-import {
-  getAllCodeEditorErrors,
-  getOpenFilename,
-  getOpenUIJSFile,
-  getOpenUIJSFileKey,
-} from '../editor/store/editor-state'
-import { useEditorState } from '../editor/store/store-hook'
+import type { GithubRepo, GithubUser } from '../editor/store/editor-state'
+import { getAllCodeEditorErrors } from '../editor/store/editor-state'
+import { Substores, useEditorState } from '../editor/store/store-hook'
 import { addingChildElement, FileBrowserItem } from './fileitem'
-import { dropFileExtension } from '../../core/shared/file-utils'
-import { objectMap } from '../../core/shared/object-utils'
-import { defaultPropertiesForComponentInFile } from '../../core/property-controls/property-controls-utils'
-import { betterReactMemo, useKeepReferenceEqualityIfPossible } from '../../utils/react-performance'
 import {
   Section,
   SectionBodyArea,
-  Button,
   SectionTitleRow,
   FlexRow,
-  Title,
   ActionSheet,
   SquareButton,
   Icons,
 } from '../../uuiui'
-import { unless, when } from '../../utils/react-conditionals'
-import { AddingFile, applyAddingFile } from './filepath-utils'
+import { unless } from '../../utils/react-conditionals'
+import type { AddingFile } from './filepath-utils'
+import { applyAddingFile } from './filepath-utils'
+import { generateUidWithExistingComponents } from '../../core/model/element-template-utils'
+import type {
+  Conflict,
+  GithubFileChanges,
+  GithubFileStatus,
+  TreeConflicts,
+} from '../../core/shared/github/helpers'
+import { useGithubFileChanges } from '../../core/shared/github/helpers'
+import { useDispatch } from '../editor/store/dispatch-context'
 
 export type FileBrowserItemType = 'file' | 'export'
 
@@ -63,16 +47,26 @@ export interface FileBrowserItemInfo {
   typeInformation?: string | null
   originatingPath: string
   modified: boolean
-  hasErrorMessages: boolean
+  errorMessages: ErrorMessage[]
   exportedFunction: boolean
   isUploadedAssetFile: boolean
+  imageFile: ImageFile | null
+  projectContents: ProjectContentTreeRoot
+  githubStatus?: GithubFileStatus
+  conflict: Conflict | null
+  githubRepo: GithubRepo | null
+  projectID: string | null
+  githubUserDetails: GithubUser | null
 }
 
-export function fileHasErrorMessages(path: string, errorMessages: ErrorMessage[] | null): boolean {
+export function filterErrorMessages(
+  path: string,
+  errorMessages: ErrorMessage[] | null,
+): ErrorMessage[] {
   if (errorMessages == null) {
-    return false
+    return []
   } else {
-    return errorMessages.some((m) => m.fileName === path)
+    return errorMessages.filter((m) => m.fileName === path)
   }
 }
 
@@ -81,12 +75,25 @@ function collectFileBrowserItems(
   collapsedPaths: string[],
   codeResultCache: CodeResultCache | null,
   errorMessages: ErrorMessage[] | null,
+  githubChanges: GithubFileChanges | null,
+  projectID: string | null,
+  conflicts: TreeConflicts,
+  githubRepo: GithubRepo | null,
+  githubUserDetails: GithubUser | null,
 ): FileBrowserItemInfo[] {
+  const getGithubStatus = (filename: string) => {
+    if (githubChanges?.untracked.includes(filename)) {
+      return 'untracked'
+    }
+    if (githubChanges?.modified.includes(filename)) {
+      return 'modified'
+    }
+    return undefined
+  }
+
   let fileBrowserItems: FileBrowserItemInfo[] = []
   walkContentsTree(projectContents, (fullPath, element) => {
     const originatingPath = fullPath
-
-    const hasErrorMessages = fileHasErrorMessages(fullPath, errorMessages)
 
     if (collapsedPaths.every((collapsed) => !fullPath.startsWith(collapsed + '/'))) {
       fileBrowserItems.push({
@@ -94,12 +101,19 @@ function collectFileBrowserItems(
         type: 'file',
         fileType: element.type,
         originatingPath: originatingPath,
-        hasErrorMessages: hasErrorMessages,
+        errorMessages: filterErrorMessages(fullPath, errorMessages),
         modified: isModifiedFile(element),
         exportedFunction: false,
         isUploadedAssetFile:
           (element.type === 'IMAGE_FILE' || element.type === 'ASSET_FILE') &&
           element.base64 == undefined,
+        imageFile: element.type === 'IMAGE_FILE' ? element : null,
+        projectContents: projectContents,
+        githubStatus: getGithubStatus(fullPath),
+        githubRepo: githubRepo,
+        conflict: conflicts[fullPath] ?? null,
+        projectID: projectID,
+        githubUserDetails: githubUserDetails,
       })
       if (
         element.type === 'TEXT_FILE' &&
@@ -117,10 +131,16 @@ function collectFileBrowserItems(
                 fileType: null,
                 typeInformation: typeInformation,
                 originatingPath: originatingPath,
-                hasErrorMessages: false,
+                errorMessages: [],
                 modified: false,
                 exportedFunction: typeInformation.includes('=>'),
                 isUploadedAssetFile: false,
+                imageFile: null,
+                projectContents: projectContents,
+                githubRepo: githubRepo,
+                conflict: conflicts[fullPath] ?? null,
+                projectID: projectID,
+                githubUserDetails: githubUserDetails,
               })
             }
           })
@@ -131,14 +151,18 @@ function collectFileBrowserItems(
   return fileBrowserItems
 }
 
-export const FileBrowser = betterReactMemo('FileBrowser', () => {
-  const { dispatch, minimised, focusedPanel } = useEditorState((store) => {
-    return {
-      dispatch: store.dispatch,
-      minimised: store.editor.fileBrowser.minimised,
-      focusedPanel: store.editor.focusedPanel,
-    }
-  }, 'FileBrowser')
+export const FileBrowser = React.memo(() => {
+  const dispatch = useDispatch()
+  const { minimised, focusedPanel } = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return {
+        minimised: store.editor.fileBrowser.minimised,
+        focusedPanel: store.editor.focusedPanel,
+      }
+    },
+    'FileBrowser',
+  )
 
   const toggleMinimised = React.useCallback(() => {
     dispatch([EditorActions.togglePanel('filebrowser')], 'leftpane')
@@ -192,12 +216,20 @@ export const FileBrowser = betterReactMemo('FileBrowser', () => {
     setAddingFile({ fileOrFolder: fileOrFolder, filename: '' })
   }, [])
 
+  const projectName = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return store.editor.projectName
+    },
+    'TitleBar projectName',
+  )
+
   return (
     <>
       <Section data-name='FileBrowser' onFocus={onFocus} tabIndex={-1}>
         <SectionTitleRow minimised={minimised} toggleMinimised={toggleMinimised}>
           <FlexRow flexGrow={1} style={{ position: 'relative' }}>
-            <Title>Project</Title>
+            <span>(root)</span>
             <FileBrowserActionSheet
               visible={!minimised}
               setAddingFileOrFolder={setAddingFileOrFolder}
@@ -230,33 +262,52 @@ interface FileBrowserActionSheetProps {
   setAddingFileOrFolder: (fileOrFolder: 'file' | 'folder') => void
 }
 
-const FileBrowserItems = betterReactMemo('FileBrowserItems', () => {
-  const {
-    dispatch,
-    projectContents,
-    editorSelectedFile,
-    errorMessages,
-    codeResultCache,
-    renamingTarget,
-    dropTarget,
-  } = useEditorState((store) => {
-    return {
-      dispatch: store.dispatch,
-      projectContents: store.editor.projectContents,
-      editorSelectedFile: getOpenFilename(store.editor),
-      errorMessages: getAllCodeEditorErrors(store.editor, 'warning', true),
-      codeResultCache: store.editor.codeResultCache,
-      propertyControlsInfo: store.editor.propertyControlsInfo,
-      renamingTarget: store.editor.fileBrowser.renamingTarget,
-      dropTarget: store.editor.fileBrowser.dropTarget,
-    }
-  }, 'FileBrowserItems')
+const FileBrowserItems = React.memo(() => {
+  const dispatch = useDispatch()
+  const { errorMessages, codeResultCache, renamingTarget, dropTarget, projectID } = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return {
+        errorMessages: getAllCodeEditorErrors(store.editor.codeEditorErrors, 'warning', true),
+        codeResultCache: store.editor.codeResultCache,
+        propertyControlsInfo: store.editor.propertyControlsInfo,
+        renamingTarget: store.editor.fileBrowser.renamingTarget,
+        dropTarget: store.editor.fileBrowser.dropTarget,
+        projectID: store.editor.id,
+      }
+    },
+    'FileBrowserItems',
+  )
+
+  const projectContents = useEditorState(
+    Substores.projectContents,
+    (store) => store.editor.projectContents,
+    'FileBrowserItems projectContents',
+  )
+
+  const { githubRepo, conflicts, githubUserDetails } = useEditorState(
+    Substores.github,
+    (store) => {
+      return {
+        githubRepo: store.editor.githubSettings.targetRepository,
+        conflicts: store.editor.githubData.treeConflicts,
+        githubUserDetails: store.editor.githubData.githubUserDetails,
+      }
+    },
+    'FileBrowserItems github',
+  )
+
+  const editorSelectedFile = useEditorState(
+    Substores.canvas,
+    (store) => store.editor.canvas.openFile?.filename ?? null,
+    'FileBrowserItems editorSelectedFile',
+  )
 
   const [selectedPath, setSelectedPath] = React.useState(editorSelectedFile)
 
   const [collapsedPaths, setCollapsedPaths] = React.useState<string[]>([])
 
-  const Expand = React.useCallback(
+  const expand = React.useCallback(
     (filePath: string) => {
       setCollapsedPaths(collapsedPaths.filter((path) => filePath !== path))
     },
@@ -280,9 +331,35 @@ const FileBrowserItems = betterReactMemo('FileBrowserItems', () => {
     }
   }, [])
 
-  const fileBrowserItems = React.useMemo(
-    () => collectFileBrowserItems(projectContents, collapsedPaths, codeResultCache, errorMessages),
-    [projectContents, collapsedPaths, codeResultCache, errorMessages],
+  const githubFileChanges = useGithubFileChanges()
+
+  const fileBrowserItems = React.useMemo(() => {
+    return collectFileBrowserItems(
+      projectContents,
+      collapsedPaths,
+      codeResultCache,
+      errorMessages,
+      githubFileChanges,
+      projectID,
+      conflicts,
+      githubRepo,
+      githubUserDetails,
+    )
+  }, [
+    projectContents,
+    collapsedPaths,
+    codeResultCache,
+    errorMessages,
+    githubFileChanges,
+    projectID,
+    conflicts,
+    githubRepo,
+    githubUserDetails,
+  ])
+
+  const generateNewUid = React.useCallback(
+    () => generateUidWithExistingComponents(projectContents),
+    [projectContents],
   )
 
   return (
@@ -301,11 +378,13 @@ const FileBrowserItems = betterReactMemo('FileBrowserItems', () => {
             key={`filebrowser-${index}`}
             dispatch={dispatch}
             toggleCollapse={toggleCollapse}
-            expand={Expand}
+            expand={expand}
             setSelected={setSelected}
             collapsed={element.type === 'file' && collapsedPaths.indexOf(element.path) > -1}
-            hasErrorMessages={fileHasErrorMessages(element.path, errorMessages)}
+            errorMessages={filterErrorMessages(element.path, errorMessages)}
             dropTarget={dropTarget}
+            imageFile={element.imageFile}
+            generateNewUid={generateNewUid}
           />
         </div>
       ))}
@@ -313,28 +392,22 @@ const FileBrowserItems = betterReactMemo('FileBrowserItems', () => {
   )
 })
 
-const FileBrowserActionSheet = betterReactMemo(
-  'FileBrowserActionSheet',
-  (props: FileBrowserActionSheetProps) => {
-    const { dispatch } = useEditorState(
-      (store) => ({ dispatch: store.dispatch }),
-      'FileBrowserActionSheet dispatch',
+const FileBrowserActionSheet = React.memo((props: FileBrowserActionSheetProps) => {
+  const dispatch = useDispatch()
+  const addFolderClick = React.useCallback(() => props.setAddingFileOrFolder('folder'), [props])
+  const addTextFileClick = React.useCallback(() => props.setAddingFileOrFolder('file'), [props])
+  if (props.visible) {
+    return (
+      <ActionSheet>
+        <SquareButton highlight onClick={addFolderClick} style={{ margin: 0 }}>
+          <Icons.FolderClosed tooltipText='Add New Folder' />
+        </SquareButton>
+        <SquareButton highlight onClick={addTextFileClick} style={{ margin: 0 }}>
+          <Icons.NewTextFile tooltipText='Add Code File' />
+        </SquareButton>
+      </ActionSheet>
     )
-    const addFolderClick = React.useCallback(() => props.setAddingFileOrFolder('folder'), [props])
-    const addTextFileClick = React.useCallback(() => props.setAddingFileOrFolder('file'), [props])
-    if (props.visible) {
-      return (
-        <ActionSheet>
-          <SquareButton highlight onClick={addFolderClick}>
-            <Icons.NewFolder tooltipText='Add New Folder' />
-          </SquareButton>
-          <SquareButton highlight onClick={addTextFileClick}>
-            <Icons.NewTextFile tooltipText='Add Code File' />
-          </SquareButton>
-        </ActionSheet>
-      )
-    } else {
-      return null
-    }
-  },
-)
+  } else {
+    return null
+  }
+})

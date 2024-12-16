@@ -1,47 +1,39 @@
+import type { EditorState } from './editor-state'
 import {
   createEditorState,
-  EditorState,
-  modifyUnderlyingTarget,
+  defaultModifyParseSuccess,
+  modifyUnderlyingTargetElement,
+  removeElementAtPath,
   StoryboardFilePath,
 } from './editor-state'
 import {
   defaultProjectContentsForNormalising,
-  getTextFileByPath,
+  printParsedCodeForFile,
 } from '../../custom-code/code-file.test-utils'
 import {
   emptyComments,
-  jsxAttributeValue,
+  isJSXConditionalExpression,
+  isJSXFragment,
+  jsExpressionValue,
   jsxElement,
   JSXElement,
   setJSXAttributesAttribute,
+  utopiaJSXComponent,
 } from '../../../core/shared/element-template'
 import { printCode, printCodeOptions } from '../../../core/workers/parser-printer/parser-printer'
+import type { Imports, ParseSuccess } from '../../../core/shared/project-file-types'
+import { importDetails } from '../../../core/shared/project-file-types'
 import {
-  Imports,
+  importAlias,
   isParseSuccess,
   parseSuccess,
-  ParseSuccess,
+  RevisionsState,
 } from '../../../core/shared/project-file-types'
 import { addImport, emptyImports } from '../../../core/workers/common/project-file-utils'
 import { omit } from '../../../core/shared/object-utils'
 import * as EP from '../../../core/shared/element-path'
-
-function getCodeForFile(actualResult: EditorState, filename: string): string {
-  const codeFile = getTextFileByPath(actualResult.projectContents, filename)
-  const parsed = codeFile.fileContents.parsed
-  if (isParseSuccess(parsed)) {
-    return printCode(
-      filename,
-      printCodeOptions(false, true, false, true),
-      parsed.imports,
-      parsed.topLevelElements,
-      parsed.jsxFactoryFunction,
-      parsed.exportsDetail,
-    )
-  } else {
-    throw new Error('No parsed version of the file.')
-  }
-}
+import { sampleJsxComponents } from '../../../core/model/test-ui-js-file.test-utils'
+import { getTextFileByPath } from '../../assets'
 
 describe('modifyUnderlyingTarget', () => {
   const startingEditorModel = {
@@ -50,20 +42,22 @@ describe('modifyUnderlyingTarget', () => {
   }
   it('changes something in the same file', () => {
     const pathToElement = EP.fromString('app-outer-div/card-instance')
-    const actualResult = modifyUnderlyingTarget(
+    const actualResult = modifyUnderlyingTargetElement(
       pathToElement,
-      '/src/app.js',
       startingEditorModel,
-      (element: JSXElement) => {
+      (element) => {
+        if (isJSXConditionalExpression(element) || isJSXFragment(element)) {
+          return element
+        }
         const updatedAttributes = setJSXAttributesAttribute(
           element.props,
           'data-thing',
-          jsxAttributeValue('a thing', emptyComments),
+          jsExpressionValue('a thing', emptyComments),
         )
         return jsxElement(element.name, element.uid, updatedAttributes, element.children)
       },
     )
-    const resultingCode = getCodeForFile(actualResult, '/src/app.js')
+    const resultingCode = printParsedCodeForFile(actualResult, '/src/app.js')
     expect(resultingCode).toMatchInlineSnapshot(`
       "import * as React from 'react'
       import { Card } from '/src/card.js'
@@ -95,11 +89,10 @@ describe('modifyUnderlyingTarget', () => {
   })
   it('changes something in the imports of the same file', () => {
     const pathToElement = EP.fromString('card-outer-div/card-inner-div')
-    const actualResult = modifyUnderlyingTarget(
+    const actualResult = modifyUnderlyingTargetElement(
       pathToElement,
-      '/src/card.js',
       startingEditorModel,
-      (element: JSXElement) => element,
+      (element) => element,
       (success: ParseSuccess) => {
         return parseSuccess(
           omit<string, Imports>(['utopia-api'], success.imports),
@@ -108,13 +101,24 @@ describe('modifyUnderlyingTarget', () => {
           success.jsxFactoryFunction,
           success.combinedTopLevelArbitraryBlock,
           success.exportsDetail,
+          success.fullHighlightBounds,
         )
       },
     )
     const codeFile = getTextFileByPath(actualResult.projectContents, '/src/card.js')
     const parsed = codeFile.fileContents.parsed
     if (isParseSuccess(parsed)) {
-      expect(parsed.imports).toEqual(addImport('', 'react', null, [], 'React', emptyImports()))
+      expect(parsed.imports).toEqual(
+        addImport(
+          '',
+          [],
+          'non-existant-dummy-library',
+          null,
+          [importAlias('Spring')],
+          null,
+          addImport('', [], 'react', null, [], 'React', emptyImports()).imports,
+        ).imports,
+      )
     } else {
       throw new Error('No parsed version of the file.')
     }
@@ -123,27 +127,30 @@ describe('modifyUnderlyingTarget', () => {
     const pathToElement = EP.fromString(
       'storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance:card-outer-div/card-inner-div',
     )
-    const actualResult = modifyUnderlyingTarget(
+    const actualResult = modifyUnderlyingTargetElement(
       pathToElement,
-      StoryboardFilePath,
       startingEditorModel,
-      (element: JSXElement) => {
+      (element) => {
+        if (isJSXConditionalExpression(element) || isJSXFragment(element)) {
+          return element
+        }
         const updatedAttributes = setJSXAttributesAttribute(
           element.props,
           'data-thing',
-          jsxAttributeValue('a thing', emptyComments),
+          jsExpressionValue('a thing', emptyComments),
         )
         return jsxElement(element.name, element.uid, updatedAttributes, element.children)
       },
     )
-    const resultingCode = getCodeForFile(actualResult, '/src/card.js')
+    const resultingCode = printParsedCodeForFile(actualResult, '/src/card.js')
     expect(resultingCode).toMatchInlineSnapshot(`
       "import * as React from 'react'
-      import { Rectangle } from 'utopia-api'
+      import { Spring } from 'non-existant-dummy-library'
       export var Card = (props) => {
         return (
           <div style={{ ...props.style }}>
             <div
+              data-testid='card-inner-div'
               style={{
                 position: 'absolute',
                 left: 0,
@@ -154,7 +161,8 @@ describe('modifyUnderlyingTarget', () => {
               }}
               data-thing='a thing'
             />
-            <Rectangle
+            <Spring
+              data-testid='spring'
               style={{
                 position: 'absolute',
                 left: 100,
@@ -170,40 +178,78 @@ describe('modifyUnderlyingTarget', () => {
       "
     `)
   })
-  it('tries to change something in a nonsense template path', () => {
+  it('tries to change something with a nonsense element path', () => {
     const pathToElement = EP.fromString('moon-palace/living-room')
     const modifyCall = () =>
-      modifyUnderlyingTarget(
-        pathToElement,
-        '/src/app.js',
-        startingEditorModel,
-        (element: JSXElement) => {
-          const updatedAttributes = setJSXAttributesAttribute(
-            element.props,
-            'data-thing',
-            jsxAttributeValue('a thing', emptyComments),
-          )
-          return jsxElement(element.name, element.uid, updatedAttributes, element.children)
-        },
-      )
-    expect(modifyCall).toThrowError(`Did not find element to transform moon-palace/living-room`)
+      modifyUnderlyingTargetElement(pathToElement, startingEditorModel, (element) => {
+        if (isJSXConditionalExpression(element) || isJSXFragment(element)) {
+          return element
+        }
+        const updatedAttributes = setJSXAttributesAttribute(
+          element.props,
+          'data-thing',
+          jsExpressionValue('a thing', emptyComments),
+        )
+        return jsxElement(element.name, element.uid, updatedAttributes, element.children)
+      })
+    expect(modifyCall).toThrowError(`Could not find element with path moon-palace/living-room`)
   })
-  it('tries to change something in a nonsense file path', () => {
+})
+
+describe('Revision state management', () => {
+  const startingEditorModel = {
+    ...createEditorState(() => {}),
+    projectContents: defaultProjectContentsForNormalising(),
+  }
+  it('changes something in a file sets revision state to PARSED_AHEAD', () => {
     const pathToElement = EP.fromString('app-outer-div/card-instance')
-    const modifyCall = () =>
-      modifyUnderlyingTarget(
-        pathToElement,
-        '/src/kitchen.js',
-        startingEditorModel,
-        (element: JSXElement) => {
-          const updatedAttributes = setJSXAttributesAttribute(
-            element.props,
-            'data-thing',
-            jsxAttributeValue('a thing', emptyComments),
-          )
-          return jsxElement(element.name, element.uid, updatedAttributes, element.children)
-        },
-      )
-    expect(modifyCall).toThrowError(`Could not proceed past /src/kitchen.js.`)
+    const actualResult = modifyUnderlyingTargetElement(
+      pathToElement,
+      startingEditorModel,
+      (element) => {
+        if (isJSXConditionalExpression(element) || isJSXFragment(element)) {
+          return element
+        }
+        const updatedAttributes = setJSXAttributesAttribute(
+          element.props,
+          'data-thing',
+          jsExpressionValue('a thing', emptyComments),
+        )
+        return jsxElement(element.name, element.uid, updatedAttributes, element.children)
+      },
+    )
+    const resultingFile = getTextFileByPath(actualResult.projectContents, '/src/app.js')
+    expect(resultingFile.fileContents.revisionsState).toEqual('PARSED_AHEAD')
+  })
+})
+
+describe('removeElementAtPath', () => {
+  it('should remove the elements imports', () => {
+    const removeElementResult = removeElementAtPath(
+      EP.fromString('aaa/mycomponent'),
+      sampleJsxComponents,
+      { 'my-component': importDetails(null, [importAlias('MyComponent')], null) },
+    )
+    expect(removeElementResult.imports['my-component']).toEqual(undefined)
+  })
+
+  it('should remove correct import', () => {
+    const removeElementResult = removeElementAtPath(
+      EP.fromString('aaa/mycomponent'),
+      sampleJsxComponents,
+      { 'my-component': importDetails('OtherImport', [importAlias('MyComponent')], null) },
+    )
+    expect(removeElementResult.imports['my-component']).toEqual(
+      importDetails('OtherImport', [], null),
+    )
+  })
+
+  it('shouldnt remove an import if another component is using it', () => {
+    const removeElementResult = removeElementAtPath(EP.fromString('aaa/ggg'), sampleJsxComponents, {
+      'utopia-api': importDetails(null, [importAlias('View')], null),
+    })
+    expect(removeElementResult.imports['utopia-api']).toEqual(
+      importDetails(null, [importAlias('View')], null),
+    )
   })
 })

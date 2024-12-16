@@ -1,17 +1,13 @@
 import { printCode, printCodeOptions } from './parser-printer'
 import { applyPrettier } from 'utopia-vscode-common'
-import {
-  testParseCode,
-  clearParseResultUniqueIDsAndEmptyBlocks,
-  elementsStructure,
-} from './parser-printer.test-utils'
+import { testParseCode, elementsStructure } from './parser-printer.test-utils'
 import { AwkwardFragmentsCode } from './parser-printer-fragments.test-utils'
 import { isParseSuccess } from '../../shared/project-file-types'
 
 describe('JSX parser', () => {
   it('handle some weird nested fragments', () => {
     const code = applyPrettier(AwkwardFragmentsCode, false).formatted
-    const parseResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const parseResult = testParseCode(code)
     if (isParseSuccess(parseResult)) {
       expect(elementsStructure(parseResult.topLevelElements)).toMatchInlineSnapshot(`
         "IMPORT_STATEMENT
@@ -20,21 +16,35 @@ describe('JSX parser', () => {
         UNPARSED_CODE
         UTOPIA_JSX_COMPONENT - App
           JSX_ELEMENT - View - aaa
-            JSX_TEXT_BLOCK
-            JSX_FRAGMENT
+            JSX_FRAGMENT - ggg
               JSX_ELEMENT - div - bbb
-                JSX_TEXT_BLOCK
-                JSX_FRAGMENT
+                JSX_TEXT_BLOCK - 481
+                JSX_FRAGMENT - 630
                   JSX_ELEMENT - div - ccc
-                JSX_TEXT_BLOCK
-            JSX_TEXT_BLOCK
+                      ATTRIBUTE_VALUE - 193
+                      ATTRIBUTE_VALUE - eb5
+                  ATTRIBUTE_VALUE - d11
+                  ATTRIBUTE_VALUE - 9ec
             JSX_ELEMENT - div - ddd
-              JSX_TEXT_BLOCK
+              JSX_TEXT_BLOCK - 935
+              JS_PROPERTY_ACCESS - 622
+              ATTRIBUTE_VALUE - b79
+              ATTRIBUTE_VALUE - 4f5
         UNPARSED_CODE
         UTOPIA_JSX_COMPONENT - storyboard
           JSX_ELEMENT - Storyboard - eee
             JSX_ELEMENT - Scene - fff
               JSX_ELEMENT - App - app
+                  ATTRIBUTE_VALUE - 753
+                  ATTRIBUTE_VALUE - 2c3
+                  ATTRIBUTE_VALUE - 417
+                  ATTRIBUTE_VALUE - 266
+                  ATTRIBUTE_VALUE - 498
+                ATTRIBUTE_VALUE - 7c2
+                ATTRIBUTE_VALUE - d23
+                ATTRIBUTE_VALUE - 14f
+                ATTRIBUTE_VALUE - c79
+                ATTRIBUTE_VALUE - 0c4
         UNPARSED_CODE"
       `)
 
@@ -49,7 +59,7 @@ describe('JSX parser', () => {
 
       expect(printedCode).toMatchInlineSnapshot(`
         "import * as React from 'react'
-        import { Scene, Storyboard, View } from 'utopia-api'
+        import { Scene, Storyboard, View, Group } from 'utopia-api'
         export var App = (props) => {
           return (
             <View
@@ -108,7 +118,7 @@ describe('JSX parser', () => {
         "
       `)
     } else {
-      fail(parseResult)
+      throw new Error(JSON.stringify(parseResult))
     }
   })
 })

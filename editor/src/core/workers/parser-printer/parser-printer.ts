@@ -1,17 +1,7 @@
-import * as React from 'react'
-import * as TS from 'typescript'
+import * as TS from 'typescript-for-the-editor'
+import { flatMapArray, uniq, findLastIndex } from '../../shared/array-utils'
+import type { Either } from '../../shared/either'
 import {
-  addUniquely,
-  flatMapArray,
-  uniq,
-  uniqBy,
-  sortBy,
-  findLastIndex,
-} from '../../shared/array-utils'
-import {
-  Either,
-  eitherToMaybe,
-  flatMap2Either,
   flatMapEither,
   isLeft,
   isRight,
@@ -21,68 +11,68 @@ import {
   sequenceEither,
   foldEither,
   forEachLeft,
-  bimapEither,
   forEachRight,
-  traverseEither,
 } from '../../shared/either'
-import {
+import type {
   ArbitraryJSBlock,
   BoundParam,
-  destructuredArray,
   DestructuredArrayPart,
-  destructuredObject,
-  destructuredParamPart,
   DestructuredParamPart,
   ElementsWithin,
+  JSExpression,
+  JSXElementChild,
+  JSXElementName,
+  Param,
+  TopLevelElement,
+  UtopiaJSXComponent,
+  Comment,
+  VarLetOrConst,
+  FunctionDeclarationSyntax,
+  ImportStatement,
+  ParsedComments,
+  JSExpressionMapOrOtherJavascript,
+  JSExpressionOtherJavaScript,
+  JSXElement,
+} from '../../shared/element-template'
+import {
+  destructuredArray,
+  destructuredObject,
+  destructuredParamPart,
   functionParam,
   isDestructuredObject,
   isJSXAttributeValue,
   isOmittedParam,
   isRegularParam,
   isUtopiaJSXComponent,
-  JSXAttribute,
-  JSXElementChild,
-  JSXElementName,
   omittedParam,
-  Param,
   regularParam,
-  TopLevelElement,
-  UtopiaJSXComponent,
   utopiaJSXComponent,
   propNamesForParam,
-  JSXAttributeOtherJavaScript,
   jsxElementName,
-  Comment,
-  singleLineComment,
-  multiLineComment,
-  WithComments,
-  VarLetOrConst,
-  FunctionDeclarationSyntax,
-  getJSXAttributeForced,
-  ImportStatement,
   importStatement,
   isImportStatement,
   unparsedCode,
   emptyComments,
-  ParsedComments,
-  parsedComments,
+  canBeRootElementOfComponent,
 } from '../../shared/element-template'
 import { messageisFatal } from '../../shared/error-messages'
 import { memoize } from '../../shared/memoize'
-import { defaultIfNull, maybeToArray, optionalMap } from '../../shared/optional-utils'
-import {
+import { maybeToArray, optionalMap } from '../../shared/optional-utils'
+import type {
   HighlightBoundsForUids,
   ImportAlias,
-  importAlias,
   Imports,
   ParsedTextFile,
   ParseSuccess,
   PropertyPathPart,
-  HighlightBounds,
   ExportsDetail,
+  ExportVariable,
+  ExportDetail,
+} from '../../shared/project-file-types'
+import {
+  importAlias,
   mergeExportsDetail,
   EmptyExportsDetail,
-  TextFile,
   reexportWildcard,
   exportVariable,
   reexportVariables,
@@ -90,70 +80,81 @@ import {
   exportClass,
   exportDefaultFunctionOrClass,
   exportFunction,
-  ExportVariable,
   exportDestructuredAssignment,
   exportVariablesWithModifier,
   parseFailure,
   parseSuccess,
-  exportIdentifier,
-  ExportDetail,
+  exportDefaultIdentifier,
+  isImportSideEffects,
+  isParseSuccess,
+  unparsed,
 } from '../../shared/project-file-types'
 import * as PP from '../../shared/property-path'
-import { fastForEach, NO_OP } from '../../shared/utils'
+import { assertNever, fastForEach } from '../../shared/utils'
 import { addImport, emptyImports } from '../common/project-file-utils'
-import { UtopiaTsWorkers } from '../common/worker-types'
 import { lintCode } from '../linter/linter'
+import type { FunctionContents, WithParserMetadata } from './parser-printer-parsing'
 import {
-  CanvasMetadataName,
   flattenOutAnnoyingContainers,
-  FunctionContents,
   getPropertyNameText,
   liftParsedElementsIntoFunctionContents,
   parseArbitraryNodes,
   parseOutFunctionContents,
   parseOutJSXElements,
-  WithParserMetadata,
-  parseAttributeOtherJavaScript,
+  parseJSExpressionMapOrOtherJavascript,
   withParserMetadata,
   isExported,
   expressionTypeForExpression,
   extractPrefixedCode,
-  parseAttributeExpression,
   markedAsExported,
   markedAsDefault,
+  parseParams,
+  parseAttributeExpression,
 } from './parser-printer-parsing'
-import { getBoundsOfNodes, guaranteeUniqueUidsFromTopLevel } from './parser-printer-utils'
 import { jsonToExpression } from './json-to-expression'
-import { compareOn, comparePrimitive } from '../../../utils/compare'
-import { emptySet } from '../../shared/set-utils'
-import { addCommentsToNode, getLeadingComments } from './parser-printer-comments'
-import { replaceAll } from '../../shared/string-utils'
-import { WorkerCodeUpdate, WorkerParsedUpdate } from '../../../components/editor/action-types'
+import { difference } from '../../shared/set-utils'
+import { addCommentsToNode } from './parser-printer-comments'
 import { fixParseSuccessUIDs } from './uid-fix'
 import { applyPrettier } from 'utopia-vscode-common'
-import { BakedInStoryboardVariableName } from '../../model/scene-utils'
 import { stripExtension } from '../../../components/custom-code/custom-code-utils'
 import { absolutePathFromRelativePath } from '../../../utils/path-utils'
+import { fromField } from '../../../core/shared/optics/optic-creators'
+import type { Optic } from '../../../core/shared/optics/optics'
+import { modify } from '../../../core/shared/optics/optic-utilities'
+import { identifyValuesDefinedInNode } from './parser-printer-expressions'
+import { isParseableFile } from '../../shared/file-utils'
+import type { FunctionWrap } from 'utopia-shared/src/types/element-template'
+import { simpleFunctionWrap } from 'utopia-shared/src/types/element-template'
+import type { FilePathMappings } from '../../../core/model/project-file-utils'
+
+const BakedInStoryboardVariableName = 'storyboard'
 
 function buildPropertyCallingFunction(
   functionName: string,
-  parameters: JSXAttribute[],
+  parameters: JSExpression[],
+  imports: Imports,
+  stripUIDs: boolean,
 ): TS.Expression {
   return TS.createCall(
     TS.createPropertyAccess(TS.createIdentifier('UtopiaUtils'), TS.createIdentifier(functionName)),
     undefined,
-    parameters.map(jsxAttributeToExpression),
+    parameters.map((p) => jsxAttributeToExpression(p, imports, stripUIDs)),
   )
 }
 
-function getJSXAttributeComments(attribute: JSXAttribute): ParsedComments {
+function getJSXAttributeComments(attribute: JSExpression): ParsedComments {
   switch (attribute.type) {
     case 'ATTRIBUTE_VALUE':
     case 'ATTRIBUTE_NESTED_OBJECT':
     case 'ATTRIBUTE_NESTED_ARRAY':
+    case 'JS_PROPERTY_ACCESS':
+    case 'JS_ELEMENT_ACCESS':
+    case 'JS_IDENTIFIER':
       return attribute.comments
+    case 'JSX_MAP_EXPRESSION':
     case 'ATTRIBUTE_OTHER_JAVASCRIPT':
     case 'ATTRIBUTE_FUNCTION_CALL':
+    case 'JSX_ELEMENT':
       return emptyComments
     default:
       const _exhaustiveCheck: never = attribute
@@ -161,25 +162,46 @@ function getJSXAttributeComments(attribute: JSXAttribute): ParsedComments {
   }
 }
 
-function rawCodeToExpressionStatement(
-  rawCode: string,
-): { statement: TS.ExpressionStatement; sourceFile: TS.SourceFile } | null {
-  const sourceFile = TS.createSourceFile(
-    'temporary.tsx',
-    rawCode,
-    TS.ScriptTarget.Latest,
-    undefined,
-    TS.ScriptKind.TSX,
+function rawCodeToExpressionStatement(rawCode: string): {
+  statement: TS.ExpressionStatement | TS.EmptyStatement
+  sourceFile: TS.SourceFile
+} {
+  const sourceFile = TS.createSourceFile('temporary.tsx', rawCode, TS.ScriptTarget.Latest)
+
+  const statements = flatMapArray(
+    (e) => flattenOutAnnoyingContainers(sourceFile, e),
+    sourceFile.getChildren(sourceFile),
   )
-  const topLevelStatement = sourceFile.statements[0]
+  const topLevelStatement = statements[0]
   if (topLevelStatement != null && TS.isExpressionStatement(topLevelStatement)) {
-    return { statement: topLevelStatement, sourceFile: sourceFile }
+    const innerExpression = topLevelStatement.expression
+
+    // This is horrible, and who knows how long it will work for. When adding comments to a node later
+    // on, TS will check if the node was parsed or synthesized. If it was parsed, TS will then attempt
+    // to look for the SourceFile for that node. In this case, the node is parsed, but TS will fail to
+    // find the SourceFile. Why? I have no idea. But, if we "adjust" the flags to mark the node as
+    // synthesized, TS will gladly add comments to it.
+    const unparsedExpression: TS.Expression = {
+      ...innerExpression,
+      flags: innerExpression.flags + TS.NodeFlags.Synthesized,
+    }
+    return {
+      statement: TS.factory.updateExpressionStatement(topLevelStatement, unparsedExpression),
+      sourceFile: sourceFile,
+    }
   } else {
-    return null
+    return {
+      statement: TS.factory.createEmptyStatement(),
+      sourceFile: sourceFile,
+    }
   }
 }
 
-function jsxAttributeToExpression(attribute: JSXAttribute): TS.Expression {
+function jsxAttributeToExpression(
+  attribute: JSExpression,
+  imports: Imports,
+  stripUIDs: boolean,
+): TS.Expression {
   function createExpression(): TS.Expression {
     switch (attribute.type) {
       case 'ATTRIBUTE_VALUE':
@@ -194,11 +216,19 @@ function jsxAttributeToExpression(attribute: JSXAttribute): TS.Expression {
           (prop) => {
             switch (prop.type) {
               case 'PROPERTY_ASSIGNMENT':
-                const key = TS.createStringLiteral(prop.key)
+                const key =
+                  typeof prop.key === 'string'
+                    ? TS.createStringLiteral(prop.key)
+                    : TS.createNumericLiteral(prop.key)
                 addCommentsToNode(key, prop.keyComments)
-                return TS.createPropertyAssignment(key, jsxAttributeToExpression(prop.value))
+                return TS.createPropertyAssignment(
+                  key,
+                  jsxAttributeToExpression(prop.value, imports, stripUIDs),
+                )
               case 'SPREAD_ASSIGNMENT':
-                return TS.createSpreadAssignment(jsxAttributeToExpression(prop.value))
+                return TS.createSpreadAssignment(
+                  jsxAttributeToExpression(prop.value, imports, stripUIDs),
+                )
               default:
                 const _exhaustiveCheck: never = prop
                 throw new Error(`Unhandled prop type ${prop}`)
@@ -210,22 +240,75 @@ function jsxAttributeToExpression(attribute: JSXAttribute): TS.Expression {
         const arrayExpressions: Array<TS.Expression> = attribute.content.map((elem) => {
           switch (elem.type) {
             case 'ARRAY_SPREAD':
-              return TS.createSpread(jsxAttributeToExpression(elem.value))
+              return TS.createSpread(jsxAttributeToExpression(elem.value, imports, stripUIDs))
             case 'ARRAY_VALUE':
-              return jsxAttributeToExpression(elem.value)
+              return jsxAttributeToExpression(elem.value, imports, stripUIDs)
             default:
               const _exhaustiveCheck: never = elem
               throw new Error(`Unhandled array element type ${elem}`)
           }
         })
         return TS.createArrayLiteral(arrayExpressions)
+      case 'JSX_MAP_EXPRESSION':
+        const valueToMapExpression = jsxAttributeToExpression(
+          attribute.valueToMap,
+          imports,
+          stripUIDs,
+        )
+        const mapFunctionExpression = jsxAttributeToExpression(
+          attribute.mapFunction,
+          imports,
+          stripUIDs,
+        )
+        const propertyAccessExpression = TS.createPropertyAccess(valueToMapExpression, 'map')
+        const callExpression = TS.createCall(propertyAccessExpression, undefined, [
+          mapFunctionExpression,
+        ])
+        addCommentsToNode(callExpression, attribute.comments)
+        return callExpression
       case 'ATTRIBUTE_OTHER_JAVASCRIPT':
-        const maybeExpressionStatement = rawCodeToExpressionStatement(attribute.javascript)
-        return maybeExpressionStatement == null
-          ? TS.createNull()
-          : maybeExpressionStatement.statement.expression
+        const maybeExpressionStatement = rawCodeToExpressionStatement(
+          attribute.javascriptWithUIDs,
+        ).statement
+        if (TS.isExpressionStatement(maybeExpressionStatement)) {
+          const expression = updateJSXElementsWithin(
+            maybeExpressionStatement.expression,
+            attribute.elementsWithin,
+            imports,
+            stripUIDs,
+          )
+          addCommentsToNode(expression, attribute.comments)
+          return expression
+        } else {
+          return TS.factory.createNull()
+        }
       case 'ATTRIBUTE_FUNCTION_CALL':
-        return buildPropertyCallingFunction(attribute.functionName, attribute.parameters)
+        return buildPropertyCallingFunction(
+          attribute.functionName,
+          attribute.parameters,
+          imports,
+          stripUIDs,
+        )
+      case 'JS_IDENTIFIER':
+        return TS.factory.createIdentifier(attribute.name)
+      case 'JS_ELEMENT_ACCESS':
+        return TS.factory.createElementAccessChain(
+          jsxAttributeToExpression(attribute.onValue, imports, stripUIDs),
+          attribute.optionallyChained === 'optionally-chained'
+            ? TS.factory.createToken(TS.SyntaxKind.QuestionDotToken)
+            : undefined,
+          jsxAttributeToExpression(attribute.element, imports, stripUIDs),
+        )
+      case 'JS_PROPERTY_ACCESS':
+        return TS.factory.createPropertyAccessChain(
+          jsxAttributeToExpression(attribute.onValue, imports, stripUIDs),
+          attribute.optionallyChained === 'optionally-chained'
+            ? TS.factory.createToken(TS.SyntaxKind.QuestionDotToken)
+            : undefined,
+          attribute.property,
+        )
+      case 'JSX_ELEMENT':
+        return jsxElementToTSJSXElement(attribute, imports, stripUIDs)
       default:
         const _exhaustiveCheck: never = attribute
         throw new Error(`Unhandled prop type ${JSON.stringify(attribute)}`)
@@ -250,7 +333,7 @@ function withUID<T>(
       return node.getText(sourceFile)
     }
   }
-  for (const property of attributes.properties) {
+  for (const property of attributes?.properties ?? []) {
     if (TS.isJsxAttribute(property)) {
       if (nodeGetText(property.name) === 'data-uid') {
         if (property.initializer != null) {
@@ -286,7 +369,7 @@ function updateJSXElementsWithin(
   ): TS.Node {
     return withUID(undefined, attributes, originalNode, (uid) => {
       if (uid in elementsWithin) {
-        return jsxElementToExpression(elementsWithin[uid], imports, stripUIDs)
+        return jsxElementToExpression(elementsWithin[uid], imports, stripUIDs, false)
       } else {
         return originalNode
       }
@@ -297,7 +380,7 @@ function updateJSXElementsWithin(
     if (TS.isJsxElement(node)) {
       const newNode = streamlineInElementsWithin(node.openingElement.attributes, node)
       if (TS.isJsxElement(newNode)) {
-        return TS.updateJsxElement(
+        return TS.factory.updateJsxElement(
           node,
           newNode.openingElement,
           newNode.children,
@@ -309,7 +392,12 @@ function updateJSXElementsWithin(
     } else if (TS.isJsxSelfClosingElement(node)) {
       const newNode = streamlineInElementsWithin(node.attributes, node)
       if (TS.isJsxSelfClosingElement(newNode)) {
-        return TS.updateJsxSelfClosingElement(node, newNode.tagName, undefined, newNode.attributes)
+        return TS.factory.updateJsxSelfClosingElement(
+          node,
+          newNode.tagName,
+          undefined,
+          newNode.attributes,
+        )
       } else {
         return newNode
       }
@@ -370,103 +458,126 @@ function getFragmentElementNameFromImports(imports: Imports): JSXElementName {
   return jsxElementName('React', ['Fragment'])
 }
 
+function jsxElementToTSJSXElement(
+  element: JSXElement,
+  imports: Imports,
+  stripUIDs: boolean,
+): TS.JsxElement | TS.JsxSelfClosingElement {
+  let attribsArray: Array<TS.JsxAttributeLike> = []
+  fastForEach(element.props, (propEntry) => {
+    switch (propEntry.type) {
+      case 'JSX_ATTRIBUTES_ENTRY':
+        const skip = stripUIDs && propEntry.key === 'data-uid'
+        if (!skip) {
+          const prop = propEntry.value
+          const identifier = TS.createIdentifier(
+            typeof propEntry.key === 'string' ? propEntry.key : `${propEntry.key}`,
+          )
+          let attributeToAdd: TS.JsxAttribute
+          if (isJSXAttributeValue(prop) && typeof prop.value === 'boolean') {
+            // Use the shorthand style for true values, and the explicit style for false values
+            if (prop.value) {
+              // The `any` allows our `undefined` to punch through the invalid typing
+              // of `createJsxAttribute`.
+              attributeToAdd = TS.createJsxAttribute(identifier, undefined as any)
+            } else {
+              attributeToAdd = TS.createJsxAttribute(
+                identifier,
+                TS.createJsxExpression(undefined, TS.createFalse()),
+              )
+            }
+          } else {
+            const attributeExpression = jsxAttributeToExpression(prop, imports, stripUIDs)
+            const initializer: TS.StringLiteral | TS.JsxExpression = TS.isStringLiteral(
+              attributeExpression,
+            )
+              ? attributeExpression
+              : TS.createJsxExpression(undefined, attributeExpression)
+            attributeToAdd = TS.createJsxAttribute(identifier, initializer)
+          }
+          addCommentsToNode(attributeToAdd, propEntry.comments)
+          attribsArray.push(attributeToAdd)
+        }
+        break
+      case 'JSX_ATTRIBUTES_SPREAD':
+        const attributeExpression = jsxAttributeToExpression(
+          propEntry.spreadValue,
+          imports,
+          stripUIDs,
+        )
+        const attributeToAdd = TS.createJsxSpreadAttribute(attributeExpression)
+        addCommentsToNode(attributeToAdd, propEntry.comments)
+        attribsArray.push(attributeToAdd)
+        break
+      default:
+        const _exhaustiveCheck: never = propEntry
+        throw new Error(`Unhandled attribute type ${JSON.stringify(propEntry)}`)
+    }
+  })
+  const attribs = TS.createJsxAttributes(attribsArray)
+  const tagName = jsxElementNameToExpression(element.name)
+  if (element.children.length === 0) {
+    return TS.createJsxSelfClosingElement(tagName, undefined, attribs)
+  } else {
+    const opening = TS.createJsxOpeningElement(tagName, undefined, attribs)
+    const closing = TS.createJsxClosingElement(tagName)
+    return TS.createJsxElement(
+      opening,
+      element.children.map((child) => jsxElementToJSXExpression(child, imports, stripUIDs)),
+      closing,
+    )
+  }
+}
+
 function jsxElementToExpression(
   element: JSXElementChild,
   imports: Imports,
   stripUIDs: boolean,
-): TS.JsxElement | TS.JsxSelfClosingElement | TS.JsxText | TS.JsxExpression | TS.JsxFragment {
+  parentIsJSX: boolean,
+):
+  | TS.JsxElement
+  | TS.JsxSelfClosingElement
+  | TS.JsxText
+  | TS.JsxExpression
+  | TS.JsxFragment
+  | TS.ConditionalExpression
+  | TS.Expression {
   switch (element.type) {
     case 'JSX_ELEMENT': {
-      let attribsArray: Array<TS.JsxAttributeLike> = []
-      fastForEach(element.props, (propEntry) => {
-        switch (propEntry.type) {
-          case 'JSX_ATTRIBUTES_ENTRY':
-            const skip = stripUIDs && propEntry.key === 'data-uid'
-            if (!skip) {
-              const prop = propEntry.value
-              const identifier = TS.createIdentifier(propEntry.key)
-              let attributeToAdd: TS.JsxAttribute
-              if (isJSXAttributeValue(prop) && typeof prop.value === 'boolean') {
-                // Use the shorthand style for true values, and the explicit style for false values
-                if (prop.value) {
-                  // The `any` allows our `undefined` to punch through the invalid typing
-                  // of `createJsxAttribute`.
-                  attributeToAdd = TS.createJsxAttribute(identifier, undefined as any)
-                } else {
-                  attributeToAdd = TS.createJsxAttribute(
-                    identifier,
-                    TS.createJsxExpression(undefined, TS.createFalse()),
-                  )
-                }
-              } else {
-                const attributeExpression = jsxAttributeToExpression(prop)
-                const initializer: TS.StringLiteral | TS.JsxExpression = TS.isStringLiteral(
-                  attributeExpression,
-                )
-                  ? attributeExpression
-                  : TS.createJsxExpression(undefined, attributeExpression)
-                attributeToAdd = TS.createJsxAttribute(identifier, initializer)
-              }
-              addCommentsToNode(attributeToAdd, propEntry.comments)
-              attribsArray.push(attributeToAdd)
-            }
-            break
-          case 'JSX_ATTRIBUTES_SPREAD':
-            const attributeExpression = jsxAttributeToExpression(propEntry.spreadValue)
-            const attributeToAdd = TS.createJsxSpreadAttribute(attributeExpression)
-            addCommentsToNode(attributeToAdd, propEntry.comments)
-            attribsArray.push(attributeToAdd)
-            break
-          default:
-            const _exhaustiveCheck: never = propEntry
-            throw new Error(`Unhandled attribute type ${JSON.stringify(propEntry)}`)
-        }
-      })
-      const attribs = TS.createJsxAttributes(attribsArray)
-      const tagName = jsxElementNameToExpression(element.name)
-      if (element.children.length === 0) {
-        return TS.createJsxSelfClosingElement(tagName, undefined, attribs)
-      } else {
-        const opening = TS.createJsxOpeningElement(tagName, undefined, attribs)
-        const closing = TS.createJsxClosingElement(tagName)
-        return TS.createJsxElement(
-          opening,
-          element.children.map((child) => jsxElementToExpression(child, imports, stripUIDs)),
-          closing,
-        )
-      }
+      return jsxElementToTSJSXElement(element, imports, stripUIDs)
     }
-    case 'JSX_ARBITRARY_BLOCK': {
-      const maybeExpressionStatement = rawCodeToExpressionStatement(element.javascript)
-      let rawCode: string = element.javascript // Fallback for the case where the code is simply a comment
-      if (maybeExpressionStatement != null) {
+    case 'JSX_MAP_EXPRESSION':
+      return jsxAttributeToExpression(element, imports, stripUIDs)
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT': {
+      if (parentIsJSX) {
+        const maybeExpressionStatement = rawCodeToExpressionStatement(element.javascriptWithUIDs)
         const { statement, sourceFile } = maybeExpressionStatement
-        const lastToken = statement.getLastToken(sourceFile)
-        const finalComments =
-          lastToken == null
-            ? emptyComments
-            : parsedComments([], getLeadingComments(element.javascript, lastToken))
 
-        const updatedStatement = updateJSXElementsWithin(
-          statement.expression,
-          element.elementsWithin,
-          imports,
-          stripUIDs,
-        )
-        addCommentsToNode(updatedStatement, finalComments)
-        rawCode = TS.createPrinter({ omitTrailingSemicolon: true }).printNode(
+        const targetNode = TS.isExpressionStatement(statement)
+          ? updateJSXElementsWithin(
+              statement.expression,
+              element.elementsWithin,
+              imports,
+              stripUIDs,
+            )
+          : statement
+
+        addCommentsToNode(targetNode, element.comments)
+        const rawCode = TS.createPrinter({ omitTrailingSemicolon: true }).printNode(
           TS.EmitHint.Unspecified,
-          updatedStatement,
+          targetNode,
           sourceFile,
         )
-      }
 
-      // By creating a `JsxText` element containing the raw code surrounded by braces, we can print the code directly
-      return TS.createJsxText(`{${rawCode}}`)
+        // By creating a `JsxText` element containing the raw code surrounded by braces, we can print the code directly
+        return TS.factory.createJsxText(`{${rawCode}}`)
+      } else {
+        return jsxAttributeToExpression(element, imports, stripUIDs)
+      }
     }
     case 'JSX_FRAGMENT': {
       const children = element.children.map((child) => {
-        return jsxElementToExpression(child, imports, stripUIDs)
+        return jsxElementToJSXExpression(child, imports, stripUIDs)
       })
       if (element.longForm) {
         const tagName = jsxElementNameToExpression(getFragmentElementNameFromImports(imports))
@@ -488,9 +599,51 @@ function jsxElementToExpression(
     case 'JSX_TEXT_BLOCK': {
       return TS.createJsxText(element.text)
     }
+    case 'JSX_CONDITIONAL_EXPRESSION': {
+      const condition = jsxAttributeToExpression(element.condition, imports, stripUIDs)
+      const whenTrue = jsxElementToExpression(element.whenTrue, imports, stripUIDs, false)
+      const whenFalse = jsxElementToExpression(element.whenFalse, imports, stripUIDs, false)
+
+      const node = TS.createConditional(
+        condition,
+        whenTrue as TS.Expression,
+        whenFalse as TS.Expression,
+      )
+      addCommentsToNode(node, element.comments)
+      addCommentsToNode(node.questionToken, element.comments.questionTokenComments ?? emptyComments)
+
+      return node
+    }
+    case 'ATTRIBUTE_VALUE':
+    case 'ATTRIBUTE_NESTED_ARRAY':
+    case 'ATTRIBUTE_NESTED_OBJECT':
+    case 'ATTRIBUTE_FUNCTION_CALL':
+    case 'JS_PROPERTY_ACCESS':
+    case 'JS_ELEMENT_ACCESS':
+    case 'JS_IDENTIFIER':
+      return jsxAttributeToExpression(element, imports, stripUIDs)
     default:
       const _exhaustiveCheck: never = element
       throw new Error(`Unhandled element type ${JSON.stringify(element)}`)
+  }
+}
+
+function jsxElementToJSXExpression(
+  element: JSXElementChild,
+  imports: Imports,
+  stripUIDs: boolean,
+): TS.JsxElement | TS.JsxSelfClosingElement | TS.JsxText | TS.JsxExpression | TS.JsxFragment {
+  const expression = jsxElementToExpression(element, imports, stripUIDs, true)
+  if (
+    TS.isJsxElement(expression) ||
+    TS.isJsxSelfClosingElement(expression) ||
+    TS.isJsxText(expression) ||
+    TS.isJsxExpression(expression) ||
+    TS.isJsxFragment(expression)
+  ) {
+    return expression
+  } else {
+    return TS.createJsxExpression(undefined, expression)
   }
 }
 
@@ -536,7 +689,7 @@ function getModifersForComponent(
         break
       case 'EXPORT_VARIABLES':
         break
-      case 'EXPORT_IDENTIFIER':
+      case 'EXPORT_DEFAULT_IDENTIFIER':
         break
       case 'EXPORT_DESTRUCTURED_ASSIGNMENT':
         break
@@ -573,23 +726,53 @@ function getModifersForComponent(
   return result
 }
 
+function printFunctionWrapping(
+  printOptions: PrintCodeOptions,
+  imports: Imports,
+  statement: TS.Expression,
+  functionWrapping: Array<FunctionWrap>,
+): TS.Expression {
+  return functionWrapping.reduceRight((workingStatement, wrap) => {
+    switch (wrap.type) {
+      case 'SIMPLE_FUNCTION_WRAP':
+        const functionExpression = jsxAttributeToExpression(
+          wrap.functionExpression,
+          imports,
+          printOptions.stripUIDs,
+        )
+        return TS.createCall(functionExpression, undefined, [workingStatement])
+    }
+  }, statement)
+}
+
 function printUtopiaJSXComponent(
   printOptions: PrintCodeOptions,
   imports: Imports,
   element: UtopiaJSXComponent,
   detailOfExports: ExportsDetail,
 ): TS.Node {
-  const asJSX = jsxElementToExpression(element.rootElement, imports, printOptions.stripUIDs)
-  if (TS.isJsxElement(asJSX) || TS.isJsxSelfClosingElement(asJSX) || TS.isJsxFragment(asJSX)) {
+  const asJSX = jsxElementToExpression(element.rootElement, imports, printOptions.stripUIDs, true)
+  if (
+    TS.isJsxElement(asJSX) ||
+    TS.isJsxSelfClosingElement(asJSX) ||
+    TS.isJsxFragment(asJSX) ||
+    TS.isConditionalExpression(asJSX) ||
+    TS.isJsxText(asJSX) || // Needed for when the root element is an arbitrary js expression, as we print that as raw text
+    asJSX.kind === TS.SyntaxKind.NullKeyword
+  ) {
     let elementNode: TS.Node
-    const jsxElementExpression = asJSX
+    const jsxElementExpression = TS.isJsxText(asJSX)
+      ? (printOtherJS(element.rootElement as JSExpressionOtherJavaScript) as TS.Expression)
+      : asJSX
     const modifiers = getModifersForComponent(element, detailOfExports)
     const nodeFlags =
       element.declarationSyntax === 'function'
         ? TS.NodeFlags.None
         : nodeFlagsForVarLetOrConst(element.declarationSyntax)
     if (element.isFunction) {
-      const functionParams = maybeToArray(element.param).map(printParam)
+      const functionParams = (element.params ?? []).map((p) =>
+        printParam(p, imports, printOptions.stripUIDs),
+      )
 
       function bodyForFunction(): TS.Block {
         let statements: Array<TS.Statement> = []
@@ -600,7 +783,9 @@ function printUtopiaJSXComponent(
           statements.push(printArbitraryJSBlock(element.arbitraryJSBlock) as any)
         }
 
-        const returnStatement = TS.createReturn(jsxElementExpression)
+        const returnStatement = TS.isUnparsedSource(jsxElementExpression)
+          ? (jsxElementExpression as any as TS.Statement) // See above comment about the space time continuum
+          : TS.createReturn(jsxElementExpression)
         addCommentsToNode(returnStatement, element.returnStatementComments)
         statements.push(returnStatement)
         return TS.createBlock(statements, printOptions.insertLinesBetweenStatements)
@@ -638,19 +823,35 @@ function printUtopiaJSXComponent(
           undefined,
           bodyForArrowFunction(),
         )
+        const wrappedArrowFunction = printFunctionWrapping(
+          printOptions,
+          imports,
+          arrowFunction,
+          element.functionWrapping,
+        )
         if (element.name == null) {
-          elementNode = TS.createExportAssignment(undefined, modifiers, undefined, arrowFunction)
+          elementNode = TS.createExportAssignment(
+            undefined,
+            modifiers,
+            undefined,
+            wrappedArrowFunction,
+          )
         } else {
-          const varDec = TS.createVariableDeclaration(element.name, undefined, arrowFunction)
+          const varDec = TS.createVariableDeclaration(element.name, undefined, wrappedArrowFunction)
           const varDecList = TS.createVariableDeclarationList([varDec], nodeFlags)
           elementNode = TS.createVariableStatement(modifiers, varDecList)
         }
       }
     } else {
       if (element.name == null) {
-        elementNode = TS.createExportAssignment(undefined, modifiers, undefined, asJSX)
+        elementNode = TS.createExportAssignment(
+          undefined,
+          modifiers,
+          undefined,
+          jsxElementExpression,
+        )
       } else {
-        const varDec = TS.createVariableDeclaration(element.name, undefined, asJSX)
+        const varDec = TS.createVariableDeclaration(element.name, undefined, jsxElementExpression)
         const varDecList = TS.createVariableDeclarationList([varDec], nodeFlags)
         elementNode = TS.createVariableStatement(modifiers, varDecList)
       }
@@ -664,13 +865,13 @@ function printUtopiaJSXComponent(
   }
 }
 
-function printParam(param: Param): TS.ParameterDeclaration {
+function printParam(param: Param, imports: Imports, stripUIDs: boolean): TS.ParameterDeclaration {
   const dotDotDotToken = optionallyCreateDotDotDotToken(param.dotDotDotToken)
   return TS.createParameter(
     undefined,
     undefined,
     dotDotDotToken,
-    printBoundParam(param.boundParam),
+    printBoundParam(param.boundParam, imports, stripUIDs),
     undefined,
     undefined,
     undefined,
@@ -678,33 +879,44 @@ function printParam(param: Param): TS.ParameterDeclaration {
 }
 
 function printBindingExpression(
-  defaultExpression: JSXAttributeOtherJavaScript | null,
+  defaultExpression: JSExpression | null,
+  imports: Imports,
+  stripUIDs: boolean,
 ): TS.Expression | undefined {
   if (defaultExpression == null) {
     return undefined
   } else {
-    return jsxAttributeToExpression(defaultExpression)
+    return jsxAttributeToExpression(defaultExpression, imports, stripUIDs)
   }
 }
 
-function printBindingElement(propertyName: string | undefined, param: Param): TS.BindingElement {
+function printBindingElement(
+  propertyName: string | undefined,
+  param: Param,
+  imports: Imports,
+  stripUIDs: boolean,
+): TS.BindingElement {
   const dotDotDotToken = optionallyCreateDotDotDotToken(param.dotDotDotToken)
   return TS.createBindingElement(
     dotDotDotToken,
     optionalMap(TS.createIdentifier, propertyName) ?? undefined,
-    printBoundParam(param.boundParam),
+    printBoundParam(param.boundParam, imports, stripUIDs),
     param.boundParam.type === 'REGULAR_PARAM'
-      ? printBindingExpression(param.boundParam.defaultExpression)
+      ? printBindingExpression(param.boundParam.defaultExpression, imports, stripUIDs)
       : undefined,
   )
 }
 
-function printBoundParam(boundParam: BoundParam): TS.BindingName {
+function printBoundParam(
+  boundParam: BoundParam,
+  imports: Imports,
+  stripUIDs: boolean,
+): TS.BindingName {
   if (isRegularParam(boundParam)) {
     return TS.createIdentifier(boundParam.paramName)
   } else if (isDestructuredObject(boundParam)) {
     const printedParts = boundParam.parts.map((part) =>
-      printBindingElement(part.propertyName, part.param),
+      printBindingElement(part.propertyName, part.param, imports, stripUIDs),
     )
     return TS.createObjectBindingPattern(printedParts)
   } else {
@@ -712,7 +924,7 @@ function printBoundParam(boundParam: BoundParam): TS.BindingName {
       if (isOmittedParam(part)) {
         return TS.createOmittedExpression()
       } else {
-        return printBindingElement(undefined, part)
+        return printBindingElement(undefined, part, imports, stripUIDs)
       }
     })
     return TS.createArrayBindingPattern(printedParts)
@@ -723,20 +935,21 @@ function optionallyCreateDotDotDotToken(createIt: boolean): TS.DotDotDotToken | 
   return createIt ? TS.createToken(TS.SyntaxKind.DotDotDotToken) : undefined
 }
 
-function printRawComment(comment: Comment): string {
-  return `${comment.rawText}${comment.trailingNewLine ? '\n' : ''}`
-}
-
 function printArbitraryJSBlock(block: ArbitraryJSBlock): TS.Node {
   return TS.createUnparsedSourceFile(block.javascript)
 }
 
+function printOtherJS(block: JSExpressionOtherJavaScript): TS.Node {
+  return TS.createUnparsedSourceFile(block.originalJavascript)
+}
+
 export const printCode = memoize(printCodeImpl, {
-  equals: (a, b) => a === b,
+  matchesArg: (a, b) => a === b,
   maxSize: 1,
 })
 
 function printStatements(
+  filePath: string,
   statements: Array<TS.Node>,
   shouldPrettify: boolean,
   insertLinesBetweenStatements: boolean,
@@ -838,7 +1051,8 @@ function printCodeImpl(
           : TS.createNamedImports(
               missingImports.map((i) => {
                 return TS.createImportSpecifier(
-                  TS.createIdentifier(i.name),
+                  false,
+                  i.name === i.alias ? undefined : TS.createIdentifier(i.name),
                   TS.createIdentifier(i.alias),
                 )
               }),
@@ -871,6 +1085,17 @@ function printCodeImpl(
       )
       pushImportDeclaration(importDeclaration)
     }
+
+    if (isImportSideEffects(importForClause) && matchingTopLevelElements.length === 0) {
+      const importDeclaration = TS.createImportDeclaration(
+        undefined,
+        undefined,
+        undefined,
+        TS.createStringLiteral(importOrigin),
+      )
+
+      pushImportDeclaration(importDeclaration)
+    }
   })
 
   const lastImportIndex = findLastIndex(isImportStatement, topLevelElements)
@@ -885,6 +1110,7 @@ function printCodeImpl(
   ]
 
   return printStatements(
+    filePath,
     statementsToPrint,
     printOptions.pretty,
     printOptions.insertLinesBetweenStatements,
@@ -896,18 +1122,21 @@ interface PossibleCanvasContentsExpression {
   name: string
   initializer: TS.Expression
   declarationSyntax: FunctionDeclarationSyntax
+  functionWrapping: Array<FunctionWrap>
 }
 
 function possibleCanvasContentsExpression(
   name: string,
   initializer: TS.Expression,
   declarationSyntax: FunctionDeclarationSyntax,
+  functionWrapping: Array<FunctionWrap>,
 ): PossibleCanvasContentsExpression {
   return {
     type: 'POSSIBLE_CANVAS_CONTENTS_EXPRESSION',
     name: name,
     initializer: initializer,
     declarationSyntax: declarationSyntax,
+    functionWrapping: functionWrapping,
   }
 }
 
@@ -917,6 +1146,7 @@ interface PossibleCanvasContentsFunction {
   parameters: TS.NodeArray<TS.ParameterDeclaration>
   body: TS.ConciseBody
   declarationSyntax: FunctionDeclarationSyntax
+  functionWrapping: Array<FunctionWrap>
 }
 
 function possibleCanvasContentsFunction(
@@ -924,6 +1154,7 @@ function possibleCanvasContentsFunction(
   parameters: TS.NodeArray<TS.ParameterDeclaration>,
   body: TS.ConciseBody,
   declarationSyntax: FunctionDeclarationSyntax,
+  functionWrapping: Array<FunctionWrap>,
 ): PossibleCanvasContentsFunction {
   return {
     type: 'POSSIBLE_CANVAS_CONTENTS_FUNCTION',
@@ -931,6 +1162,7 @@ function possibleCanvasContentsFunction(
     parameters: parameters,
     body: body,
     declarationSyntax: declarationSyntax,
+    functionWrapping: functionWrapping,
   }
 }
 
@@ -969,37 +1201,77 @@ function nodeFlagsForVarLetOrConst(varLetOrConst: VarLetOrConst): TS.NodeFlags {
 export function looksLikeCanvasElements(
   sourceFile: TS.SourceFile,
   node: TS.Node,
+  sourceText: string,
+  filename: string,
+  imports: Imports,
+  topLevelNames: Array<string>,
+  propsObjectName: string | null,
+  existingHighlightBounds: Readonly<HighlightBoundsForUids>,
+  alreadyExistingUIDs: Set<string>,
+  applySteganography: SteganographyMode,
 ): Either<TS.Node, PossibleCanvasContents> {
   if (TS.isVariableStatement(node)) {
     const variableDeclaration = node.declarationList.declarations[0]
     if (variableDeclaration != null) {
       if (variableDeclaration.initializer != null) {
         const name = variableDeclaration.name.getText(sourceFile)
-        const initializer = variableDeclaration.initializer
         const varLetOrConst = getVarLetOrConst(node.declarationList)
-        if (TS.isArrowFunction(initializer)) {
-          return right(
-            possibleCanvasContentsFunction(
-              name,
-              initializer.parameters,
-              initializer.body,
-              varLetOrConst,
-            ),
-          )
-        } else if (name === BakedInStoryboardVariableName) {
-          // FIXME The below case should result in a parsed top level *element*, but instead it is treated
-          // as a *component*. Unfortunately our use of the storyboard incorrectly relies on it being treated
-          // as a component. See https://github.com/concrete-utopia/utopia/issues/1718 for more info
-          return right(
-            possibleCanvasContentsExpression(name, variableDeclaration.initializer, varLetOrConst),
-          )
+        const initializer = variableDeclaration.initializer
+
+        function processVariable(
+          currentNode: TS.Node,
+          functionWrapping: Array<FunctionWrap>,
+        ): Either<TS.Node, PossibleCanvasContents> {
+          if (TS.isCallExpression(currentNode)) {
+            const expressionFromCall = parseAttributeExpression(
+              sourceFile,
+              sourceText,
+              filename,
+              imports,
+              topLevelNames,
+              propsObjectName,
+              currentNode.expression,
+              existingHighlightBounds,
+              alreadyExistingUIDs,
+              [],
+              applySteganography,
+              'outermost-expression',
+            )
+            if (isRight(expressionFromCall) && currentNode.arguments.length === 1) {
+              const newFunctionWrapping = [
+                ...functionWrapping,
+                simpleFunctionWrap(expressionFromCall.value.value),
+              ]
+              return processVariable(currentNode.arguments[0], newFunctionWrapping)
+            }
+          } else if (TS.isArrowFunction(currentNode)) {
+            return right(
+              possibleCanvasContentsFunction(
+                name,
+                currentNode.parameters,
+                currentNode.body,
+                varLetOrConst,
+                functionWrapping,
+              ),
+            )
+          } else if (name === BakedInStoryboardVariableName) {
+            // FIXME The below case should result in a parsed top level *element*, but instead it is treated
+            // as a *component*. Unfortunately our use of the storyboard incorrectly relies on it being treated
+            // as a component. See https://github.com/concrete-utopia/utopia/issues/1718 for more info
+            return right(
+              possibleCanvasContentsExpression(name, initializer, varLetOrConst, functionWrapping),
+            )
+          }
+          return left(node)
         }
+
+        return processVariable(initializer, [])
       }
     }
   } else if (TS.isFunctionDeclaration(node)) {
     if (node.body != null) {
       const name = node.name == null ? null : node.name.getText(sourceFile)
-      return right(possibleCanvasContentsFunction(name, node.parameters, node.body, 'function'))
+      return right(possibleCanvasContentsFunction(name, node.parameters, node.body, 'function', []))
     }
   }
 
@@ -1022,7 +1294,7 @@ function detailsFromExportAssignment(
   declaration: TS.ExportAssignment,
 ): Either<TS.ExportAssignment, ExportDetail> {
   if (TS.isIdentifier(declaration.expression)) {
-    return right(exportIdentifier(declaration.expression.getText(sourceFile)))
+    return right(exportDefaultIdentifier(declaration.expression.getText(sourceFile)))
   } else if (TS.isArrowFunction(declaration.expression)) {
     return right(exportDefaultFunctionOrClass(null))
   } else {
@@ -1148,18 +1420,28 @@ export function isReactImported(sourceFile: TS.SourceFile): boolean {
   })
 }
 
+export type SteganographyMode = 'apply-steganography' | 'do-not-apply-steganography'
+
 export function parseCode(
-  filename: string,
+  filePath: string,
+  filePathMappings: FilePathMappings,
   sourceText: string,
   oldParseResultForUIDComparison: ParseSuccess | null,
   alreadyExistingUIDs_MUTABLE: Set<string>,
+  applySteganography: SteganographyMode,
 ): ParsedTextFile {
-  const sourceFile = TS.createSourceFile(filename, sourceText, TS.ScriptTarget.ES3)
+  const originalAlreadyExistingUIDs_MUTABLE: Set<string> = new Set(alreadyExistingUIDs_MUTABLE)
+  const sourceFile = TS.createSourceFile(filePath, sourceText, TS.ScriptTarget.ES3)
+
+  const topLevelNodes = flatMapArray(
+    (e) => flattenOutAnnoyingContainers(sourceFile, e),
+    sourceFile.getChildren(sourceFile),
+  )
 
   const jsxFactoryFunction = getJsxFactoryFunction(sourceFile)
 
   if (sourceFile == null) {
-    return parseFailure([], null, `File ${filename} not found.`, [])
+    return parseFailure([], null, `File ${filePath} not found.`, [])
   } else {
     let topLevelElements: Array<Either<string, TopLevelElement>> = []
     let imports: Imports = emptyImports()
@@ -1167,17 +1449,22 @@ export function parseCode(
     // existing further ahead.
     let highlightBounds: HighlightBoundsForUids = {}
 
-    let allArbitraryNodes: Array<TS.Node> = []
+    interface NodeAndUIDs {
+      node: TS.Node
+      uidsBeforeParse: Set<string>
+    }
+    let allArbitraryNodes: Array<NodeAndUIDs> = []
 
     // Account for exported components.
     let detailOfExports: ExportsDetail = EmptyExportsDetail
 
-    function pushArbitraryNode(node: TS.Node) {
+    function pushArbitraryNode(node: TS.Node): void {
       if (node.kind !== TS.SyntaxKind.EndOfFileToken) {
+        const uidsBeforeParse: Set<string> = new Set(alreadyExistingUIDs_MUTABLE)
         const nodeParseResult = parseArbitraryNodes(
           sourceFile,
           sourceText,
-          filename,
+          filePath,
           [node],
           imports,
           topLevelNames,
@@ -1187,14 +1474,24 @@ export function parseCode(
           true,
           '',
           false,
+          applySteganography,
         )
-        topLevelElements.push(
-          mapEither((parsed) => {
+        forEachRight(nodeParseResult, (parsed) => {
+          if (parsed != null) {
+            topLevelElements.push(right(parsed.value))
             highlightBounds = parsed.highlightBounds
-            return parsed.value
-          }, nodeParseResult),
-        )
-        allArbitraryNodes = [...allArbitraryNodes, node]
+          }
+        })
+        forEachLeft(nodeParseResult, (errorMessage) => {
+          topLevelElements.push(left(errorMessage))
+        })
+        allArbitraryNodes = [
+          ...allArbitraryNodes,
+          {
+            node: node,
+            uidsBeforeParse: uidsBeforeParse,
+          },
+        ]
       }
     }
 
@@ -1206,29 +1503,8 @@ export function parseCode(
       topLevelElements.push(right(unparsedCode(rawCode)))
     }
 
-    const topLevelNodes = flatMapArray(
-      (e) => flattenOutAnnoyingContainers(sourceFile, e),
-      sourceFile.getChildren(sourceFile),
-    )
-
     const topLevelNames = flatMapArray((node) => {
-      let names: Array<string> = []
-      if (TS.isVariableStatement(node)) {
-        for (const variableDeclaration of node.declarationList.declarations) {
-          if (variableDeclaration.initializer != null) {
-            names.push(variableDeclaration.name.getText(sourceFile))
-          }
-        }
-      } else if (TS.isFunctionLike(node)) {
-        if (node.name != null) {
-          names.push(node.name.getText(sourceFile))
-        }
-      } else if (TS.isClassDeclaration(node)) {
-        if (node.name != null) {
-          names.push(node.name.getText(sourceFile))
-        }
-      }
-      return names
+      return identifyValuesDefinedInNode(sourceFile, node)
     }, topLevelNodes)
 
     for (const topLevelElement of topLevelNodes) {
@@ -1245,7 +1521,7 @@ export function parseCode(
         forEachRight(fromAssignment, (toMerge) => {
           detailOfExports = detailOfExports.concat(toMerge)
 
-          if (toMerge.type === 'EXPORT_IDENTIFIER') {
+          if (toMerge.type === 'EXPORT_DEFAULT_IDENTIFIER') {
             pushUnparsedCode(topLevelElement.getText(sourceFile))
           } else {
             pushArbitraryNode(topLevelElement)
@@ -1321,13 +1597,14 @@ export function parseCode(
           // this import looks like `import Cat from './src/cats'`
           const importedWithName = optionalMap((n) => n.getText(sourceFile), importClause?.name)
           imports = addImport(
-            filename,
+            filePath,
+            filePathMappings,
             importFrom,
             importedWithName,
             importedFromWithin,
             importedAs,
             imports,
-          )
+          ).imports
           const rawImportStatement = importStatement(
             topLevelElement.getText(sourceFile),
             importedAs != null,
@@ -1338,7 +1615,18 @@ export function parseCode(
           pushImportStatement(rawImportStatement)
         }
       } else {
-        const possibleDeclaration = looksLikeCanvasElements(sourceFile, topLevelElement)
+        const possibleDeclaration = looksLikeCanvasElements(
+          sourceFile,
+          topLevelElement,
+          sourceText,
+          filePath,
+          imports,
+          topLevelNames,
+          null,
+          highlightBounds,
+          alreadyExistingUIDs_MUTABLE,
+          applySteganography,
+        )
         if (isRight(possibleDeclaration)) {
           const canvasContents = possibleDeclaration.value
           const { name } = canvasContents
@@ -1346,52 +1634,47 @@ export function parseCode(
             'No contents',
           )
           let isFunction: boolean = false
-          let parsedFunctionParam: Either<string, WithParserMetadata<Param> | null> = right(null)
+          let parsedFunctionParams: Either<string, WithParserMetadata<Array<Param>> | null> =
+            right(null)
           let propsUsed: Array<string> = []
           if (isPossibleCanvasContentsFunction(canvasContents)) {
             const { parameters, body } = canvasContents
             isFunction = true
-            const parsedFunctionParams = parseParams(
+            const notNullParsedFunctionParams = parseParams(
               parameters,
               sourceFile,
               sourceText,
-              filename,
+              filePath,
               imports,
               topLevelNames,
               highlightBounds,
               alreadyExistingUIDs_MUTABLE,
+              applySteganography,
             )
-            parsedFunctionParam = flatMapEither((parsedParams) => {
-              const paramsValue = parsedParams.value
-              if (paramsValue.length === 0) {
-                return right(null)
-              } else if (paramsValue.length === 1) {
-                // Note: We're explicitly ignoring the `propsUsed` value as
-                // that should be handled by the call to `propNamesForParam` below.
-                return right(
-                  withParserMetadata(paramsValue[0], parsedParams.highlightBounds, [], []),
-                )
-              } else {
-                return left('Invalid number of params')
-              }
-            }, parsedFunctionParams)
-            forEachRight(parsedFunctionParam, (param) => {
-              const boundParam = param?.value.boundParam
+            parsedFunctionParams = notNullParsedFunctionParams
+            forEachRight(notNullParsedFunctionParams, (params) => {
+              const firstParam = params.value.at(0)
+              const boundParam = firstParam?.boundParam
               const propsObjectName =
                 boundParam != null && isRegularParam(boundParam) ? boundParam.paramName : null
 
-              propsUsed = param == null ? [] : propNamesForParam(param.value)
-
+              propsUsed = firstParam == null ? [] : propNamesForParam(firstParam)
               parsedContents = parseOutFunctionContents(
                 sourceFile,
                 sourceText,
-                filename,
+                filePath,
+                foldEither(
+                  () => [],
+                  (paramsSuccess) => paramsSuccess.value,
+                  notNullParsedFunctionParams,
+                ),
                 imports,
                 topLevelNames,
                 propsObjectName,
                 body,
-                param?.highlightBounds ?? {},
+                params?.highlightBounds ?? {},
                 alreadyExistingUIDs_MUTABLE,
+                applySteganography,
               )
             })
           } else {
@@ -1401,55 +1684,63 @@ export function parseCode(
               parseOutJSXElements(
                 sourceFile,
                 sourceText,
-                filename,
+                filePath,
                 [canvasContents.initializer],
                 imports,
                 topLevelNames,
                 null,
                 highlightBounds,
                 alreadyExistingUIDs_MUTABLE,
+                applySteganography,
               ),
             )
           }
-          if (isLeft(parsedContents) || (isFunction && isLeft(parsedFunctionParam))) {
-            pushArbitraryNode(topLevelElement)
-            if (isExported(topLevelElement)) {
-              if (name == null) {
+
+          // push any export details
+          if (isExported(topLevelElement)) {
+            if (name == null) {
+              detailOfExports = mergeExportsDetail(detailOfExports, [
+                exportDefaultFunctionOrClass(null),
+              ])
+            } else {
+              const defaultExport = markedAsDefault(topLevelElement)
+              if (defaultExport) {
                 detailOfExports = mergeExportsDetail(detailOfExports, [
-                  exportDefaultFunctionOrClass(null),
+                  exportDefaultFunctionOrClass(name),
                 ])
               } else {
-                const defaultExport = markedAsDefault(topLevelElement)
-                if (defaultExport) {
-                  detailOfExports = mergeExportsDetail(detailOfExports, [
-                    exportDefaultFunctionOrClass(name),
-                  ])
-                } else {
-                  detailOfExports = mergeExportsDetail(detailOfExports, [exportFunction(name)])
-                }
+                detailOfExports = mergeExportsDetail(detailOfExports, [exportFunction(name)])
               }
             }
+          }
+
+          if (isLeft(parsedContents) || (isFunction && isLeft(parsedFunctionParams))) {
+            pushArbitraryNode(topLevelElement)
           } else {
-            highlightBounds = {
-              ...highlightBounds,
-              ...parsedContents.value.highlightBounds,
-            }
             const contents = parsedContents.value.value
             // If propsUsed is already populated, it's because the user used destructuring, so we can
             // use that. Otherwise, we have to use the list retrieved during parsing
             propsUsed = propsUsed.length > 0 ? propsUsed : uniq(parsedContents.value.propsUsed)
-            if (contents.elements.length === 1) {
-              const exported = isExported(topLevelElement)
+            if (
+              contents.elements.length === 1 &&
+              canBeRootElementOfComponent(contents.elements[0].value)
+            ) {
+              highlightBounds = {
+                ...highlightBounds,
+                ...parsedContents.value.highlightBounds,
+              }
+
               // capture var vs let vs const vs function here
               const utopiaComponent = utopiaJSXComponent(
                 name,
                 isFunction,
                 canvasContents.declarationSyntax,
                 contents.blockOrExpression,
+                canvasContents.functionWrapping,
                 foldEither(
                   (_) => null,
                   (param) => param?.value ?? null,
-                  parsedFunctionParam,
+                  parsedFunctionParams,
                 ),
                 propsUsed,
                 contents.elements[0].value,
@@ -1457,23 +1748,6 @@ export function parseCode(
                 false,
                 contents.returnStatementComments,
               )
-
-              const defaultExport = markedAsDefault(topLevelElement)
-              if (exported) {
-                if (name == null) {
-                  detailOfExports = mergeExportsDetail(detailOfExports, [
-                    exportDefaultFunctionOrClass(null),
-                  ])
-                } else {
-                  if (defaultExport) {
-                    detailOfExports = mergeExportsDetail(detailOfExports, [
-                      exportDefaultFunctionOrClass(name),
-                    ])
-                  } else {
-                    detailOfExports = mergeExportsDetail(detailOfExports, [exportFunction(name)])
-                  }
-                }
-              }
 
               topLevelElements.push(right(utopiaComponent))
             } else {
@@ -1562,35 +1836,39 @@ export function parseCode(
     if (isLeft(sequencedTopLevelElements)) {
       return parseFailure(null, null, sequencedTopLevelElements.value, [])
     }
-    const realTopLevelElements = sequencedTopLevelElements.value
-
-    let topLevelElementsWithFixedUIDs = guaranteeUniqueUidsFromTopLevel(realTopLevelElements)
+    let realTopLevelElements = sequencedTopLevelElements.value
 
     let combinedTopLevelArbitraryBlock: ArbitraryJSBlock | null = null
     if (allArbitraryNodes.length > 0) {
       const nodeParseResult = parseArbitraryNodes(
         sourceFile,
         sourceText,
-        filename,
-        allArbitraryNodes,
+        filePath,
+        allArbitraryNodes.map((entry) => entry.node),
         imports,
         topLevelNames,
         null,
         highlightBounds,
-        alreadyExistingUIDs_MUTABLE,
+        // FIXME: This is using the first `uidsBeforeParse` value so that
+        // this parse should not find duplicate UIDs which will potentially
+        // attempt to pull mocked UIDs to replace those fake duplicates.
+        new Set(allArbitraryNodes[0].uidsBeforeParse),
         true,
         '',
         true,
+        applySteganography,
       )
       forEachRight(nodeParseResult, (nodeParseSuccess) => {
-        combinedTopLevelArbitraryBlock = nodeParseSuccess.value
+        if (nodeParseSuccess != null) {
+          combinedTopLevelArbitraryBlock = nodeParseSuccess.value
+        }
       })
 
       const componentsRenderedByReactDOM = flatMapArray(
-        (node) => getComponentsRenderedWithReactDOM(sourceFile, node),
+        (entry) => getComponentsRenderedWithReactDOM(sourceFile, entry.node),
         allArbitraryNodes,
       )
-      topLevelElementsWithFixedUIDs = topLevelElementsWithFixedUIDs.map((topLevelElement) => {
+      realTopLevelElements = realTopLevelElements.map((topLevelElement) => {
         if (
           isUtopiaJSXComponent(topLevelElement) &&
           componentsRenderedByReactDOM.includes(topLevelElement.name)
@@ -1600,7 +1878,8 @@ export function parseCode(
             topLevelElement.isFunction,
             topLevelElement.declarationSyntax,
             topLevelElement.blockOrExpression,
-            topLevelElement.param,
+            topLevelElement.functionWrapping,
+            topLevelElement.params,
             topLevelElement.propsUsed,
             topLevelElement.rootElement,
             topLevelElement.arbitraryJSBlock,
@@ -1613,333 +1892,178 @@ export function parseCode(
       })
     }
 
+    // Create the basic success result from the values we have so far.
     const unfixedParseSuccess = parseSuccess(
       imports,
-      topLevelElementsWithFixedUIDs,
+      realTopLevelElements,
       highlightBounds,
       jsxFactoryFunction,
       combinedTopLevelArbitraryBlock,
       detailOfExports,
+      highlightBounds,
     )
+
+    // Determine what new UIDs were generated during this parse.
+    const fixParseSuccessExistingUIDs = new Set(originalAlreadyExistingUIDs_MUTABLE)
+    const newlyCreatedUIDs = difference(alreadyExistingUIDs_MUTABLE, fixParseSuccessExistingUIDs)
+
+    // Fix the `ParseSuccess` instance by copying over UIDs where possible from the previous
+    // parse result while also deduplicating UIDs found in the result.
     const fixedParseSuccess = fixParseSuccessUIDs(
       oldParseResultForUIDComparison,
       unfixedParseSuccess,
+      fixParseSuccessExistingUIDs,
+      newlyCreatedUIDs,
     )
+
+    // Find the UIDs created from the above `fixParseSuccessUIDs` invocation and include them
+    // in the mutable already existing UIDs as that is used outside this function.
+    const newlyCreatedUIDsFromFix = difference(
+      fixParseSuccessExistingUIDs,
+      originalAlreadyExistingUIDs_MUTABLE,
+    )
+    newlyCreatedUIDsFromFix.forEach((newlyCreatedUID) =>
+      alreadyExistingUIDs_MUTABLE.add(newlyCreatedUID),
+    )
+
+    // Return the corrected result.
     return fixedParseSuccess
   }
 }
 
-function parseParams(
-  params: TS.NodeArray<TS.ParameterDeclaration>,
-  file: TS.SourceFile,
-  sourceText: string,
-  filename: string,
-  imports: Imports,
-  topLevelNames: Array<string>,
-  existingHighlightBounds: Readonly<HighlightBoundsForUids>,
-  existingUIDs: Set<string>,
-): Either<string, WithParserMetadata<Array<Param>>> {
-  let parsedParams: Array<Param> = []
-  let highlightBounds: HighlightBoundsForUids = { ...existingHighlightBounds }
-  let propsUsed: Array<string> = []
-  for (const param of params) {
-    const parseResult = parseParam(
-      param,
-      file,
-      sourceText,
-      filename,
-      imports,
-      topLevelNames,
-      highlightBounds,
-      existingUIDs,
-    )
-    if (isRight(parseResult)) {
-      const parsedParam = parseResult.value
-      highlightBounds = {
-        ...highlightBounds,
-        ...parsedParam.highlightBounds,
+// In practical usage currently these highlight bounds should only include entries
+// that are selectable, potentially in the future this will extend beyond that but for
+// the moment it doesn't make sense to include highlight bounds for a value deep within
+// some properties for example.
+export function trimHighlightBounds(success: ParseSuccess): ParseSuccess {
+  const highlightBoundsOptic: Optic<ParseSuccess, HighlightBoundsForUids> =
+    fromField('highlightBounds')
+  return modify(
+    highlightBoundsOptic,
+    (highlightBounds) => {
+      let updatedHighlightBounds: HighlightBoundsForUids = {}
+
+      function includeElement(element: JSXElementChild | ArbitraryJSBlock): void {
+        if (element.uid in highlightBounds) {
+          updatedHighlightBounds[element.uid] = highlightBounds[element.uid]
+        }
       }
-      propsUsed = [...propsUsed, ...parsedParam.propsUsed]
-      parsedParams.push(parsedParam.value)
-    } else {
-      return parseResult
-    }
-  }
-  return right(withParserMetadata(parsedParams, highlightBounds, propsUsed, []))
-}
 
-function parseParam(
-  param: TS.ParameterDeclaration | TS.BindingElement,
-  file: TS.SourceFile,
-  sourceText: string,
-  filename: string,
-  imports: Imports,
-  topLevelNames: Array<string>,
-  existingHighlightBounds: Readonly<HighlightBoundsForUids>,
-  existingUIDs: Set<string>,
-): Either<string, WithParserMetadata<Param>> {
-  const dotDotDotToken = param.dotDotDotToken != null
-  const parsedExpression: Either<
-    string,
-    WithParserMetadata<JSXAttributeOtherJavaScript | undefined>
-  > =
-    param.initializer == null
-      ? right(withParserMetadata(undefined, existingHighlightBounds, [], []))
-      : parseAttributeOtherJavaScript(
-          file,
-          sourceText,
-          filename,
-          imports,
-          topLevelNames,
-          null,
-          param.initializer,
-          existingHighlightBounds,
-          existingUIDs,
-        )
-  return flatMapEither((paramExpression) => {
-    const parsedBindingName = parseBindingName(
-      param.name,
-      paramExpression,
-      file,
-      sourceText,
-      filename,
-      imports,
-      topLevelNames,
-      existingHighlightBounds,
-      existingUIDs,
-    )
-    return mapEither(
-      (bindingName) =>
-        withParserMetadata(
-          functionParam(dotDotDotToken, bindingName.value),
-          bindingName.highlightBounds,
-          bindingName.propsUsed,
-          [],
-        ),
-      parsedBindingName,
-    )
-  }, parsedExpression)
-}
-
-function parseBindingName(
-  elem: TS.BindingName,
-  expression: WithParserMetadata<JSXAttributeOtherJavaScript | undefined>,
-  file: TS.SourceFile,
-  sourceText: string,
-  filename: string,
-  imports: Imports,
-  topLevelNames: Array<string>,
-  existingHighlightBounds: Readonly<HighlightBoundsForUids>,
-  existingUIDs: Set<string>,
-): Either<string, WithParserMetadata<BoundParam>> {
-  let highlightBounds: HighlightBoundsForUids = {
-    ...existingHighlightBounds,
-    ...expression.highlightBounds,
-  }
-  let propsUsed: Array<string> = [...expression.propsUsed]
-
-  if (TS.isIdentifier(elem)) {
-    const parsedParamName = getPropertyNameText(elem, file)
-    return mapEither(
-      (paramName) =>
-        withParserMetadata(
-          regularParam(paramName, expression.value ?? null),
-          highlightBounds,
-          propsUsed,
-          [],
-        ),
-      parsedParamName,
-    )
-  } else if (TS.isObjectBindingPattern(elem)) {
-    let parts: Array<DestructuredParamPart> = []
-    for (const element of elem.elements) {
-      const parsedPropertyName: Either<string, string | null> =
-        element.propertyName == null ? right(null) : getPropertyNameText(element.propertyName, file)
-      if (isRight(parsedPropertyName)) {
-        const propertyName = parsedPropertyName.value
-        const parsedParam = parseParam(
-          element,
-          file,
-          sourceText,
-          filename,
-          imports,
-          topLevelNames,
-          highlightBounds,
-          existingUIDs,
-        )
-        if (isRight(parsedParam)) {
-          const bound = parsedParam.value.value
-          highlightBounds = {
-            ...highlightBounds,
-            ...parsedParam.value.highlightBounds,
-          }
-          propsUsed = [...propsUsed, ...parsedParam.value.propsUsed]
-          if (propertyName == null) {
-            if (isRegularParam(bound.boundParam)) {
-              parts.push(destructuredParamPart(undefined, bound, null))
-            } else {
-              return left('Unable to parse bound object parameter with no parameter propertyName')
+      function walkJSXElementChild(element: JSXElementChild): void {
+        switch (element.type) {
+          case 'JSX_ELEMENT':
+            includeElement(element)
+            for (const child of element.children) {
+              walkJSXElementChild(child)
             }
-          } else {
-            parts.push(destructuredParamPart(propertyName, bound, null))
-          }
-        } else {
-          return parsedParam
+            for (const prop of element.props) {
+              if (prop.type === 'JSX_ATTRIBUTES_ENTRY') {
+                walkJSXElementChild(prop.value)
+              }
+            }
+            break
+          case 'JSX_FRAGMENT':
+            includeElement(element)
+            for (const child of element.children) {
+              walkJSXElementChild(child)
+            }
+            break
+          case 'JSX_CONDITIONAL_EXPRESSION':
+            includeElement(element)
+            walkJSXElementChild(element.condition)
+            walkJSXElementChild(element.whenTrue)
+            walkJSXElementChild(element.whenFalse)
+            break
+          case 'JS_ELEMENT_ACCESS':
+            includeElement(element)
+            walkJSXElementChild(element.onValue)
+            walkJSXElementChild(element.element)
+            break
+          case 'JS_PROPERTY_ACCESS':
+            includeElement(element)
+            walkJSXElementChild(element.onValue)
+            break
+          case 'JSX_TEXT_BLOCK':
+          case 'ATTRIBUTE_VALUE':
+          case 'ATTRIBUTE_NESTED_ARRAY':
+          case 'ATTRIBUTE_NESTED_OBJECT':
+          case 'ATTRIBUTE_FUNCTION_CALL':
+          case 'JS_IDENTIFIER':
+            // Don't walk any further down these.
+            break
+          case 'JSX_MAP_EXPRESSION':
+            includeElement(element)
+            walkJSXElementChild(element.valueToMap)
+            walkJSXElementChild(element.mapFunction)
+            break
+          case 'ATTRIBUTE_OTHER_JAVASCRIPT':
+            includeElement(element)
+            walkElementsWithin(element.elementsWithin)
+            break
+          default:
+            assertNever(element)
         }
-      } else {
-        return parsedPropertyName
       }
-    }
-    return right(withParserMetadata(destructuredObject(parts), highlightBounds, propsUsed, []))
-  } else if (TS.isArrayBindingPattern(elem)) {
-    let parts: Array<DestructuredArrayPart> = []
-    for (const element of elem.elements) {
-      if (TS.isOmittedExpression(element)) {
-        parts.push(omittedParam())
-      } else {
-        const parsedParam = parseParam(
-          element,
-          file,
-          sourceText,
-          filename,
-          imports,
-          topLevelNames,
-          highlightBounds,
-          existingUIDs,
-        )
-        if (isRight(parsedParam)) {
-          const bound = parsedParam.value.value
-          highlightBounds = {
-            ...highlightBounds,
-            ...parsedParam.value.highlightBounds,
-          }
-          propsUsed = [...propsUsed, ...parsedParam.value.propsUsed]
-          parts.push(bound)
-        } else {
-          return parsedParam
+
+      function walkElementsWithin(elementsWithin: ElementsWithin): void {
+        for (const elementWithin of Object.values(elementsWithin)) {
+          walkJSXElementChild(elementWithin)
         }
       }
-    }
-    return right(withParserMetadata(destructuredArray(parts), highlightBounds, propsUsed, []))
-  } else {
-    return left('Unable to parse binding element')
-  }
-}
 
-function withJSXElementAttributes(
-  sourceFile: TS.SourceFile,
-  withAttributes: (node: TS.Node, attrs: TS.JsxAttributes) => void,
-): void {
-  const transformer = (context: TS.TransformationContext) => {
-    const walkTree = (node: TS.Node) => {
-      if (TS.isJsxSelfClosingElement(node)) {
-        withAttributes(node, node.attributes)
-      } else if (TS.isJsxElement(node)) {
-        withAttributes(node, node.openingElement.attributes)
+      for (const topLevelElement of success.topLevelElements) {
+        switch (topLevelElement.type) {
+          case 'UTOPIA_JSX_COMPONENT':
+            walkJSXElementChild(topLevelElement.rootElement)
+            if (topLevelElement.arbitraryJSBlock != null) {
+              walkElementsWithin(topLevelElement.arbitraryJSBlock.elementsWithin)
+            }
+            break
+          case 'ARBITRARY_JS_BLOCK':
+            walkElementsWithin(topLevelElement.elementsWithin)
+            break
+          case 'IMPORT_STATEMENT':
+          case 'UNPARSED_CODE':
+            break
+          default:
+            assertNever(topLevelElement)
+        }
       }
-      TS.visitEachChild(node, walkTree, context)
-
-      return node
-    }
-    return (n: TS.Node) => TS.visitNode(n, walkTree)
-  }
-
-  TS.transform(sourceFile, [transformer])
-}
-
-type HighlightBoundsWithoutUid = Omit<HighlightBounds, 'uid'>
-
-export function getHighlightBoundsWithUID(
-  filename: string,
-  sourceText: string,
-): Array<HighlightBounds> {
-  const sourceFile = TS.createSourceFile(
-    filename,
-    sourceText,
-    TS.ScriptTarget.Latest,
-    false,
-    TS.ScriptKind.TSX,
+      return updatedHighlightBounds
+    },
+    success,
   )
-
-  let result: Array<HighlightBounds> = []
-
-  if (sourceFile != null) {
-    withJSXElementAttributes(
-      sourceFile,
-      (boundingElement: TS.Node, attributes: TS.JsxAttributes) => {
-        withUID(undefined, attributes, undefined, (uid) => {
-          const startPosition = TS.getLineAndCharacterOfPosition(
-            sourceFile,
-            boundingElement.getStart(sourceFile, false),
-          )
-          const endPosition = TS.getLineAndCharacterOfPosition(sourceFile, boundingElement.getEnd())
-          result.push({
-            startCol: startPosition.character,
-            startLine: startPosition.line,
-            endCol: endPosition.character,
-            endLine: endPosition.line,
-            uid: uid,
-          })
-        })
-      },
-    )
-  }
-
-  return result
-}
-
-export function getHighlightBoundsWithoutUID(
-  filename: string,
-  sourceText: string,
-): Array<HighlightBoundsWithoutUid> {
-  const sourceFile = TS.createSourceFile(
-    filename,
-    sourceText,
-    TS.ScriptTarget.Latest,
-    false,
-    TS.ScriptKind.TSX,
-  )
-
-  let result: Array<HighlightBoundsWithoutUid> = []
-
-  if (sourceFile != null) {
-    withJSXElementAttributes(
-      sourceFile,
-      (boundingElement: TS.Node, attributes: TS.JsxAttributes) => {
-        const startPosition = TS.getLineAndCharacterOfPosition(
-          sourceFile,
-          boundingElement.getStart(sourceFile, false),
-        )
-        const endPosition = TS.getLineAndCharacterOfPosition(sourceFile, boundingElement.getEnd())
-        result.push({
-          startCol: startPosition.character,
-          startLine: startPosition.line,
-          endCol: endPosition.character,
-          endLine: endPosition.line,
-        })
-      },
-    )
-  }
-
-  return result
 }
 
 export function lintAndParse(
   filename: string,
+  filePathMappings: FilePathMappings,
   content: string,
   oldParseResultForUIDComparison: ParseSuccess | null,
   alreadyExistingUIDs_MUTABLE: Set<string>,
+  shouldTrimBounds: 'trim-bounds' | 'do-not-trim-bounds',
+  applySteganography: SteganographyMode,
 ): ParsedTextFile {
+  if (!isParseableFile(filename)) {
+    return unparsed
+  }
+
   const lintResult = lintCode(filename, content)
   // Only fatal or error messages should bounce the parse.
   if (lintResult.filter(messageisFatal).length === 0) {
     const result = parseCode(
       filename,
+      filePathMappings,
       content,
       oldParseResultForUIDComparison,
       alreadyExistingUIDs_MUTABLE,
+      applySteganography,
     )
-    return result
+    if (isParseSuccess(result) && shouldTrimBounds === 'trim-bounds') {
+      return trimHighlightBounds(result)
+    } else {
+      return result
+    }
   } else {
     return parseFailure(null, null, null, lintResult)
   }

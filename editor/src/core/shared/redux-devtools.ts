@@ -1,8 +1,10 @@
+import type { StrategyState } from '../../components/canvas/canvas-strategies/interaction-state'
 import type { EditorAction } from '../../components/editor/action-types'
-import type { EditorStore } from '../../components/editor/store/editor-state'
+import type { EditorStoreFull, EditorState } from '../../components/editor/store/editor-state'
 import { isFeatureEnabled } from '../../utils/feature-switches'
-import { pluck } from './array-utils'
-import { ElementInstanceMetadata, ElementInstanceMetadataMap } from './element-template'
+import { mapDropNulls, pluck } from './array-utils'
+import * as EP from './element-path'
+import type { ElementInstanceMetadata, ElementInstanceMetadataMap } from './element-template'
 import { objectMap } from './object-utils'
 
 interface Connection {
@@ -15,6 +17,7 @@ interface Connection {
 
 function connectDevToolsExtension(): Connection | null {
   if (
+    typeof window !== 'undefined' &&
     window != null &&
     (window as any).__REDUX_DEVTOOLS_EXTENSION__ != null &&
     (window as any).__REDUX_DEVTOOLS_EXTENSION__.connect != null
@@ -57,17 +60,15 @@ maybeDevTools?.subscribe((message) => {
   }
 })
 
-const ActionsToOmit: Array<EditorAction['action']> = ['UPDATE_PREVIEW_CONNECTED', 'LOAD']
-const ActionsWithoutPayload: Array<EditorAction['action']> = ['LOAD', 'UPDATE_CODE_RESULT_CACHE']
-
 let lastDispatchedStore: SanitizedState
 
 const PlaceholderMessage = '<<SANITIZED_FROM_DEVTOOLS>>'
 
 function simplifiedMetadata(elementMetadata: ElementInstanceMetadata) {
   return {
-    ...elementMetadata,
-    props: PlaceholderMessage,
+    elementPath: EP.toString(elementMetadata.elementPath),
+    globalFrame: elementMetadata.globalFrame,
+    computedStyle: elementMetadata.computedStyle,
   }
 }
 
@@ -78,84 +79,113 @@ function simplifiedMetadataMap(metadata: ElementInstanceMetadataMap) {
   return sanitizedSpyData
 }
 
-type SanitizedState = ReturnType<typeof sanitizeLoggedState>
-function sanitizeLoggedState(store: EditorStore) {
+function sanitizeEditor(editor: EditorState) {
+  // When you debug something, feel free to add it to the sanitized editor. right now it contains a few keys that I needed.
+  // Be careful about what you add: logging too much stuff chokes the redux devtool
   return {
-    ...store,
-    editor: {
-      ...store.editor,
-      spyMetadata: simplifiedMetadataMap(store.editor.jsxMetadata),
-      domMetadata: store.editor.domMetadata.map(simplifiedMetadata),
-      jsxMetadata: simplifiedMetadataMap(store.editor.jsxMetadata),
-      codeResultCache: PlaceholderMessage,
-      nodeModules: {
-        packageStatus: store.editor.nodeModules.packageStatus,
+    selectedViews: editor.selectedViews.map(EP.toString) as any, // this is easier for human consumption
+    canvas: {
+      mountCount: editor.canvas.mountCount,
+      domWalkerInvalidateCount: editor.canvas.domWalkerInvalidateCount,
+      canvasContentInvalidateCount: editor.canvas.canvasContentInvalidateCount,
+      controls: {
+        ...editor.canvas.controls,
       },
-      canvas: PlaceholderMessage,
-    },
-    history: PlaceholderMessage,
-    workers: PlaceholderMessage,
-    dispatch: PlaceholderMessage,
+      interactionSession: {
+        interactionData: editor.canvas.interactionSession?.interactionData,
+        latestMetadata: simplifiedMetadataMap(
+          editor.canvas.interactionSession?.latestMetadata ?? {},
+        ) as any,
+      },
+    } as Partial<EditorState['canvas']>,
+    jsxMetadata: simplifiedMetadataMap(editor.jsxMetadata) as any,
+    domMetadata: simplifiedMetadataMap(editor.domMetadata) as any,
+    spyMetadata: simplifiedMetadataMap(editor.spyMetadata) as any,
+  } as Partial<EditorState>
+}
+
+function sanitizeStrategyState(strategyState: StrategyState) {
+  return {
+    currentStrategy: strategyState.currentStrategy,
+    currentStrategyFitness: strategyState.currentStrategyFitness,
+    currentStrategyCommands: strategyState.currentStrategyCommands,
+  }
+}
+
+type SanitizedState = ReturnType<typeof sanitizeLoggedState>
+function sanitizeLoggedState(store: EditorStoreFull) {
+  return {
+    unpatchedEditor: sanitizeEditor(store.unpatchedEditor),
+    patchedEditor: sanitizeEditor(store.patchedEditor),
+    strategyState: sanitizeStrategyState(store.strategyState),
   }
 }
 
 export function reduxDevtoolsSendActions(
   actions: Array<Array<EditorAction>>,
-  newStore: EditorStore,
+  newStore: EditorStoreFull,
+  isTransient: boolean,
 ): void {
-  if (
-    maybeDevTools != null &&
-    sendActionUpdates &&
-    isFeatureEnabled('Debug mode – Redux Devtools')
-  ) {
+  if (maybeDevTools != null && sendActionUpdates && isFeatureEnabled('Debug – Redux Devtools')) {
     // filter out the actions we are not interested in
-    const filteredActions = actions
-      .flat()
-      .filter((action) => !ActionsToOmit.includes(action.action))
-      .map((action) =>
-        ActionsWithoutPayload.includes(action.action) ? { action: action.action } : action,
-      )
+    const filteredActions = mapDropNulls((action) => {
+      switch (action.action) {
+        //Actions to be completely omitted from logging to redux devtools, to avoid noise
+        // These actions will be logged with all of their payload. Be careful: large payloads choke the Redux Devtool logging
+        case 'SELECT_COMPONENTS':
+        case 'CREATE_INTERACTION_SESSION':
+        case 'UPDATE_INTERACTION_SESSION':
+        case 'UPDATE_DRAG_INTERACTION_DATA':
+        case 'CLEAR_INTERACTION_SESSION': {
+          return action
+        }
+        // List custom printers for specific actions here
+        case 'SAVE_DOM_REPORT': {
+          return {
+            action: action.action,
+            cachedPaths: action.cachedPaths,
+            elementMetadata: simplifiedMetadataMap(action.elementMetadata),
+          }
+        }
+        // By default, we only log the name of the action, and omit the payload
+        default:
+          return { action: action.action }
+      }
+    }, actions.flat())
+
     if (filteredActions.length > 0) {
       const sanitizedStore = sanitizeLoggedState(newStore)
       const actionNames = pluck(filteredActions, 'action').join(' ')
-      maybeDevTools.send({ type: `⚫️ ${actionNames}`, actions: filteredActions }, sanitizedStore)
+      const colorBall = isTransient ? `⚪️` : `⚫️`
+      maybeDevTools.send(
+        { type: `${colorBall} ${actionNames}`, actions: filteredActions },
+        sanitizedStore,
+      )
       lastDispatchedStore = sanitizedStore
     }
   }
 }
 
-export function reduxDevtoolsSendInitialState(newStore: EditorStore): void {
+export function reduxDevtoolsSendInitialState(newStore: EditorStoreFull): void {
   if (maybeDevTools != null) {
     maybeDevTools.init(newStore)
   }
 }
 
 export function reduxDevtoolsLogMessage(message: string, optionalPayload?: any): void {
-  if (
-    maybeDevTools != null &&
-    sendActionUpdates &&
-    isFeatureEnabled('Debug mode – Redux Devtools')
-  ) {
+  if (maybeDevTools != null && sendActionUpdates && isFeatureEnabled('Debug – Redux Devtools')) {
     maybeDevTools.send({ type: `🟢 ${message}`, payload: optionalPayload }, lastDispatchedStore)
   }
 }
 
 export function reduxDevtoolsLogError(message: string, optionalPayload?: any): void {
-  if (
-    maybeDevTools != null &&
-    sendActionUpdates &&
-    isFeatureEnabled('Debug mode – Redux Devtools')
-  ) {
+  if (maybeDevTools != null && sendActionUpdates && isFeatureEnabled('Debug – Redux Devtools')) {
     maybeDevTools.send({ type: `🔴 ${message}`, payload: optionalPayload }, lastDispatchedStore)
   }
 }
 
-export function reduxDevtoolsUpdateState(message: string, newStore: EditorStore): void {
-  if (
-    maybeDevTools != null &&
-    sendActionUpdates &&
-    isFeatureEnabled('Debug mode – Redux Devtools')
-  ) {
+export function reduxDevtoolsUpdateState(message: string, newStore: EditorStoreFull): void {
+  if (maybeDevTools != null && sendActionUpdates && isFeatureEnabled('Debug – Redux Devtools')) {
     const sanitizedStore = sanitizeLoggedState(newStore)
     maybeDevTools.send(`🟣 ${message}`, sanitizedStore)
     lastDispatchedStore = sanitizedStore

@@ -1,17 +1,11 @@
+import type { OutgoingLinterWorkerMessage } from './linter/linter-worker'
 import {
   createLinterRequestMessage,
   handleMessage as handleLinterMessage,
-  OutgoingLinterWorkerMessage,
 } from './linter/linter-worker'
-import { LinterWorker, ParserPrinterWorker, WatchdogWorker } from './workers'
+import type { LinterWorker, ParserPrinterWorker, WatchdogWorker } from './workers'
 import { handleMessage as handleParserPrinterMessage } from './parser-printer/parser-printer-worker'
-import { handleMessage as handleTSWorkerMessage } from './ts/ts-worker'
-import { BundlerWorker } from './bundler-bridge'
-import {
-  createParsePrintFilesRequest,
-  ParseOrPrint,
-  ParsePrintResultMessage,
-} from './common/worker-types'
+import type { ParsePrintFilesRequest, ParsePrintResultMessage } from './common/worker-types'
 
 export class FakeParserPrinterWorker implements ParserPrinterWorker {
   messageListeners: Array<(ev: MessageEvent) => any> = []
@@ -30,8 +24,12 @@ export class FakeParserPrinterWorker implements ParserPrinterWorker {
     })
   }
 
-  sendParsePrintMessage = (files: Array<ParseOrPrint>): void => {
-    handleParserPrinterMessage(createParsePrintFilesRequest(files), this.receiveMessage)
+  sendParsePrintMessage = (request: ParsePrintFilesRequest): void => {
+    void handleParserPrinterMessage(request, this.receiveMessage)
+  }
+
+  sendClearParseCacheMessage = (): void => {
+    // empty
   }
 }
 

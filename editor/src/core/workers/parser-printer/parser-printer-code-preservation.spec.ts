@@ -41,8 +41,10 @@ describe('Parsing and then printing code', () => {
   })
 
   it('retains a non-parenthesized expression body on an arrow function component', () => {
-    const code = applyPrettier(`export const whatever = (props) => <div data-uid='aaa' />`, false)
-      .formatted
+    const code = applyPrettier(
+      `export const whatever = (props) => <div data-uid='aaa' />`,
+      false,
+    ).formatted
 
     const parsedThenPrinted = parseThenPrint('/index.js', code)
     expect(parsedThenPrinted).toEqual(code)
@@ -80,8 +82,9 @@ import { GithubPicker } from "react-color";
 function Picker() {
   const [color, setColor] = useThemeContext();
   const [visible, setVisible] = usePickerVisibilityContext();
-  return visible ? (
-    <GithubPicker
+
+  if (visible) {
+    return <GithubPicker
       style={{ position: "absolute" }}
       triangle="hide"
       color={color}
@@ -90,7 +93,9 @@ function Picker() {
         setVisible(false);
       }}
     />
-  ) : null;
+  } else {
+    return null
+  }
 }
 `,
       false,
@@ -243,7 +248,7 @@ function Picker() {
         Multiple,
         Lines
       } from 'some-library'
-      import { Scene, Storyboard, View } from 'utopia-api'
+      import { Scene, Storyboard, View, Group } from 'utopia-api'
       
       const { m } = require('./thing')
       const { n } = require('./thing')
@@ -287,6 +292,90 @@ function Picker() {
       export { thing1, thing2 }
       export { default as p } from './thing'
       `,
+      false,
+    ).formatted
+
+    const parsedThenPrinted = parseThenPrint('/index.js', code)
+    expect(parsedThenPrinted).toEqual(code)
+  })
+
+  it('Simple JSIdentifier', () => {
+    const code = applyPrettier(
+      `const element = 'cica'
+      
+      export function MyComponent(props) {
+        return <div data-uid='aaa' myProp={element} />
+      }`,
+      false,
+    ).formatted
+
+    const parsedThenPrinted = parseThenPrint('/index.js', code)
+    expect(parsedThenPrinted).toEqual(code)
+  })
+
+  it('Simple JSPropertyAccess', () => {
+    const code = applyPrettier(
+      `const element = {cica: 'cica'}
+      
+      export function MyComponent(props) {
+        return <div data-uid='aaa' myProp={element.cica} />
+      }`,
+      false,
+    ).formatted
+
+    const parsedThenPrinted = parseThenPrint('/index.js', code)
+    expect(parsedThenPrinted).toEqual(code)
+  })
+
+  it('Optional chaining property access operator', () => {
+    const code = applyPrettier(
+      `const element = {cica: 'cica'}
+      
+      export function MyComponent(props) {
+        return <div data-uid='aaa' myProp={element?.cica} />
+      }`,
+      false,
+    ).formatted
+
+    const parsedThenPrinted = parseThenPrint('/index.js', code)
+    expect(parsedThenPrinted).toEqual(code)
+  })
+
+  it('Simple JSElementAccess', () => {
+    const code = applyPrettier(
+      `const element = {cica: 'cica'}
+      
+      export function MyComponent(props) {
+        return <div data-uid='aaa' myProp={element['cica']}  myPro2={element[0]} />
+      }`,
+      false,
+    ).formatted
+
+    const parsedThenPrinted = parseThenPrint('/index.js', code)
+    expect(parsedThenPrinted).toEqual(code)
+  })
+
+  it('Optional chaining element access operator', () => {
+    const code = applyPrettier(
+      `const element = {cica: 'cica'}
+      
+      export function MyComponent(props) {
+        return <div data-uid='aaa' myProp={element?.['cica']}  myPro2={element?.[0]} />
+      }`,
+      false,
+    ).formatted
+
+    const parsedThenPrinted = parseThenPrint('/index.js', code)
+    expect(parsedThenPrinted).toEqual(code)
+  })
+
+  it('Long chained property access and element access', () => {
+    const code = applyPrettier(
+      `const element = {cica: 'cica'}
+      
+      export function MyComponent(props) {
+        return <div data-uid='aaa' myProp={element.cica[0]['left'].right}  myPropOptional={element.cica[0]?.['left']?.right} />
+      }`,
       false,
     ).formatted
 

@@ -1,7 +1,8 @@
 import React from 'react'
 import fastDeepEqual from 'fast-deep-equal'
 import { PRODUCTION_ENV } from '../common/env-vars'
-import { KeepDeepEqualityCall, keepDeepEqualityResult } from './deep-equality'
+import type { KeepDeepEqualityCall, KeepDeepEqualityResult } from './deep-equality'
+import { keepDeepEqualityResult } from './deep-equality'
 import { shallowEqual } from '../core/shared/equality-utils'
 
 export function useHookUpdateAnalysisStrictEquals<P>(name: string, newValue: P) {
@@ -108,7 +109,7 @@ export function shouldComponentUpdateAnalysis<P, S>(
 }
 
 export function memoEqualityCheckAnalysis<P>(previousProps: P, nextProps: P): boolean {
-  if (typeof previousProps === 'object') {
+  if (typeof previousProps === 'object' && previousProps != null) {
     let differingPropKeys: Array<string> = []
     for (const propKey of Object.keys(previousProps)) {
       const previousPropValue = (previousProps as any)[propKey]
@@ -139,14 +140,14 @@ export function memoEqualityCheckAnalysis<P>(previousProps: P, nextProps: P): bo
 export function failSafeReactMemo<P extends Record<string, unknown>>(
   displayName: string,
   severity: 'strict' | 'gentle',
-  Component: React.FunctionComponent<P>,
+  Component: React.FunctionComponent<React.PropsWithChildren<P>>,
 ): React.NamedExoticComponent<P>
-export function failSafeReactMemo<T extends React.ComponentType<any>>(
+export function failSafeReactMemo<T extends React.ComponentType<React.PropsWithChildren<any>>>(
   displayName: string,
   severity: 'strict' | 'gentle',
   Component: T,
 ): React.MemoExoticComponent<T>
-export function failSafeReactMemo<T extends React.ComponentType<any>>(
+export function failSafeReactMemo<T extends React.ComponentType<React.PropsWithChildren<any>>>(
   displayName: string,
   severity: 'strict' | 'gentle',
   Component: T,
@@ -161,7 +162,7 @@ export function failSafeReactMemo<T extends React.ComponentType<any>>(
 
 function failSafeMemoEqualityFunction(componentDisplayName: string, severity: 'strict' | 'gentle') {
   return function <P>(previousProps: P, nextProps: P): boolean {
-    if (typeof previousProps === 'object') {
+    if (typeof previousProps === 'object' && previousProps != null) {
       let differingPropKeys: Array<string> = []
       let propKeysThatAreDifferentYetDeeplyEqual: Array<string> = []
       for (const propKey of Object.keys(previousProps)) {
@@ -217,7 +218,9 @@ function keepDeepReferenceEqualityInner(
   possibleNewValue: any,
   stackSizeInner: number,
   valueStackSoFar: Set<any>,
-) {
+): any {
+  if (oldValue === possibleNewValue) return oldValue
+
   if (stackSizeInner > 100) {
     return possibleNewValue
   }
@@ -229,8 +232,6 @@ function keepDeepReferenceEqualityInner(
   }
   // mutation
   valueStackSoFar.add(possibleNewValue)
-
-  if (oldValue === possibleNewValue) return oldValue
 
   if (
     oldValue != null &&
@@ -370,6 +371,9 @@ function keepDeepReferenceEqualityInner(
 
     for (i = 0; i < length; i++) {
       var key = keys[i]
+      if (key === undefined) {
+        continue
+      }
 
       if (key !== oldKeys[i]) {
         canSaveOldObject = false
@@ -441,27 +445,16 @@ export function useFlasher<T extends HTMLElement>() {
   return ref
 }
 
-export function betterReactMemo<P extends Record<string, any>>(
-  displayName: string,
-  componentToMemo: React.FunctionComponent<P>,
-  propsAreEqual?: (
-    prevProps: Readonly<React.PropsWithChildren<P>>,
-    nextProps: Readonly<React.PropsWithChildren<P>>,
-  ) => boolean,
-  whyDidYouRender: boolean = false,
-) {
-  componentToMemo.displayName = displayName
-  ;(componentToMemo as any).whyDidYouRender = whyDidYouRender
-  const memoized = React.memo(componentToMemo, propsAreEqual)
-  memoized.displayName = displayName
-  return memoized
+export function getIntrospectiveKeepDeepResult<T>(
+  oldValue: T,
+  newValue: T,
+): KeepDeepEqualityResult<T> {
+  const value = keepDeepReferenceEqualityIfPossible(oldValue, newValue)
+  return keepDeepEqualityResult(value, value === oldValue)
 }
 
 export function createCallFromIntrospectiveKeepDeep<T>(): KeepDeepEqualityCall<T> {
-  return (oldValue, newValue) => {
-    const value = keepDeepReferenceEqualityIfPossible(oldValue, newValue)
-    return keepDeepEqualityResult(value, value === oldValue)
-  }
+  return getIntrospectiveKeepDeepResult
 }
 
 export function useKeepShallowReferenceEquality<T>(possibleNewValue: T, measure = false): T {

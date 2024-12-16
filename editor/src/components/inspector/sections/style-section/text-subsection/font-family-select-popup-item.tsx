@@ -1,10 +1,11 @@
 import React from 'react'
-import { ListChildComponentProps } from 'react-window'
+import type { ListChildComponentProps } from 'react-window'
 import { FlexColumn, useColorTheme } from '../../../../../uuiui'
-import { WebFontFamilyVariant } from '../../../../navigator/external-resources/google-fonts-utils'
-import { CSSFontStyle, CSSFontWeight } from '../../../common/css-utils'
-import { OnSubmitValue } from '../../../controls/control'
-import { isSelectableItemData, ItemData, submitNewValue } from './font-family-select-popup'
+import type { WebFontFamilyVariant } from '../../../../navigator/external-resources/google-fonts-utils'
+import type { CSSFontStyle, CSSFontWeight } from '../../../common/css-utils'
+import type { OnSubmitValue } from '../../../controls/control'
+import type { ItemData } from './font-family-select-popup'
+import { isSelectableItemData, submitNewValue } from './font-family-select-popup'
 import { ProjectTypefaceItem } from './project-typeface-item'
 import { SystedDefaultFontItem } from './system-default-font-item'
 
@@ -26,7 +27,9 @@ interface FontsListChildComponentProps extends ListChildComponentProps {
   }
 }
 
-export const FontFamilySelectPopupItem: React.FunctionComponent<FontsListChildComponentProps> = ({
+export const FontFamilySelectPopupItem: React.FunctionComponent<
+  React.PropsWithChildren<FontsListChildComponentProps>
+> = ({
   data: {
     itemsArray,
     onSubmitFontFamily,
@@ -97,7 +100,7 @@ export const FontFamilySelectPopupItem: React.FunctionComponent<FontsListChildCo
         paddingRight: 12,
         backgroundColor: selected ? colorTheme.inspectorFocusedColor.value : undefined,
         fontSize: 12,
-        color: selected ? 'white' : undefined,
+        color: selected ? colorTheme.bg1.value : undefined,
       }}
       onClick={onClick}
       onMouseOver={onMouseOver}

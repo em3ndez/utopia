@@ -1,16 +1,18 @@
 export function normalizePath(path: Array<string>): Array<string> {
-  return path.reduce((pathSoFar: Array<string>, pathElem: string, index: number) => {
-    if (pathElem === '') {
-      return pathSoFar
+  let result: Array<string> = []
+  for (const elem of path) {
+    switch (elem) {
+      case '':
+      case '.':
+        break
+      case '..':
+        result.pop()
+        break
+      default:
+        result.push(elem)
     }
-    if (pathElem === '.') {
-      return pathSoFar
-    }
-    if (pathElem === '..') {
-      return pathSoFar.slice(0, -1)
-    }
-    return [...pathSoFar, pathElem]
-  }, [])
+  }
+  return result
 }
 
 export function stripTrailingSlash(path: string): string {
@@ -31,8 +33,45 @@ export function getParentDirectory(filepath: string): string {
   return makePathFromParts(getPartsFromPath(filepath).slice(0, -1))
 }
 
+type SubPathCache = { [key: string]: PathCache }
+
+interface PathCache {
+  cachedString: string
+  subPathCache: SubPathCache
+}
+
+function pathCache(cachedString: string, subPathCache: SubPathCache): PathCache {
+  return {
+    cachedString: cachedString,
+    subPathCache: subPathCache,
+  }
+}
+
+let rootPathCache: SubPathCache = {}
+
+function getPathFromCache(parts: Array<string>): string {
+  let workingSubCache: SubPathCache = rootPathCache
+  let workingPathCache: PathCache | null = null
+  let partsSoFar: Array<string> = []
+  for (const part of parts) {
+    partsSoFar.push(part)
+    if (part in workingSubCache) {
+      // The `in` check above proves this does not return `undefined`.
+      workingPathCache = workingSubCache[part]!
+      workingSubCache = workingPathCache.subPathCache
+    } else {
+      const cachedString = `/${partsSoFar.join('/')}`
+      const newPathCache = pathCache(cachedString, {})
+      workingPathCache = newPathCache
+      workingSubCache[part] = newPathCache
+      workingSubCache = newPathCache.subPathCache
+    }
+  }
+  return workingPathCache == null ? '/' : workingPathCache.cachedString
+}
+
 export function makePathFromParts(parts: Array<string>): string {
-  return `/${parts.join('/')}`
+  return getPathFromCache(parts)
 }
 
 export function getPartsFromPath(path: string): Array<string> {
@@ -44,7 +83,7 @@ export function absolutePathFromRelativePath(
   originIsDir: boolean,
   relativePath: string,
 ): string {
-  if (relativePath.startsWith('/') || !relativePath.includes('/')) {
+  if (!relativePath.startsWith('.')) {
     // Not actually relative in this case.
     return relativePath
   } else {

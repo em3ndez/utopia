@@ -1,6 +1,5 @@
+import type { ProjectContentTreeRoot, ProjectContentsTree } from '../../../components/assets'
 import {
-  ProjectContentTreeRoot,
-  ProjectContentsTree,
   isProjectContentFile,
   getProjectFileFromTree,
   zipContentsTree,
@@ -10,28 +9,25 @@ import {
   getSavedCodeFromTextFile,
   getUnsavedCodeFromTextFile,
 } from '../../../core/model/project-file-utils'
-import { ProjectFile, isTextFile } from '../../../core/shared/project-file-types'
+import type { ProjectFile } from '../../../core/shared/project-file-types'
+import { isTextFile } from '../../../core/shared/project-file-types'
 import { fastForEach, isBrowserEnvironment } from '../../../core/shared/utils'
 import {
   applyProjectChanges,
   getCodeEditorDecorations,
   getSelectedElementChangedMessage,
+  sendMessage,
 } from '../../../core/vscode/vscode-bridge'
-import {
+import type {
   UpdateDecorationsMessage,
   SelectedElementChanged,
-  AccumulatedToVSCodeMessage,
-  ToVSCodeMessageNoAccumulated,
-  accumulatedToVSCodeMessage,
-  sendMessage,
+  FromUtopiaToVSCodeMessage,
 } from 'utopia-vscode-common'
-import {
-  EditorState,
-  getHighlightBoundsForElementPaths,
-  getHighlightBoundsForUids,
-  getUnderlyingVSCodeBridgeID,
-} from './editor-state'
+import type { EditorState } from './editor-state'
+import { getHighlightBoundsForElementPaths } from './editor-state'
 import { shallowEqual } from '../../../core/shared/equality-utils'
+import * as EP from '../../../core/shared/element-path'
+import { collateCollaborativeProjectChanges } from './collaborative-editing'
 
 export interface WriteProjectFileChange {
   type: 'WRITE_PROJECT_FILE'
@@ -76,14 +72,16 @@ export function ensureDirectoryExistsChange(fullPath: string): EnsureDirectoryEx
   }
 }
 
-export type ProjectChange = WriteProjectFileChange | DeletePathChange | EnsureDirectoryExistsChange
+export type ProjectFileChange =
+  | WriteProjectFileChange
+  | DeletePathChange
+  | EnsureDirectoryExistsChange
 
 export function collateProjectChanges(
-  projectID: string,
   oldContents: ProjectContentTreeRoot,
   newContents: ProjectContentTreeRoot,
-): Array<ProjectChange> {
-  let changesToProcess: Array<ProjectChange> = []
+): Array<ProjectFileChange> {
+  let changesToProcess: Array<ProjectFileChange> = []
 
   function applyChanges(
     fullPath: string,
@@ -106,11 +104,19 @@ export function collateProjectChanges(
           const fileMarkedDirtyButNoCodeChangeYet =
             firstUnsavedContent == null && secondUnsavedContent === firstSavedContent
 
-          // When a parsed model is updated but that change hasn't been reflected in the code yet, we end up with a file
-          // that has no code change, so we don't want to write that to the FS for VS Code to act on it until the new code
-          // has been generated
+          const revisionStateWarrantWrite =
+            secondContents.content.fileContents.revisionsState === 'BOTH_MATCH' ||
+            secondContents.content.fileContents.revisionsState ===
+              'CODE_AHEAD_BUT_PLEASE_TELL_VSCODE_ABOUT_IT'
+
           const fileShouldBeWritten =
-            savedContentChanged || (unsavedContentChanged && !fileMarkedDirtyButNoCodeChangeYet)
+            // This means that we'll only send the code across when it is in sync with the parsed model, rather
+            // than sending a stale version of the code across whilst waiting on the new version.
+            revisionStateWarrantWrite &&
+            // When a parsed model is updated but that change hasn't been reflected in the code yet, we end up with a file
+            // that has no code change, so we don't want to write that to the FS for VS Code to act on it until the new code
+            // has been generated
+            (savedContentChanged || (unsavedContentChanged && !fileMarkedDirtyButNoCodeChangeYet))
 
           if (fileShouldBeWritten) {
             changesToProcess.push(writeProjectFileChange(fullPath, secondContents.content))
@@ -168,6 +174,7 @@ export function collateProjectChanges(
       zipContentsTree(oldContents, newContents, onElement)
     }
   }
+
   return changesToProcess
 }
 
@@ -183,10 +190,10 @@ export function shouldIncludeVSCodeDecorations(
     [...newEditorState.highlightedViews, ...newEditorState.selectedViews],
     newEditorState,
   )
-  return (
-    oldEditorState.selectedViews !== newEditorState.selectedViews ||
-    oldEditorState.highlightedViews !== newEditorState.highlightedViews ||
-    !shallowEqual(oldHighlightBounds, newHighlightBounds)
+  return !(
+    EP.arrayOfPathsEqual(oldEditorState.selectedViews, newEditorState.selectedViews) &&
+    EP.arrayOfPathsEqual(oldEditorState.highlightedViews, newEditorState.highlightedViews) &&
+    shallowEqual(oldHighlightBounds, newHighlightBounds)
   )
 }
 
@@ -194,49 +201,48 @@ export function shouldIncludeSelectedElementChanges(
   oldEditorState: EditorState,
   newEditorState: EditorState,
 ): boolean {
-  const oldHighlightBounds = getHighlightBoundsForElementPaths(
-    oldEditorState.selectedViews,
-    oldEditorState,
-  )
-  const newHighlightBounds = getHighlightBoundsForElementPaths(
-    newEditorState.selectedViews,
-    newEditorState,
-  )
   return (
-    (oldEditorState.selectedViews !== newEditorState.selectedViews ||
-      !shallowEqual(oldHighlightBounds, newHighlightBounds)) &&
+    !EP.arrayOfPathsEqual(oldEditorState.selectedViews, newEditorState.selectedViews) &&
     newEditorState.selectedViews.length > 0
   )
+}
+
+export interface ProjectContentProjectChanges {
+  collabProjectChanges: Array<ProjectFileChange>
+  changesForVSCode: Array<ProjectFileChange>
 }
 
 export function getProjectContentsChanges(
   oldEditorState: EditorState,
   newEditorState: EditorState,
-  updateCameFromVSCode: boolean,
-): Array<ProjectChange> {
-  if (oldEditorState.vscodeBridgeId != null && !updateCameFromVSCode) {
-    return collateProjectChanges(
-      getUnderlyingVSCodeBridgeID(oldEditorState.vscodeBridgeId),
-      oldEditorState.projectContents,
-      newEditorState.projectContents,
-    )
-  } else {
-    return []
+): ProjectContentProjectChanges {
+  const projectChanges = collateProjectChanges(
+    oldEditorState.projectContents,
+    newEditorState.projectContents,
+  )
+  const collabProjectChanges = collateCollaborativeProjectChanges(
+    oldEditorState.projectContents,
+    newEditorState.projectContents,
+  )
+
+  return {
+    collabProjectChanges: collabProjectChanges,
+    changesForVSCode: projectChanges,
   }
 }
 
-export interface AccumulatedVSCodeChanges {
-  fileChanges: Array<ProjectChange>
+export interface ProjectChanges {
+  fileChanges: ProjectContentProjectChanges
   updateDecorations: UpdateDecorationsMessage | null
   selectedChanged: SelectedElementChanged | null
 }
 
 function combineFileChanges(
-  first: Array<ProjectChange>,
-  second: Array<ProjectChange>,
-): Array<ProjectChange> {
+  first: Array<ProjectFileChange>,
+  second: Array<ProjectFileChange>,
+): Array<ProjectFileChange> {
   let writeFilePathsSeen: Set<string> = new Set()
-  let reversedResult: Array<ProjectChange> = []
+  let reversedResult: Array<ProjectFileChange> = []
   fastForEach([...first, ...second].reverse(), (change) => {
     if (change.type === 'WRITE_PROJECT_FILE') {
       if (writeFilePathsSeen.has(change.fullPath)) {
@@ -255,57 +261,66 @@ function combineFileChanges(
   return result
 }
 
-export function combineAccumulatedVSCodeChanges(
-  first: AccumulatedVSCodeChanges,
-  second: AccumulatedVSCodeChanges,
-): AccumulatedVSCodeChanges {
+export function combineProjectChanges(
+  first: ProjectChanges,
+  second: ProjectChanges,
+): ProjectChanges {
   return {
-    fileChanges: combineFileChanges(first.fileChanges, second.fileChanges),
+    fileChanges: {
+      changesForVSCode: combineFileChanges(
+        first.fileChanges.changesForVSCode,
+        second.fileChanges.changesForVSCode,
+      ),
+      collabProjectChanges: combineFileChanges(
+        first.fileChanges.collabProjectChanges,
+        second.fileChanges.collabProjectChanges,
+      ),
+    },
     updateDecorations: second.updateDecorations ?? first.updateDecorations,
     selectedChanged: second.selectedChanged ?? first.selectedChanged,
   }
 }
 
-export const emptyAccumulatedVSCodeChanges: AccumulatedVSCodeChanges = {
-  fileChanges: [],
+export const emptyProjectChanges: ProjectChanges = {
+  fileChanges: {
+    changesForVSCode: [],
+    collabProjectChanges: [],
+  },
   updateDecorations: null,
   selectedChanged: null,
 }
 
-export function localAccumulatedToVSCodeAccumulated(
-  local: AccumulatedVSCodeChanges,
-): AccumulatedToVSCodeMessage {
-  let messages: Array<ToVSCodeMessageNoAccumulated> = []
+function projectChangesToVSCodeMessages(local: ProjectChanges): Array<FromUtopiaToVSCodeMessage> {
+  let messages: Array<FromUtopiaToVSCodeMessage> = []
   if (local.updateDecorations != null) {
     messages.push(local.updateDecorations)
   }
   if (local.selectedChanged != null) {
     messages.push(local.selectedChanged)
   }
-  return accumulatedToVSCodeMessage(messages)
+  return messages
 }
 
-export function getVSCodeChanges(
+export function getProjectChanges(
   oldEditorState: EditorState,
   newEditorState: EditorState,
-  updateCameFromVSCode: boolean,
-): AccumulatedVSCodeChanges {
+  updatedFromVSCode: boolean,
+): ProjectChanges {
+  const projectChanges = getProjectContentsChanges(oldEditorState, newEditorState)
   return {
-    fileChanges: getProjectContentsChanges(oldEditorState, newEditorState, updateCameFromVSCode),
+    fileChanges: updatedFromVSCode ? { ...projectChanges, changesForVSCode: [] } : projectChanges,
     updateDecorations: shouldIncludeVSCodeDecorations(oldEditorState, newEditorState)
       ? getCodeEditorDecorations(newEditorState)
       : null,
-    selectedChanged: shouldIncludeSelectedElementChanges(oldEditorState, newEditorState)
-      ? getSelectedElementChangedMessage(newEditorState)
-      : null,
+    selectedChanged:
+      !updatedFromVSCode && shouldIncludeSelectedElementChanges(oldEditorState, newEditorState)
+        ? getSelectedElementChangedMessage(newEditorState, 'do-not-force-navigation')
+        : null,
   }
 }
 
-export async function sendVSCodeChanges(changes: AccumulatedVSCodeChanges): Promise<void> {
-  await applyProjectChanges(changes.fileChanges)
-  const toVSCodeAccumulated = localAccumulatedToVSCodeAccumulated(changes)
-  if (toVSCodeAccumulated.messages.length > 0) {
-    await sendMessage(toVSCodeAccumulated)
-  }
-  return Promise.resolve()
+export function sendVSCodeChanges(changes: ProjectChanges) {
+  applyProjectChanges(changes.fileChanges.changesForVSCode)
+  const toVSCodeAccumulated = projectChangesToVSCodeMessages(changes)
+  toVSCodeAccumulated.forEach((message) => sendMessage(message))
 }

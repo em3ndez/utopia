@@ -4,37 +4,211 @@ import type {
   StaticElementPathPart,
   ElementPath,
 } from './project-file-types'
-import { CanvasRectangle, LocalRectangle, LocalPoint, zeroCanvasRect } from './math-utils'
-import { Either, foldEither, isLeft, left, right } from './either'
+import type { CanvasRectangle, LocalPoint, MaybeInfinityCanvasRectangle } from './math-utils'
+import { zeroCanvasRect } from './math-utils'
+import type { Either } from './either'
+import { flatMapEither, isRight, left, mapEither, right } from './either'
 import { v4 as UUID } from 'uuid'
-import { RawSourceMap } from '../workers/ts/ts-typings/RawSourceMap'
+import type { RawSourceMap } from '../workers/ts/ts-typings/RawSourceMap'
 import * as PP from './property-path'
-import { Sides, sides, NormalisedFrame, LayoutSystem } from 'utopia-api'
-import { fastForEach, unknownObjectProperty } from './utils'
-import { addAllUniquely, mapDropNulls, reverse } from './array-utils'
+import type { Sides, LayoutSystem } from 'utopia-api/core'
+import { sides } from 'utopia-api/core'
+import { assertNever, fastForEach, unknownObjectProperty } from './utils'
+import { addAllUniquely, mapDropNulls } from './array-utils'
 import { objectMap } from './object-utils'
-import { CSSPosition } from '../../components/inspector/common/css-utils'
-import {
-  dropKeyFromNestedObject,
-  getJSXAttributeAtPathInner,
-  ModifiableAttribute,
-  setJSXValueInAttributeAtPath,
-} from './jsx-attributes'
+import type {
+  CSSKeyword,
+  CSSPosition,
+  FlexDirection,
+  GridAutoFlow,
+  GridDimension,
+} from '../../components/inspector/common/css-utils'
+import type { ModifiableAttribute } from './jsx-attributes'
 import * as EP from './element-path'
 import { firstLetterIsLowerCase } from './string-utils'
 import { intrinsicHTMLElementNamesAsStrings } from './dom-utils'
 import type { MapLike } from 'typescript'
 import { forceNotNull } from './optional-utils'
+import type {
+  AlignContent,
+  FlexAlignment,
+  FlexJustifyContent,
+  SelfAlignment,
+} from '../../components/inspector/inspector-common'
+import { allComments } from './utopia-flags'
+import type { Optic } from './optics/optics'
+import { fromField } from './optics/optic-creators'
+import { jsxSimpleAttributeToValue } from './jsx-attribute-utils'
+import type {
+  ParsedComments,
+  MultiLineComment,
+  SingleLineComment,
+  WithComments,
+  JSExpressionValue,
+  PartOfJSXAttributeValue,
+  JSXAttributeNotFound,
+  JSOpaqueArbitraryStatement,
+  JSAssignment,
+  JSAssignmentStatement,
+  JSExpressionOtherJavaScript,
+  JSXMapExpression,
+  JSXSpreadAssignment,
+  JSXPropertyAssignment,
+  JSExpressionNestedObject,
+  JSXArrayValue,
+  JSXArraySpread,
+  JSExpressionNestedArray,
+  JSExpressionFunctionCall,
+  JSIdentifier,
+  JSPropertyAccess,
+  JSElementAccess,
+  JSXAttributesEntry,
+  JSXAttributesSpread,
+  JSXElementName,
+  JSXElement,
+  WithElementsWithin,
+  JSXTextBlock,
+  JSXFragment,
+  JSXConditionalExpression,
+  RegularParam,
+  DestructuredParamPart,
+  DestructuredObject,
+  DestructuredArray,
+  UtopiaJSXComponent,
+  ImportStatement,
+  UnparsedCode,
+  SameFileOrigin,
+  ImportedOrigin,
+  Comment,
+  JSArbitraryStatement,
+  JSXProperty,
+  JSXArrayElement,
+  OptionallyChained,
+  IdentifierOrAccess,
+  JSExpression,
+  JSExpressionMapOrOtherJavascript,
+  JSXAttributesPart,
+  JSXAttributes,
+  JSXElementWithoutUID,
+  JSXConditionalExpressionWithoutUID,
+  JSXFragmentWithoutUID,
+  JSXMapExpressionWithoutUID,
+  ElementsWithin,
+  JSXElementLike,
+  JSXElementChild,
+  JSXElementChildWithoutUID,
+  JSXElementChildren,
+  DestructuredArrayPart,
+  BoundParam,
+  Param,
+  VarLetOrConst,
+  FunctionDeclarationSyntax,
+  BlockOrExpression,
+  ArbitraryJSBlock,
+  TopLevelElement,
+  ComputedStyle,
+  StyleAttributeMetadataEntry,
+  StyleAttributeMetadata,
+  ImportInfo,
+  ActiveAndDefaultConditionValues,
+  ConditionValue,
+  DetectedLayoutSystem,
+  TextDirection,
+  HugProperty,
+  HugPropertyWidthHeight,
+  ElementsByUID,
+  FunctionWrap,
+} from 'utopia-shared/src/types/element-template'
+import type { VariableData } from '../../components/canvas/ui-jsx-canvas'
 
-export interface ParsedComments {
-  leadingComments: Array<Comment>
-  trailingComments: Array<Comment>
+export type {
+  ParsedComments,
+  MultiLineComment,
+  SingleLineComment,
+  WithComments,
+  JSExpressionValue,
+  PartOfJSXAttributeValue,
+  JSXAttributeNotFound,
+  JSOpaqueArbitraryStatement,
+  JSAssignment,
+  JSAssignmentStatement,
+  JSExpressionOtherJavaScript,
+  JSXMapExpression,
+  JSXSpreadAssignment,
+  JSXPropertyAssignment,
+  JSExpressionNestedObject,
+  JSXArrayValue,
+  JSXArraySpread,
+  JSExpressionNestedArray,
+  JSExpressionFunctionCall,
+  JSIdentifier,
+  JSPropertyAccess,
+  JSElementAccess,
+  JSXAttributesEntry,
+  JSXAttributesSpread,
+  JSXElementName,
+  JSXElement,
+  WithElementsWithin,
+  JSXTextBlock,
+  JSXFragment,
+  JSXConditionalExpression,
+  RegularParam,
+  DestructuredParamPart,
+  DestructuredObject,
+  DestructuredArray,
+  UtopiaJSXComponent,
+  ImportStatement,
+  UnparsedCode,
+  SameFileOrigin,
+  ImportedOrigin,
+  Comment,
+  JSArbitraryStatement,
+  JSXProperty,
+  JSXArrayElement,
+  OptionallyChained,
+  IdentifierOrAccess,
+  JSExpression,
+  JSExpressionMapOrOtherJavascript,
+  JSXAttributesPart,
+  JSXAttributes,
+  JSXElementWithoutUID,
+  JSXConditionalExpressionWithoutUID,
+  JSXFragmentWithoutUID,
+  JSXMapExpressionWithoutUID,
+  ElementsWithin,
+  JSXElementLike,
+  JSXElementChild,
+  JSXElementChildWithoutUID,
+  JSXElementChildren,
+  DestructuredArrayPart,
+  BoundParam,
+  Param,
+  VarLetOrConst,
+  FunctionDeclarationSyntax,
+  BlockOrExpression,
+  ArbitraryJSBlock,
+  TopLevelElement,
+  ComputedStyle,
+  StyleAttributeMetadataEntry,
+  StyleAttributeMetadata,
+  ImportInfo,
+  ActiveAndDefaultConditionValues,
+  ConditionValue,
+  DetectedLayoutSystem,
+  TextDirection,
+  HugProperty,
+  HugPropertyWidthHeight,
+  ElementsByUID,
 }
 
-export const emptyComments: ParsedComments = {
-  leadingComments: [],
-  trailingComments: [],
-}
+import {
+  emptyComments,
+  emptyComputedStyle,
+  emptyAttributeMetadata,
+  simpleFunctionWrap,
+} from 'utopia-shared/src/types/element-template'
+import type { GridCellGlobalFrames } from '../../components/canvas/canvas-strategies/strategies/grid-helpers'
+export { emptyComments, emptyComputedStyle, emptyAttributeMetadata }
 
 export function isParsedCommentsEmpty(comments: ParsedComments): boolean {
   return comments.leadingComments.length === 0 && comments.trailingComments.length === 0
@@ -48,17 +222,6 @@ export function parsedComments(
     leadingComments: leadingComments,
     trailingComments: trailingComments,
   }
-}
-
-interface BaseComment {
-  comment: string
-  rawText: string
-  trailingNewLine: boolean
-  pos: number | null
-}
-
-export interface MultiLineComment extends BaseComment {
-  type: 'MULTI_LINE_COMMENT'
 }
 
 export function multiLineComment(
@@ -76,10 +239,6 @@ export function multiLineComment(
   }
 }
 
-export interface SingleLineComment extends BaseComment {
-  type: 'SINGLE_LINE_COMMENT'
-}
-
 export function singleLineComment(
   comment: string,
   rawText: string,
@@ -95,8 +254,6 @@ export function singleLineComment(
   }
 }
 
-export type Comment = MultiLineComment | SingleLineComment
-
 export function isMultiLineComment(comment: Comment): comment is MultiLineComment {
   return comment.type === 'MULTI_LINE_COMMENT'
 }
@@ -105,20 +262,20 @@ export function isSingleLineComment(comment: Comment): comment is SingleLineComm
   return comment.type === 'SINGLE_LINE_COMMENT'
 }
 
-export interface WithComments {
-  comments: ParsedComments
+export function isWithComments(e: unknown): e is WithComments {
+  return (e as WithComments).comments != null
 }
 
-export interface JSXAttributeValue<T> extends WithComments {
-  type: 'ATTRIBUTE_VALUE'
-  value: T
-}
-
-export function jsxAttributeValue<T>(value: T, comments: ParsedComments): JSXAttributeValue<T> {
+export function jsExpressionValue<T>(
+  value: T,
+  comments: ParsedComments,
+  uid: string = UUID(),
+): JSExpressionValue<T> {
   return {
     type: 'ATTRIBUTE_VALUE',
     value: value,
     comments: comments,
+    uid: uid,
   }
 }
 
@@ -133,10 +290,6 @@ export function jsxAttributeValue<T>(value: T, comments: ParsedComments): JSXAtt
  we will get a `PART_OF_ATTRIBUTE_VALUE`, whose value is `'red'`. If alternatively `style` were an `ATTRIBUTE_NESTED_OBJECT`, then
  each of its contents would all be a `JSXAttribute`, in which case `'red'` might be an `ATTRIBUTE_VALUE`
  */
-export interface PartOfJSXAttributeValue {
-  type: 'PART_OF_ATTRIBUTE_VALUE'
-  value: any
-}
 
 export function partOfJsxAttributeValue(value: any): PartOfJSXAttributeValue {
   return {
@@ -145,51 +298,137 @@ export function partOfJsxAttributeValue(value: any): PartOfJSXAttributeValue {
   }
 }
 
-export interface JSXAttributeNotFound {
-  type: 'ATTRIBUTE_NOT_FOUND'
-}
-
 export function jsxAttributeNotFound(): JSXAttributeNotFound {
   return {
     type: 'ATTRIBUTE_NOT_FOUND',
   }
 }
 
-export interface JSXAttributeOtherJavaScript {
-  type: 'ATTRIBUTE_OTHER_JAVASCRIPT'
-  javascript: string
-  transpiledJavascript: string
-  definedElsewhere: Array<string>
-  sourceMap: RawSourceMap | null
-  uniqueID: string
-  elementsWithin: ElementsWithin
+export function jsOpaqueArbitraryStatement(
+  originalJavascript: string,
+  definedWithin: Array<string>,
+  definedElsewhere: Array<string>,
+  uid: string,
+): JSOpaqueArbitraryStatement {
+  return {
+    type: 'JS_OPAQUE_ARBITRARY_STATEMENT',
+    originalJavascript: originalJavascript,
+    definedWithin: definedWithin,
+    definedElsewhere: definedElsewhere,
+    uid: uid,
+  }
 }
 
-export function jsxAttributeOtherJavaScript(
-  javascript: string,
+export function jsAssignment(leftHandSide: BoundParam, rightHandSide: JSExpression): JSAssignment {
+  return {
+    type: 'JS_ASSIGNMENT',
+    leftHandSide: leftHandSide,
+    rightHandSide: rightHandSide,
+  }
+}
+
+export function jsAssignmentStatement(
+  declarationKeyword: 'let' | 'const' | 'var',
+  assignments: Array<JSAssignment>,
+  uid: string,
+): JSAssignmentStatement {
+  return {
+    type: 'JS_ASSIGNMENT_STATEMENT',
+    declarationKeyword: declarationKeyword,
+    assignments: assignments,
+    uid: uid,
+  }
+}
+
+export function simpleJSAssignmentStatement(
+  declarationKeyword: JSAssignmentStatement['declarationKeyword'],
+  name: string,
+  value: unknown,
+): JSAssignmentStatement {
+  return jsAssignmentStatement(
+    declarationKeyword,
+    [
+      jsAssignment(
+        regularParam(name, jsExpressionValue(value, emptyComments)),
+        jsExpressionValue(value, emptyComments),
+      ),
+    ],
+    '',
+  )
+}
+
+export function isJSAssignmentStatement(
+  statement: JSArbitraryStatement,
+): statement is JSAssignmentStatement {
+  return statement.type === 'JS_ASSIGNMENT_STATEMENT'
+}
+
+export function isJSOpaqueArbitraryStatement(
+  statement: JSArbitraryStatement,
+): statement is JSOpaqueArbitraryStatement {
+  return statement.type === 'JS_OPAQUE_ARBITRARY_STATEMENT'
+}
+
+export function jsExpressionOtherJavaScript(
+  params: Array<Param>,
+  originalJavascript: string,
+  javascriptWithUIDs: string,
   transpiledJavascript: string,
   definedElsewhere: Array<string>,
   sourceMap: RawSourceMap | null,
   elementsWithin: ElementsWithin,
-): JSXAttributeOtherJavaScript {
+  comments: ParsedComments,
+  uid: string = UUID(),
+): JSExpressionOtherJavaScript {
   return {
     type: 'ATTRIBUTE_OTHER_JAVASCRIPT',
-    javascript: javascript,
+    params: params,
+    originalJavascript: originalJavascript,
+    javascriptWithUIDs: javascriptWithUIDs,
     transpiledJavascript: transpiledJavascript,
     definedElsewhere: definedElsewhere,
     sourceMap: sourceMap,
-    uniqueID: UUID(),
+    uid: uid,
+    comments: comments,
     elementsWithin: elementsWithin,
   }
 }
 
-export interface JSXSpreadAssignment extends WithComments {
-  type: 'SPREAD_ASSIGNMENT'
-  value: JSXAttribute
+export function jsExpressionOtherJavaScriptSimple(
+  javascript: string,
+  definedElsewhere: Array<string>,
+): JSExpressionOtherJavaScript {
+  return jsExpressionOtherJavaScript(
+    [],
+    javascript,
+    javascript,
+    `return ${javascript}`,
+    definedElsewhere,
+    null,
+    {},
+    emptyComments,
+  )
+}
+
+export function jsxMapExpression(
+  valueToMap: JSExpression,
+  mapFunction: JSExpression,
+  comments: ParsedComments,
+  valuesInScopeFromParameters: Array<string>,
+  uid: string = UUID(),
+): JSXMapExpression {
+  return {
+    type: 'JSX_MAP_EXPRESSION',
+    valueToMap: valueToMap,
+    mapFunction: mapFunction,
+    uid: uid,
+    comments: comments,
+    valuesInScopeFromParameters: valuesInScopeFromParameters,
+  }
 }
 
 export function jsxSpreadAssignment(
-  value: JSXAttribute,
+  value: JSExpression,
   comments: ParsedComments,
 ): JSXSpreadAssignment {
   return {
@@ -199,16 +438,9 @@ export function jsxSpreadAssignment(
   }
 }
 
-export interface JSXPropertyAssignment extends WithComments {
-  type: 'PROPERTY_ASSIGNMENT'
-  key: string
-  value: JSXAttribute
-  keyComments: ParsedComments
-}
-
 export function jsxPropertyAssignment(
-  key: string,
-  value: JSXAttribute,
+  key: string | number,
+  value: JSExpression,
   comments: ParsedComments,
   keyComments: ParsedComments,
 ): JSXPropertyAssignment {
@@ -221,8 +453,6 @@ export function jsxPropertyAssignment(
   }
 }
 
-export type JSXProperty = JSXPropertyAssignment | JSXSpreadAssignment
-
 export function isSpreadAssignment(property: JSXProperty): property is JSXSpreadAssignment {
   return property.type === 'SPREAD_ASSIGNMENT'
 }
@@ -231,41 +461,35 @@ export function isPropertyAssignment(property: JSXProperty): property is JSXProp
   return property.type === 'PROPERTY_ASSIGNMENT'
 }
 
-export interface JSXAttributeNestedObject extends WithComments {
-  type: 'ATTRIBUTE_NESTED_OBJECT'
-  content: Array<JSXProperty>
-}
-
-export function jsxAttributeNestedObject(
+export function jsExpressionNestedObject(
   content: Array<JSXProperty>,
   comments: ParsedComments,
-): JSXAttributeNestedObject {
+  uid: string = UUID(),
+): JSExpressionNestedObject {
   return {
     type: 'ATTRIBUTE_NESTED_OBJECT',
     content: content,
     comments: comments,
+    uid: uid,
   }
 }
 
 export function jsxAttributeNestedObjectSimple(
   content: Array<JSXAttributesEntry>,
   comments: ParsedComments,
-): JSXAttributeNestedObject {
+  uid: string = UUID(),
+): JSExpressionNestedObject {
   return {
     type: 'ATTRIBUTE_NESTED_OBJECT',
     content: content.map((elem) =>
       jsxPropertyAssignment(elem.key, elem.value, emptyComments, emptyComments),
     ),
     comments: comments,
+    uid: uid,
   }
 }
 
-export interface JSXArrayValue extends WithComments {
-  type: 'ARRAY_VALUE'
-  value: JSXAttribute
-}
-
-export function jsxArrayValue(value: JSXAttribute, comments: ParsedComments): JSXArrayValue {
+export function jsxArrayValue(value: JSExpression, comments: ParsedComments): JSXArrayValue {
   return {
     type: 'ARRAY_VALUE',
     value: value,
@@ -273,20 +497,13 @@ export function jsxArrayValue(value: JSXAttribute, comments: ParsedComments): JS
   }
 }
 
-export interface JSXArraySpread extends WithComments {
-  type: 'ARRAY_SPREAD'
-  value: JSXAttribute
-}
-
-export function jsxArraySpread(value: JSXAttribute, comments: ParsedComments): JSXArraySpread {
+export function jsxArraySpread(value: JSExpression, comments: ParsedComments): JSXArraySpread {
   return {
     type: 'ARRAY_SPREAD',
     value: value,
     comments: comments,
   }
 }
-
-export type JSXArrayElement = JSXArrayValue | JSXArraySpread
 
 export function isArrayValue(elem: JSXArrayElement): elem is JSXArrayValue {
   return elem.type === 'ARRAY_VALUE'
@@ -296,63 +513,161 @@ export function isArraySpread(elem: JSXArrayElement): elem is JSXArraySpread {
   return elem.type === 'ARRAY_SPREAD'
 }
 
-export interface JSXAttributeNestedArray extends WithComments {
-  type: 'ATTRIBUTE_NESTED_ARRAY'
-  content: Array<JSXArrayElement>
-}
-
-export function jsxAttributeNestedArray(
+export function jsExpressionNestedArray(
   content: Array<JSXArrayElement>,
   comments: ParsedComments,
-): JSXAttributeNestedArray {
+  uid: string = UUID(),
+): JSExpressionNestedArray {
   return {
     type: 'ATTRIBUTE_NESTED_ARRAY',
     content: content,
     comments: comments,
+    uid: uid,
   }
 }
 
 export function jsxAttributeNestedArraySimple(
-  content: Array<JSXAttribute>,
-): JSXAttributeNestedArray {
-  return jsxAttributeNestedArray(
+  content: Array<JSExpression>,
+): JSExpressionNestedArray {
+  return jsExpressionNestedArray(
     content.map((value) => jsxArrayValue(value, emptyComments)),
     emptyComments,
   )
 }
 
-export interface JSXAttributeFunctionCall {
-  type: 'ATTRIBUTE_FUNCTION_CALL'
-  functionName: string
-  parameters: Array<JSXAttribute>
-}
-
-export function jsxAttributeFunctionCall(
+export function jsExpressionFunctionCall(
   functionName: string,
-  parameters: Array<JSXAttribute>,
-): JSXAttributeFunctionCall {
+  parameters: Array<JSExpression>,
+  uid: string = UUID(),
+): JSExpressionFunctionCall {
   return {
     type: 'ATTRIBUTE_FUNCTION_CALL',
     functionName: functionName,
     parameters: parameters,
+    uid: uid,
   }
 }
 
-export type JSXAttribute =
-  | JSXAttributeValue<any>
-  | JSXAttributeOtherJavaScript
-  | JSXAttributeNestedArray
-  | JSXAttributeNestedObject
-  | JSXAttributeFunctionCall
-
-export function clearJSXAttributeOtherJavaScriptUniqueIDs(
-  attribute: JSXAttributeOtherJavaScript,
-): JSXAttributeOtherJavaScript {
-  const updatedElementsWithin = objectMap(clearJSXElementUniqueIDs, attribute.elementsWithin)
+export function jsIdentifier(
+  name: string,
+  uid: string,
+  sourceMap: RawSourceMap | null,
+  comments: ParsedComments,
+): JSIdentifier {
   return {
-    ...attribute,
-    uniqueID: '',
+    type: 'JS_IDENTIFIER',
+    name: name,
+    uid: uid,
+    sourceMap: sourceMap,
+    comments: comments,
+  }
+}
+
+export function isJSIdentifier(expression: JSXElementChild): expression is JSIdentifier {
+  return expression.type === 'JS_IDENTIFIER'
+}
+
+export function isJSIdentifierForName(
+  expression: JSExpression,
+  name: string,
+): expression is JSIdentifier {
+  return isJSIdentifier(expression) && expression.name === name
+}
+
+export function jsPropertyAccess(
+  onValue: JSExpression,
+  property: string,
+  uid: string,
+  sourceMap: RawSourceMap | null,
+  comments: ParsedComments,
+  originalJavascript: string,
+  optionallyChained: OptionallyChained,
+): JSPropertyAccess {
+  return {
+    type: 'JS_PROPERTY_ACCESS',
+    onValue: onValue,
+    property: property,
+    uid: uid,
+    sourceMap: sourceMap,
+    originalJavascript: originalJavascript,
+    optionallyChained: optionallyChained,
+    comments: comments,
+  }
+}
+
+export function isJSPropertyAccess(expression: JSXElementChild): expression is JSPropertyAccess {
+  return expression.type === 'JS_PROPERTY_ACCESS'
+}
+
+export function isJSPropertyAccessForProperty(
+  expression: JSExpression,
+  property: string,
+): expression is JSPropertyAccess {
+  return isJSPropertyAccess(expression) && expression.property === property
+}
+
+export function jsElementAccess(
+  onValue: JSExpression,
+  element: JSExpression,
+  uid: string,
+  sourceMap: RawSourceMap | null,
+  comments: ParsedComments,
+  originalJavascript: string,
+  optionallyChained: OptionallyChained,
+): JSElementAccess {
+  return {
+    type: 'JS_ELEMENT_ACCESS',
+    onValue: onValue,
+    element: element,
+    uid: uid,
+    sourceMap: sourceMap,
+    originalJavascript: originalJavascript,
+    optionallyChained: optionallyChained,
+    comments: comments,
+  }
+}
+
+export function isJSElementAccess(expression: JSXElementChild): expression is JSElementAccess {
+  return expression.type === 'JS_ELEMENT_ACCESS'
+}
+
+export function isIdentifierOrAccess(
+  expression: JSXElementChild,
+): expression is IdentifierOrAccess {
+  return (
+    isJSIdentifier(expression) || isJSPropertyAccess(expression) || isJSElementAccess(expression)
+  )
+}
+
+export function clearJSXMapExpressionUniqueIDs(mapExpression: JSXMapExpression): JSXMapExpression {
+  const updatedValueToMap = clearExpressionUniqueIDs(mapExpression.valueToMap)
+  const updatedMapFunction = clearExpressionUniqueIDs(mapExpression.mapFunction)
+  return {
+    ...mapExpression,
+    uid: '',
+    valueToMap: updatedValueToMap,
+    mapFunction: updatedMapFunction,
+  }
+}
+
+export function clearJSExpressionOtherJavaScriptUniqueIDs(
+  expression: JSExpressionOtherJavaScript,
+): JSExpressionOtherJavaScript {
+  const updatedElementsWithin = objectMap(clearJSXElementLikeUniqueIDs, expression.elementsWithin)
+  return {
+    ...expression,
+    uid: '',
     elementsWithin: updatedElementsWithin,
+  }
+}
+
+export function clearJSExpressionOtherJavaScriptOrMapExpressionUniqueIDs(
+  expression: JSExpressionMapOrOtherJavascript,
+): JSExpressionMapOrOtherJavascript {
+  if (isJSXMapExpression(expression)) {
+    return clearJSXMapExpressionUniqueIDs(expression)
+  } else {
+    return clearJSExpressionOtherJavaScriptUniqueIDs(expression)
   }
 }
 
@@ -377,11 +692,16 @@ export function simplifyAttributesIfPossible(attributes: JSXAttributes): JSXAttr
   })
 }
 
-export function simplifyAttributeIfPossible(attribute: JSXAttribute): JSXAttribute {
+export function simplifyAttributeIfPossible(attribute: JSExpression): JSExpression {
   switch (attribute.type) {
     case 'ATTRIBUTE_VALUE':
+    case 'JSX_MAP_EXPRESSION':
     case 'ATTRIBUTE_OTHER_JAVASCRIPT':
     case 'ATTRIBUTE_FUNCTION_CALL':
+    case 'JS_IDENTIFIER':
+    case 'JS_ELEMENT_ACCESS':
+    case 'JS_PROPERTY_ACCESS':
+    case 'JSX_ELEMENT':
       return attribute
     case 'ATTRIBUTE_NESTED_ARRAY':
       let simpleArray: Array<unknown> = []
@@ -411,9 +731,9 @@ export function simplifyAttributeIfPossible(attribute: JSXAttribute): JSXAttribu
         }
       }
       if (isSimpleArray) {
-        return jsxAttributeValue(simpleArray, attribute.comments)
+        return jsExpressionValue(simpleArray, attribute.comments, attribute.uid)
       } else {
-        return jsxAttributeNestedArray(notSoSimpleArray, attribute.comments)
+        return jsExpressionNestedArray(notSoSimpleArray, attribute.comments, attribute.uid)
       }
     case 'ATTRIBUTE_NESTED_OBJECT':
       let simpleObject: MapLike<unknown> = {}
@@ -458,9 +778,9 @@ export function simplifyAttributeIfPossible(attribute: JSXAttribute): JSXAttribu
         }
       }
       if (isSimpleObject) {
-        return jsxAttributeValue(simpleObject, attribute.comments)
+        return jsExpressionValue(simpleObject, attribute.comments, attribute.uid)
       } else {
-        return jsxAttributeNestedObject(notSoSimpleObject, attribute.comments)
+        return jsExpressionNestedObject(notSoSimpleObject, attribute.comments, attribute.uid)
       }
     default:
       const _exhaustiveCheck: never = attribute
@@ -468,42 +788,74 @@ export function simplifyAttributeIfPossible(attribute: JSXAttribute): JSXAttribu
   }
 }
 
-export function clearAttributeUniqueIDs(attribute: JSXAttribute): JSXAttribute {
+export function clearIdentifierUniqueIDs(identifier: JSIdentifier): JSIdentifier {
+  return jsIdentifier(identifier.name, '', identifier.sourceMap, identifier.comments)
+}
+
+export function clearExpressionUniqueIDs(attribute: JSExpression): JSExpression {
   switch (attribute.type) {
+    case 'JSX_ELEMENT':
+      return jsxElement(attribute.name, '', attribute.props, attribute.children)
     case 'ATTRIBUTE_VALUE':
-      return attribute
+      return jsExpressionValue(attribute.value, attribute.comments, '')
+    case 'JSX_MAP_EXPRESSION':
+      return clearJSXMapExpressionUniqueIDs(attribute)
     case 'ATTRIBUTE_OTHER_JAVASCRIPT':
-      return clearJSXAttributeOtherJavaScriptUniqueIDs(attribute)
+      return clearJSExpressionOtherJavaScriptUniqueIDs(attribute)
     case 'ATTRIBUTE_NESTED_ARRAY':
-      return jsxAttributeNestedArray(
+      return jsExpressionNestedArray(
         attribute.content.map((elem) => {
           switch (elem.type) {
             case 'ARRAY_SPREAD':
-              return jsxArraySpread(clearAttributeUniqueIDs(elem.value), elem.comments)
+              return jsxArraySpread(clearExpressionUniqueIDs(elem.value), elem.comments)
             case 'ARRAY_VALUE':
-              return jsxArrayValue(clearAttributeUniqueIDs(elem.value), elem.comments)
+              return jsxArrayValue(clearExpressionUniqueIDs(elem.value), elem.comments)
             default:
               const _exhaustiveCheck: never = elem
               throw new Error(`Unhandled array element type ${JSON.stringify(elem)}`)
           }
         }),
         attribute.comments,
+        '',
+      )
+    case 'JS_IDENTIFIER':
+      return clearIdentifierUniqueIDs(attribute)
+    case 'JS_PROPERTY_ACCESS':
+      return jsPropertyAccess(
+        clearExpressionUniqueIDs(attribute.onValue),
+        attribute.property,
+        '',
+        attribute.sourceMap,
+        attribute.comments,
+        attribute.originalJavascript,
+        attribute.optionallyChained,
+      )
+    case 'JS_ELEMENT_ACCESS':
+      return jsElementAccess(
+        clearExpressionUniqueIDs(attribute.onValue),
+        clearExpressionUniqueIDs(attribute.element),
+        '',
+        attribute.sourceMap,
+        attribute.comments,
+        attribute.originalJavascript,
+        attribute.optionallyChained,
       )
     case 'ATTRIBUTE_FUNCTION_CALL':
-      return jsxAttributeFunctionCall(
+      return jsExpressionFunctionCall(
         attribute.functionName,
-        attribute.parameters.map(clearAttributeUniqueIDs),
+        attribute.parameters.map(clearExpressionUniqueIDs),
+        '',
       )
     case 'ATTRIBUTE_NESTED_OBJECT':
-      return jsxAttributeNestedObject(
+      return jsExpressionNestedObject(
         attribute.content.map((prop) => {
           switch (prop.type) {
             case 'SPREAD_ASSIGNMENT':
-              return jsxSpreadAssignment(clearAttributeUniqueIDs(prop.value), prop.comments)
+              return jsxSpreadAssignment(clearExpressionUniqueIDs(prop.value), prop.comments)
             case 'PROPERTY_ASSIGNMENT':
               return jsxPropertyAssignment(
                 prop.key,
-                clearAttributeUniqueIDs(prop.value),
+                clearExpressionUniqueIDs(prop.value),
                 prop.comments,
                 prop.keyComments,
               )
@@ -513,6 +865,7 @@ export function clearAttributeUniqueIDs(attribute: JSXAttribute): JSXAttribute {
           }
         }),
         attribute.comments,
+        '',
       )
     default:
       const _exhaustiveCheck: never = attribute
@@ -521,50 +874,128 @@ export function clearAttributeUniqueIDs(attribute: JSXAttribute): JSXAttribute {
 }
 
 export function clearJSXAttributeOtherJavaScriptSourceMaps(
-  attribute: JSXAttributeOtherJavaScript,
-): JSXAttributeOtherJavaScript {
-  return {
-    ...attribute,
-    sourceMap: null,
+  attribute: JSExpressionMapOrOtherJavascript,
+): JSExpressionMapOrOtherJavascript {
+  if (isJSXMapExpression(attribute)) {
+    const updatedValueToMap = clearExpressionSourceMaps(attribute.valueToMap)
+    const updatedMapFunction = clearExpressionSourceMaps(attribute.mapFunction)
+    return {
+      ...attribute,
+      valueToMap: updatedValueToMap,
+      mapFunction: updatedMapFunction,
+    }
+  } else {
+    return {
+      ...attribute,
+      sourceMap: null,
+    }
   }
 }
 
-export function clearAttributeSourceMaps(attribute: JSXAttribute): JSXAttribute {
+function clearJSXElementChildSourceMaps(element: JSXElementChild): JSXElementChild {
+  if (isJSXElement(element)) {
+    return jsxElement(
+      element.name,
+      element.uid,
+      clearAttributesSourceMaps(element.props),
+      element.children.map((c) => clearJSXElementChildSourceMaps(c)),
+    )
+  } else if (isJSExpression(element)) {
+    return clearExpressionSourceMaps(element)
+  } else if (isJSXTextBlock(element)) {
+    return element
+  } else if (isJSXFragment(element)) {
+    return jsxFragment(
+      element.uid,
+      element.children.map((c) => clearJSXElementChildSourceMaps(c)),
+      element.longForm,
+    )
+  } else if (isJSXConditionalExpression(element)) {
+    return jsxConditionalExpression(
+      element.uid,
+      element.condition,
+      element.originalConditionString,
+      clearJSXElementChildSourceMaps(element.whenTrue),
+      clearJSXElementChildSourceMaps(element.whenFalse),
+      element.comments,
+    )
+  } else {
+    assertNever(element)
+  }
+}
+
+export function clearIdentifierSourceMaps(identifier: JSIdentifier): JSIdentifier {
+  return jsIdentifier(identifier.name, identifier.uid, null, identifier.comments)
+}
+
+export function clearExpressionSourceMaps(attribute: JSExpression): JSExpression {
   switch (attribute.type) {
+    case 'JSX_ELEMENT':
+      return jsxElement(
+        attribute.name,
+        attribute.uid,
+        clearAttributesSourceMaps(attribute.props),
+        attribute.children.map((c) => clearJSXElementChildSourceMaps(c)),
+      )
     case 'ATTRIBUTE_VALUE':
       return attribute
+    case 'JSX_MAP_EXPRESSION':
     case 'ATTRIBUTE_OTHER_JAVASCRIPT':
       return clearJSXAttributeOtherJavaScriptSourceMaps(attribute)
     case 'ATTRIBUTE_NESTED_ARRAY':
-      return jsxAttributeNestedArray(
+      return jsExpressionNestedArray(
         attribute.content.map((elem) => {
           switch (elem.type) {
             case 'ARRAY_SPREAD':
-              return jsxArraySpread(clearAttributeSourceMaps(elem.value), emptyComments)
+              return jsxArraySpread(clearExpressionSourceMaps(elem.value), emptyComments)
             case 'ARRAY_VALUE':
-              return jsxArrayValue(clearAttributeSourceMaps(elem.value), emptyComments)
+              return jsxArrayValue(clearExpressionSourceMaps(elem.value), emptyComments)
             default:
               const _exhaustiveCheck: never = elem
               throw new Error(`Unhandled array element type ${JSON.stringify(elem)}`)
           }
         }),
         emptyComments,
+        attribute.uid,
+      )
+    case 'JS_IDENTIFIER':
+      return clearIdentifierSourceMaps(attribute)
+    case 'JS_PROPERTY_ACCESS':
+      return jsPropertyAccess(
+        clearExpressionSourceMaps(attribute.onValue),
+        attribute.property,
+        attribute.uid,
+        null,
+        attribute.comments,
+        attribute.originalJavascript,
+        attribute.optionallyChained,
+      )
+    case 'JS_ELEMENT_ACCESS':
+      return jsElementAccess(
+        clearExpressionSourceMaps(attribute.onValue),
+        clearExpressionSourceMaps(attribute.element),
+        attribute.uid,
+        null,
+        attribute.comments,
+        attribute.originalJavascript,
+        attribute.optionallyChained,
       )
     case 'ATTRIBUTE_FUNCTION_CALL':
-      return jsxAttributeFunctionCall(
+      return jsExpressionFunctionCall(
         attribute.functionName,
-        attribute.parameters.map(clearAttributeSourceMaps),
+        attribute.parameters.map(clearExpressionSourceMaps),
+        attribute.uid,
       )
     case 'ATTRIBUTE_NESTED_OBJECT':
-      return jsxAttributeNestedObject(
+      return jsExpressionNestedObject(
         attribute.content.map((prop) => {
           switch (prop.type) {
             case 'SPREAD_ASSIGNMENT':
-              return jsxSpreadAssignment(clearAttributeSourceMaps(prop.value), emptyComments)
+              return jsxSpreadAssignment(clearExpressionSourceMaps(prop.value), emptyComments)
             case 'PROPERTY_ASSIGNMENT':
               return jsxPropertyAssignment(
                 prop.key,
-                clearAttributeSourceMaps(prop.value),
+                clearExpressionSourceMaps(prop.value),
                 emptyComments,
                 emptyComments,
               )
@@ -574,6 +1005,7 @@ export function clearAttributeSourceMaps(attribute: JSXAttribute): JSXAttribute 
           }
         }),
         emptyComments,
+        attribute.uid,
       )
     default:
       const _exhaustiveCheck: never = attribute
@@ -581,63 +1013,119 @@ export function clearAttributeSourceMaps(attribute: JSXAttribute): JSXAttribute 
   }
 }
 
-export function isJSXAttributeValue(
-  attribute: JSXAttribute | PartOfJSXAttributeValue | JSXAttributeNotFound,
-): attribute is JSXAttributeValue<any> {
-  return attribute != null && attribute.type === 'ATTRIBUTE_VALUE'
+export function clearIdentifierUniqueIDsAndSourceMaps(identifier: JSIdentifier): JSIdentifier {
+  return clearIdentifierUniqueIDs(clearIdentifierSourceMaps(identifier))
 }
 
-export function isPartOfJSXAttributeValue(
-  attribute: JSXAttribute | PartOfJSXAttributeValue | JSXAttributeNotFound,
+export function clearAssignmentUniqueIDsAndSourceMaps(assignment: JSAssignment): JSAssignment {
+  return {
+    type: 'JS_ASSIGNMENT',
+    leftHandSide: clearBoundParamUniqueIDsAndSourceMaps(assignment.leftHandSide),
+    rightHandSide: clearExpressionUniqueIDsAndSourceMaps(assignment.rightHandSide),
+  }
+}
+
+export function clearExpressionUniqueIDsAndSourceMaps(expression: JSExpression): JSExpression {
+  return clearExpressionUniqueIDs(clearExpressionSourceMaps(expression))
+}
+
+export function isJSXAttributeValue(element: JSXElementChild): element is JSExpressionValue<any> {
+  return element.type === 'ATTRIBUTE_VALUE'
+}
+
+export function isNullJSXAttributeValue(element: JSXElementChild): boolean {
+  if (!isJSXAttributeValue(element)) {
+    return false
+  }
+  const value = jsxSimpleAttributeToValue(element)
+  return isRight(value) && value.value === null
+}
+
+export function modifiableAttributeIsPartOfAttributeValue(
+  attribute: ModifiableAttribute,
 ): attribute is PartOfJSXAttributeValue {
   return attribute != null && attribute.type === 'PART_OF_ATTRIBUTE_VALUE'
 }
 
-export function isJSXAttributeOtherJavaScript(
+export function modifiableAttributeIsAttributeValue(
   attribute: ModifiableAttribute,
-): attribute is JSXAttributeOtherJavaScript {
+): attribute is JSExpressionValue<any> {
+  return attribute != null && attribute.type === 'ATTRIBUTE_VALUE'
+}
+
+export function modifiableAttributeIsAttributeOtherJavaScript(
+  attribute: ModifiableAttribute,
+): attribute is JSExpressionOtherJavaScript {
   return attribute != null && attribute.type === 'ATTRIBUTE_OTHER_JAVASCRIPT'
 }
 
-export function isJSXAttributeFunctionCall(
-  attribute: JSXAttribute | PartOfJSXAttributeValue | JSXAttributeNotFound,
-): attribute is JSXAttributeFunctionCall {
+export function modifiableAttributeIsJsxElement(
+  attribute: ModifiableAttribute,
+): attribute is JSXElement {
+  return attribute != null && attribute.type === 'JSX_ELEMENT'
+}
+
+export function modifiableAttributeIsAttributeFunctionCall(
+  attribute: ModifiableAttribute,
+): attribute is JSExpressionFunctionCall {
   return attribute != null && attribute.type === 'ATTRIBUTE_FUNCTION_CALL'
 }
 
-export function isJSXAttributeNestedArray(
-  attribute: JSXAttribute | PartOfJSXAttributeValue,
-): attribute is JSXAttributeNestedArray {
+export function modifiableAttributeIsAttributeNestedArray(
+  attribute: ModifiableAttribute,
+): attribute is JSExpressionNestedArray {
   return attribute != null && attribute.type === 'ATTRIBUTE_NESTED_ARRAY'
 }
 
-export function isJSXAttributeNestedObject(
-  attribute: JSXAttribute | PartOfJSXAttributeValue | JSXAttributeNotFound,
-): attribute is JSXAttributeNestedObject {
+export function modifiableAttributeIsAttributeNestedObject(
+  attribute: ModifiableAttribute,
+): attribute is JSExpressionNestedObject {
   return attribute != null && attribute.type === 'ATTRIBUTE_NESTED_OBJECT'
 }
 
-export function isJSXAttributeNotFound(attribute: unknown): attribute is JSXAttributeNotFound {
+export function modifiableAttributeIsAttributeNotFound(
+  attribute: unknown,
+): attribute is JSXAttributeNotFound {
   return unknownObjectProperty(attribute, 'type') === 'ATTRIBUTE_NOT_FOUND'
 }
 
-export function isRegularJSXAttribute(
-  attribute: JSXAttribute | PartOfJSXAttributeValue | JSXAttributeNotFound,
-): attribute is JSXAttribute {
+export function isRegularJSXAttribute(attribute: ModifiableAttribute): attribute is JSExpression {
   return (
-    attribute != null && !isPartOfJSXAttributeValue(attribute) && !isJSXAttributeNotFound(attribute)
+    attribute != null &&
+    !modifiableAttributeIsPartOfAttributeValue(attribute) &&
+    !modifiableAttributeIsAttributeNotFound(attribute)
   )
 }
 
-export interface JSXAttributesEntry extends WithComments {
-  type: 'JSX_ATTRIBUTES_ENTRY'
-  key: string
-  value: JSXAttribute
+export function modifiableAttributeToValuePath(
+  attribute: ModifiableAttribute,
+): Either<string, Array<string | number>> {
+  switch (attribute.type) {
+    case 'JS_IDENTIFIER':
+      return right([attribute.name])
+    case 'JS_PROPERTY_ACCESS':
+      return mapEither((onValueArray) => {
+        return [...onValueArray, attribute.property]
+      }, modifiableAttributeToValuePath(attribute.onValue))
+    case 'JS_ELEMENT_ACCESS':
+      return flatMapEither((onValueArray) => {
+        if (isJSExpressionValue(attribute.element)) {
+          switch (typeof attribute.element.value) {
+            case 'number':
+            case 'string':
+              return right([...onValueArray, attribute.element.value])
+          }
+        }
+        return left('Unable to handle this element access.')
+      }, modifiableAttributeToValuePath(attribute.onValue))
+    default:
+      return left('Unable to handle this expression type.')
+  }
 }
 
 export function jsxAttributesEntry(
-  key: string,
-  value: JSXAttribute,
+  key: string | number,
+  value: JSExpression,
   comments: ParsedComments,
 ): JSXAttributesEntry {
   return {
@@ -648,13 +1136,12 @@ export function jsxAttributesEntry(
   }
 }
 
-export interface JSXAttributesSpread extends WithComments {
-  type: 'JSX_ATTRIBUTES_SPREAD'
-  spreadValue: JSXAttribute
+export function simpleAttribute(key: string, value: unknown): JSXAttributesEntry {
+  return jsxAttributesEntry(key, jsExpressionValue(value, emptyComments), emptyComments)
 }
 
 export function jsxAttributesSpread(
-  spreadValue: JSXAttribute,
+  spreadValue: JSExpression,
   comments: ParsedComments,
 ): JSXAttributesSpread {
   return {
@@ -664,8 +1151,6 @@ export function jsxAttributesSpread(
   }
 }
 
-export type JSXAttributesPart = JSXAttributesEntry | JSXAttributesSpread
-
 export function isJSXAttributesEntry(part: JSXAttributesPart): part is JSXAttributesEntry {
   return part.type === 'JSX_ATTRIBUTES_ENTRY'
 }
@@ -674,16 +1159,18 @@ export function isJSXAttributesSpread(part: JSXAttributesPart): part is JSXAttri
   return part.type === 'JSX_ATTRIBUTES_SPREAD'
 }
 
-export type JSXAttributes = Array<JSXAttributesPart>
-
-export function jsxAttributesFromMap(map: MapLike<JSXAttribute>): Array<JSXAttributesEntry> {
+export function jsxAttributesFromMap(map: MapLike<JSExpression>): Array<JSXAttributesEntry> {
   return Object.keys(map).map((objectKey) => {
     return jsxAttributesEntry(objectKey, map[objectKey], emptyComments)
   })
 }
 
-export function getJSXAttribute(attributes: JSXAttributes, key: string): JSXAttribute | null {
-  for (const attrPart of reverse(attributes)) {
+export function getJSXAttribute(
+  attributes: JSXAttributes,
+  key: string | number,
+): JSExpression | null {
+  for (let index = attributes.length - 1; index >= 0; index--) {
+    const attrPart = attributes[index]
     switch (attrPart.type) {
       case 'JSX_ATTRIBUTES_ENTRY':
         if (attrPart.key === key) {
@@ -705,7 +1192,7 @@ export function getJSXAttributeForced(attributes: JSXAttributes, key: string): M
   return forceNotNull('Should not be null.', getJSXAttribute(attributes, key))
 }
 
-export function deleteJSXAttribute(attributes: JSXAttributes, key: string): JSXAttributes {
+export function deleteJSXAttribute(attributes: JSXAttributes, key: string | number): JSXAttributes {
   let newAttributes: JSXAttributes = []
   for (const attrPart of attributes) {
     switch (attrPart.type) {
@@ -727,18 +1214,17 @@ export function deleteJSXAttribute(attributes: JSXAttributes, key: string): JSXA
 
 export function setJSXAttributesAttribute(
   attributes: JSXAttributes,
-  key: string,
-  value: JSXAttribute,
+  key: string | number,
+  value: JSExpression,
 ): JSXAttributes {
   let updatedExistingField: boolean = false
-  const simplifiedValue = simplifyAttributeIfPossible(value)
   let result: JSXAttributes = []
 
   for (const attrPart of attributes) {
     switch (attrPart.type) {
       case 'JSX_ATTRIBUTES_ENTRY':
         if (attrPart.key === key) {
-          result.push(jsxAttributesEntry(key, simplifiedValue, attrPart.comments))
+          result.push(jsxAttributesEntry(key, value, attrPart.comments))
           updatedExistingField = true
         } else {
           result.push(attrPart)
@@ -754,24 +1240,187 @@ export function setJSXAttributesAttribute(
   }
 
   if (!updatedExistingField) {
-    result.push(jsxAttributesEntry(key, simplifiedValue, emptyComments))
+    result.push(jsxAttributesEntry(key, value, emptyComments))
   }
   return result
 }
 
-export function getDefinedElsewhereFromAttribute(attribute: JSXAttribute): Array<string> {
-  if (isJSXAttributeOtherJavaScript(attribute)) {
-    return attribute.definedElsewhere
-  } else if (isJSXAttributeNestedObject(attribute)) {
-    return attribute.content.reduce<Array<string>>((working, elem) => {
-      return addAllUniquely(working, getDefinedElsewhereFromAttribute(elem.value))
-    }, [])
-  } else if (isJSXAttributeNestedArray(attribute)) {
-    return attribute.content.reduce<Array<string>>((working, elem) => {
-      return addAllUniquely(working, getDefinedElsewhereFromAttribute(elem.value))
-    }, [])
-  } else {
-    return []
+const AllowedExternalReferences = ['React', 'utopiaCanvasJSXLookup']
+
+export function attributeReferencesElsewhere(attribute: JSExpression): boolean {
+  switch (attribute.type) {
+    case 'JSX_ELEMENT':
+      return (
+        attribute.props.some(jsxAttributesPartReferencesElsewhere) ||
+        attribute.children.some(elementReferencesElsewhere)
+      )
+    case 'ATTRIBUTE_VALUE':
+      return false
+    case 'JSX_MAP_EXPRESSION':
+      return (
+        attributeReferencesElsewhere(attribute.valueToMap) ||
+        attributeReferencesElsewhere(attribute.mapFunction)
+      )
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT':
+      return (
+        attribute.definedElsewhere.filter((r) => !AllowedExternalReferences.includes(r)).length > 0
+      )
+    case 'ATTRIBUTE_NESTED_OBJECT':
+      return attribute.content.some((subAttr) => {
+        return attributeReferencesElsewhere(subAttr.value)
+      })
+    case 'ATTRIBUTE_NESTED_ARRAY':
+      return attribute.content.some((subAttr) => {
+        return attributeReferencesElsewhere(subAttr.value)
+      })
+    case 'JS_IDENTIFIER':
+      return true
+    case 'JS_ELEMENT_ACCESS':
+      return (
+        attributeReferencesElsewhere(attribute.element) ||
+        attributeReferencesElsewhere(attribute.onValue)
+      )
+    case 'JS_PROPERTY_ACCESS':
+      return attributeReferencesElsewhere(attribute.onValue)
+    case 'ATTRIBUTE_FUNCTION_CALL':
+      return true
+    default:
+      const _exhaustiveCheck: never = attribute
+      throw new Error(`Unhandled attribute type ${JSON.stringify(attribute)}`)
+  }
+}
+
+export function jsxAttributesPartReferencesElsewhere(attrPart: JSXAttributesPart): boolean {
+  switch (attrPart.type) {
+    case 'JSX_ATTRIBUTES_ENTRY':
+      return attributeReferencesElsewhere(attrPart.value)
+    case 'JSX_ATTRIBUTES_SPREAD':
+      return attributeReferencesElsewhere(attrPart.spreadValue)
+    default:
+      const _exhaustiveCheck: never = attrPart
+      throw new Error(`Unhandled attribute type ${JSON.stringify(attrPart)}`)
+  }
+}
+
+export function elementReferencesElsewhere(element: JSXElementChild): boolean {
+  switch (element.type) {
+    case 'JSX_ELEMENT':
+      return (
+        element.props.some(jsxAttributesPartReferencesElsewhere) ||
+        element.children.some(elementReferencesElsewhere)
+      )
+    case 'JSX_TEXT_BLOCK':
+      return false
+    case 'JSX_FRAGMENT':
+      return element.children.some(elementReferencesElsewhere)
+    case 'JSX_CONDITIONAL_EXPRESSION':
+      return (
+        elementReferencesElsewhere(element.condition) ||
+        elementReferencesElsewhere(element.whenTrue) ||
+        elementReferencesElsewhere(element.whenFalse)
+      )
+    default:
+      return attributeReferencesElsewhere(element)
+  }
+}
+
+export function getElementReferencesElsewherePathsFromProps(
+  element: JSXElementChild,
+  pathSoFar: PropertyPath,
+): PropertyPath[] {
+  switch (element.type) {
+    case 'JSX_ELEMENT':
+      return element.props.flatMap((prop) =>
+        prop.type === 'JSX_ATTRIBUTES_SPREAD'
+          ? []
+          : getElementReferencesElsewherePathsFromProps(
+              prop.value,
+              PP.append(pathSoFar, PP.create(prop.key)),
+            ),
+      )
+    case 'ATTRIBUTE_NESTED_OBJECT':
+      const spreads: JSXSpreadAssignment[] = []
+      const assigments: JSXPropertyAssignment[] = []
+      element.content.forEach((c) => {
+        switch (c.type) {
+          case 'PROPERTY_ASSIGNMENT':
+            assigments.push(c)
+            break
+          case 'SPREAD_ASSIGNMENT':
+            spreads.push(c)
+            break
+          default:
+            assertNever(c)
+        }
+      })
+      if (spreads.length > 0) {
+        return [pathSoFar] // if a spread assignment is present, overwrite the whole prop
+      }
+      return assigments.flatMap((assignment) =>
+        getElementReferencesElsewherePathsFromProps(
+          assignment.value,
+          PP.append(pathSoFar, PP.create(assignment.key)),
+        ),
+      )
+    case 'JSX_FRAGMENT':
+    case 'JSX_CONDITIONAL_EXPRESSION':
+    case 'JSX_TEXT_BLOCK':
+      return [] // no props present on these elements
+    case 'ATTRIBUTE_NESTED_ARRAY':
+    case 'ATTRIBUTE_VALUE':
+    case 'ATTRIBUTE_FUNCTION_CALL':
+    case 'JSX_MAP_EXPRESSION':
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT':
+    case 'JS_IDENTIFIER':
+      return [pathSoFar] // replace the property corresponding to these values
+    case 'JS_PROPERTY_ACCESS':
+      return [PP.append(pathSoFar, PP.create(element.property))]
+    case 'JS_ELEMENT_ACCESS':
+      const onValuePaths = getElementReferencesElsewherePathsFromProps(element.onValue, pathSoFar)
+      return onValuePaths.flatMap((onValuePath) => {
+        return getElementReferencesElsewherePathsFromProps(element.element, onValuePath)
+      })
+    default:
+      assertNever(element)
+  }
+}
+
+export function getDefinedElsewhereFromAttribute(attribute: JSExpression): Array<string> {
+  switch (attribute.type) {
+    case 'JSX_ELEMENT':
+      return getDefinedElsewhereFromElement(attribute)
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT':
+      return attribute.definedElsewhere
+    case 'ATTRIBUTE_NESTED_OBJECT':
+      return attribute.content.reduce<Array<string>>((working, elem) => {
+        return addAllUniquely(working, getDefinedElsewhereFromAttribute(elem.value))
+      }, [])
+    case 'ATTRIBUTE_NESTED_ARRAY':
+      return attribute.content.reduce<Array<string>>((working, elem) => {
+        return addAllUniquely(working, getDefinedElsewhereFromAttribute(elem.value))
+      }, [])
+    case 'JS_PROPERTY_ACCESS':
+      return getDefinedElsewhereFromAttribute(attribute.onValue)
+    case 'JS_ELEMENT_ACCESS':
+      return addAllUniquely(
+        getDefinedElsewhereFromAttribute(attribute.onValue),
+        getDefinedElsewhereFromAttribute(attribute.element),
+      )
+    case 'JS_IDENTIFIER':
+      return [attribute.name]
+    case 'ATTRIBUTE_VALUE':
+      return []
+    case 'JSX_MAP_EXPRESSION':
+      return addAllUniquely(
+        getDefinedElsewhereFromAttribute(attribute.valueToMap),
+        getDefinedElsewhereFromAttribute(attribute.mapFunction),
+      )
+    case 'ATTRIBUTE_FUNCTION_CALL':
+      return attribute.parameters.reduce<Array<string>>((working, elem) => {
+        return addAllUniquely(working, getDefinedElsewhereFromAttribute(elem))
+      }, [])
+    default:
+      assertNever(attribute)
   }
 }
 
@@ -789,17 +1438,71 @@ export function getDefinedElsewhereFromAttributes(attributes: JSXAttributes): Ar
   }, [])
 }
 
-export function getDefinedElsewhereFromElement(element: JSXElement): Array<string> {
-  const fromAttributes = getDefinedElsewhereFromAttributes(element.props)
-  return element.children.reduce((working, child) => {
-    if (isJSXArbitraryBlock(child)) {
+export function getDefinedElsewhereFromElementChild(
+  working: Array<string>,
+  child: JSXElementChild,
+): Array<string> {
+  switch (child.type) {
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT':
       return addAllUniquely(working, child.definedElsewhere)
-    } else if (isJSXElement(child)) {
+    case 'JSX_MAP_EXPRESSION':
+      return addAllUniquely(working, [
+        ...getDefinedElsewhereFromAttribute(child.valueToMap),
+        ...getDefinedElsewhereFromAttribute(child.mapFunction),
+      ])
+    case 'JSX_CONDITIONAL_EXPRESSION':
+      const withCondition = getDefinedElsewhereFromElementChild(working, child.condition)
+      const withWhenTrue = getDefinedElsewhereFromElementChild(withCondition, child.whenTrue)
+      return getDefinedElsewhereFromElementChild(withWhenTrue, child.whenFalse)
+    case 'JSX_ELEMENT':
       return addAllUniquely(working, getDefinedElsewhereFromElement(child))
-    } else {
+    case 'JSX_TEXT_BLOCK':
+    case 'JSX_FRAGMENT':
+    case 'ATTRIBUTE_VALUE':
+    case 'ATTRIBUTE_FUNCTION_CALL':
       return working
-    }
-  }, fromAttributes)
+    case 'ATTRIBUTE_NESTED_ARRAY':
+      return child.content.reduce((innerWorking, contentElement) => {
+        switch (contentElement.type) {
+          case 'ARRAY_VALUE':
+            return getDefinedElsewhereFromElementChild(innerWorking, contentElement.value)
+          case 'ARRAY_SPREAD':
+            return getDefinedElsewhereFromElementChild(innerWorking, contentElement.value)
+          default:
+            return assertNever(contentElement)
+        }
+      }, working)
+    case 'ATTRIBUTE_NESTED_OBJECT':
+      return child.content.reduce((innerWorking, contentElement) => {
+        switch (contentElement.type) {
+          case 'PROPERTY_ASSIGNMENT':
+            return getDefinedElsewhereFromElementChild(innerWorking, contentElement.value)
+          case 'SPREAD_ASSIGNMENT':
+            return getDefinedElsewhereFromElementChild(innerWorking, contentElement.value)
+          default:
+            return assertNever(contentElement)
+        }
+      }, working)
+    case 'JS_IDENTIFIER':
+      return [...working, child.name]
+    case 'JS_ELEMENT_ACCESS':
+      const withOnValue = getDefinedElsewhereFromElementChild(working, child.onValue)
+      return getDefinedElsewhereFromElementChild(withOnValue, child.element)
+    case 'JS_PROPERTY_ACCESS':
+      return getDefinedElsewhereFromElementChild(working, child.onValue)
+    default:
+      assertNever(child)
+  }
+}
+
+export function getDefinedElsewhereFromElement(element: JSXElementLike): Array<string> {
+  const fromAttributes = isJSXElement(element)
+    ? getDefinedElsewhereFromAttributes(element.props)
+    : []
+  return element.children.reduce(
+    (working, child) => getDefinedElsewhereFromElementChild(working, child),
+    fromAttributes,
+  )
 }
 
 export function clearAttributesUniqueIDs(attributes: JSXAttributes): JSXAttributes {
@@ -808,12 +1511,12 @@ export function clearAttributesUniqueIDs(attributes: JSXAttributes): JSXAttribut
       case 'JSX_ATTRIBUTES_ENTRY':
         return jsxAttributesEntry(
           attribute.key,
-          clearAttributeUniqueIDs(attribute.value),
+          clearExpressionUniqueIDs(attribute.value),
           attribute.comments,
         )
       case 'JSX_ATTRIBUTES_SPREAD':
         return jsxAttributesSpread(
-          clearAttributeUniqueIDs(attribute.spreadValue),
+          clearExpressionUniqueIDs(attribute.spreadValue),
           attribute.comments,
         )
       default:
@@ -829,12 +1532,12 @@ export function clearAttributesSourceMaps(attributes: JSXAttributes): JSXAttribu
       case 'JSX_ATTRIBUTES_ENTRY':
         return jsxAttributesEntry(
           attribute.key,
-          clearAttributeSourceMaps(attribute.value),
+          clearExpressionSourceMaps(attribute.value),
           attribute.comments,
         )
       case 'JSX_ATTRIBUTES_SPREAD':
         return jsxAttributesSpread(
-          clearAttributeSourceMaps(attribute.spreadValue),
+          clearExpressionSourceMaps(attribute.spreadValue),
           attribute.comments,
         )
       default:
@@ -844,19 +1547,19 @@ export function clearAttributesSourceMaps(attributes: JSXAttributes): JSXAttribu
   })
 }
 
-export interface JSXElementName {
-  baseVariable: string
-  propertyPath: PropertyPath
-}
-
 export function jsxElementName(
   baseVariable: string,
   propertyPathParts: Array<PropertyPathPart>,
 ): JSXElementName {
   return {
     baseVariable: baseVariable,
-    propertyPath: PP.create(propertyPathParts),
+    propertyPath: PP.createFromArray(propertyPathParts),
   }
+}
+
+export function jsxElementNameFromString(name: string): JSXElementName {
+  const [baseVariable, ...properties] = name.split('.')
+  return jsxElementName(baseVariable, properties)
 }
 
 export function jsxElementNameEquals(first: JSXElementName, second: JSXElementName): boolean {
@@ -874,6 +1577,10 @@ export function isIntrinsicElementFromString(name: string): boolean {
 
 export function isIntrinsicElement(name: JSXElementName): boolean {
   return PP.depth(name.propertyPath) === 0 && isIntrinsicElementFromString(name.baseVariable)
+}
+
+export function isSVGElement(name: JSXElementName): boolean {
+  return PP.depth(name.propertyPath) === 0 && name.baseVariable === 'svg'
 }
 
 export function isIntrinsicHTMLElementString(name: string): boolean {
@@ -908,91 +1615,222 @@ export function getJSXElementNameAsString(name: JSXElementName): string {
   }
 }
 
-export interface JSXElement {
-  type: 'JSX_ELEMENT'
-  name: JSXElementName
-  props: JSXAttributes
-  children: JSXElementChildren
-  uid: string
-}
-
-export interface JSXElementWithoutUID {
-  name: JSXElementName
-  props: JSXAttributes
-  children: JSXElementChildren
-}
-
-export type ElementsWithin = { [uid: string]: JSXElement }
-
-export interface JSXArbitraryBlock {
-  type: 'JSX_ARBITRARY_BLOCK'
-  originalJavascript: string
-  javascript: string
-  transpiledJavascript: string
-  definedElsewhere: Array<string>
-  sourceMap: RawSourceMap | null
-  uniqueID: string
-  elementsWithin: ElementsWithin
-}
-
-export function jsxArbitraryBlock(
-  originalJavascript: string,
-  javascript: string,
-  transpiledJavascript: string,
-  definedElsewhere: Array<string>,
-  sourceMap: RawSourceMap | null,
-  elementsWithin: ElementsWithin,
-): JSXArbitraryBlock {
-  return {
-    type: 'JSX_ARBITRARY_BLOCK',
-    originalJavascript: originalJavascript,
-    javascript: javascript,
-    transpiledJavascript: transpiledJavascript,
-    definedElsewhere: definedElsewhere,
-    sourceMap: sourceMap,
-    uniqueID: UUID(),
-    elementsWithin: elementsWithin,
+export function getJSXElementLikeNameAsString(element: JSXElementLike): string {
+  switch (element.type) {
+    case 'JSX_ELEMENT':
+      return getJSXElementNameAsString(element.name)
+    case 'JSX_FRAGMENT':
+      return 'Fragment'
+    default:
+      assertNever(element)
   }
 }
 
-export interface JSXTextBlock {
-  type: 'JSX_TEXT_BLOCK'
-  text: string
-  uniqueID: string
+export function clearJSXMapExpressionWithoutUIDUniqueIDs(
+  mapExpression: JSXMapExpressionWithoutUID,
+): JSXMapExpressionWithoutUID {
+  const updatedValueToMap = clearExpressionUniqueIDs(mapExpression.valueToMap)
+  const updatedMapFunction = clearExpressionUniqueIDs(mapExpression.mapFunction)
+  return {
+    ...mapExpression,
+    valueToMap: updatedValueToMap,
+    mapFunction: updatedMapFunction,
+  }
 }
 
-export function jsxTextBlock(text: string): JSXTextBlock {
+export function clearJSXElementWithoutUIDUniqueIDs(
+  element: JSXElementWithoutUID,
+): JSXElementWithoutUID {
+  return {
+    ...element,
+    props: clearAttributesUniqueIDs(element.props),
+    children: element.children.map(clearJSXElementChildUniqueIDs),
+  }
+}
+
+export function clearJSXConditionalExpressionWithoutUIDUniqueIDs(
+  conditional: JSXConditionalExpressionWithoutUID,
+): JSXConditionalExpressionWithoutUID {
+  return {
+    ...conditional,
+    condition: clearExpressionUniqueIDs(conditional.condition),
+    whenTrue: clearJSXElementChildUniqueIDs(conditional.whenTrue),
+    whenFalse: clearJSXElementChildUniqueIDs(conditional.whenFalse),
+  }
+}
+
+export function clearJSXFragmentWithoutUIDUniqueIDs(
+  fragment: JSXFragmentWithoutUID,
+): JSXFragmentWithoutUID {
+  return {
+    ...fragment,
+    children: fragment.children.map(clearJSXElementChildUniqueIDs),
+  }
+}
+
+export function hasElementsWithin(e: unknown): e is WithElementsWithin {
+  return (e as WithElementsWithin).elementsWithin != null
+}
+
+export function jsxTextBlock(text: string, uid: string = UUID()): JSXTextBlock {
   return {
     type: 'JSX_TEXT_BLOCK',
     text: text,
-    uniqueID: UUID(),
+    uid: uid,
   }
 }
 
-export interface JSXFragment {
-  type: 'JSX_FRAGMENT'
-  children: JSXElementChildren
-  uniqueID: string
-  longForm: boolean // When true, <React.Fragment> instead of <>.
-}
-
-export function jsxFragment(children: JSXElementChildren, longForm: boolean): JSXFragment {
+export function jsxFragment(
+  uid: string,
+  children: JSXElementChildren,
+  longForm: boolean,
+): JSXFragment {
   return {
     type: 'JSX_FRAGMENT',
+    uid: uid,
     children: children,
-    uniqueID: UUID(),
     longForm: longForm,
   }
 }
 
-export type JSXElementChild = JSXElement | JSXArbitraryBlock | JSXTextBlock | JSXFragment
+function fixBaseComments(comments: ParsedComments, parentComments: Comment[]): ParsedComments {
+  function commentIsNotIncluded(comment: Comment) {
+    return !parentComments.some(
+      (other) =>
+        other.comment === comment.comment &&
+        other.rawText === comment.rawText &&
+        other.pos === comment.pos,
+    )
+  }
+  return {
+    leadingComments: comments.leadingComments.filter(commentIsNotIncluded),
+    trailingComments: comments.trailingComments.filter(commentIsNotIncluded),
+  }
+}
+
+function fixJSXConditionalExpressionCondition(
+  condition: JSExpression,
+  comments: ParsedComments,
+): JSExpression {
+  if (!isWithComments(condition)) {
+    return condition
+  }
+
+  const flatComments = allComments(comments)
+
+  return {
+    ...condition,
+    comments: {
+      ...fixBaseComments(condition.comments, flatComments),
+      questionTokenComments:
+        condition.comments.questionTokenComments != null
+          ? fixBaseComments(condition.comments.questionTokenComments, flatComments)
+          : undefined,
+    },
+  }
+}
+
+export function jsxConditionalExpression(
+  uid: string,
+  condition: JSExpression,
+  originalConditionString: string,
+  whenTrue: JSXElementChild,
+  whenFalse: JSXElementChild,
+  comments: ParsedComments,
+): JSXConditionalExpression {
+  return {
+    type: 'JSX_CONDITIONAL_EXPRESSION',
+    uid: uid,
+    originalConditionString: originalConditionString,
+    condition: fixJSXConditionalExpressionCondition(condition, comments), // remove any duplicate comments shared with the element
+    whenTrue: whenTrue,
+    whenFalse: whenFalse,
+    comments: comments,
+  }
+}
+
+export function jsxConditionalExpressionConditionOptic(
+  condition: 'whenTrue' | 'whenFalse',
+): Optic<JSXConditionalExpression, JSXElementChild> {
+  return fromField(condition)
+}
+
+export function canBeRootElementOfComponent(element: JSXElementChild): boolean {
+  if (isJSXElement(element) || isJSXFragment(element) || isJSXConditionalExpression(element)) {
+    return true
+  }
+
+  if (isJSExpression(element)) {
+    if (hasElementsWithin(element)) {
+      return Object.keys(element.elementsWithin).length > 0
+    }
+  }
+
+  return false
+}
 
 export function isJSXElement(element: JSXElementChild): element is JSXElement {
   return element.type === 'JSX_ELEMENT'
 }
 
-export function isJSXArbitraryBlock(element: JSXElementChild): element is JSXArbitraryBlock {
-  return element.type === 'JSX_ARBITRARY_BLOCK'
+export function isJSExpressionValue(element: JSXElementChild): element is JSExpressionValue<any> {
+  return element.type === 'ATTRIBUTE_VALUE'
+}
+
+export function isJSExpressionNestedArray(
+  element: JSXElementChild,
+): element is JSExpressionNestedArray {
+  return element.type === 'ATTRIBUTE_NESTED_ARRAY'
+}
+
+export function isJSExpressionNestedObject(
+  element: JSXElementChild,
+): element is JSExpressionNestedObject {
+  return element.type === 'ATTRIBUTE_NESTED_OBJECT'
+}
+
+export function isJSExpressionFunctionCall(
+  element: JSXElementChild,
+): element is JSExpressionFunctionCall {
+  return element.type === 'ATTRIBUTE_FUNCTION_CALL'
+}
+
+export function isJSExpressionOtherJavaScript(
+  element: JSXElementChild,
+): element is JSExpressionOtherJavaScript {
+  return element.type === 'ATTRIBUTE_OTHER_JAVASCRIPT'
+}
+
+export function isJSXMapExpression(element: JSXElementChild): element is JSXMapExpression {
+  return element.type === 'JSX_MAP_EXPRESSION'
+}
+
+export function isJSExpressionMapOrOtherJavaScript(
+  element: JSXElementChild,
+): element is JSExpressionMapOrOtherJavascript {
+  return isJSExpressionOtherJavaScript(element) || isJSXMapExpression(element)
+}
+
+export function isJSExpression(element: JSXElementChild): element is JSExpression {
+  switch (element.type) {
+    case 'JSX_ELEMENT':
+    case 'JSX_TEXT_BLOCK':
+    case 'JSX_FRAGMENT':
+    case 'JSX_CONDITIONAL_EXPRESSION':
+      return false
+    case 'ATTRIBUTE_VALUE':
+    case 'JSX_MAP_EXPRESSION':
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT':
+    case 'ATTRIBUTE_NESTED_ARRAY':
+    case 'ATTRIBUTE_NESTED_OBJECT':
+    case 'ATTRIBUTE_FUNCTION_CALL':
+    case 'JS_ELEMENT_ACCESS':
+    case 'JS_PROPERTY_ACCESS':
+    case 'JS_IDENTIFIER':
+      return true
+    default:
+      assertNever(element)
+  }
 }
 
 export function isJSXTextBlock(element: JSXElementChild): element is JSXTextBlock {
@@ -1003,42 +1841,100 @@ export function isJSXFragment(element: JSXElementChild): element is JSXFragment 
   return element.type === 'JSX_FRAGMENT'
 }
 
-export function isJSXElementLikeWithChildren(
+export function isJSXConditionalExpression(
   element: JSXElementChild,
-): element is JSXElement | JSXFragment {
+): element is JSXConditionalExpression {
+  return element.type === 'JSX_CONDITIONAL_EXPRESSION'
+}
+
+export function isJSXElementLike(element: JSXElementChild): element is JSXElementLike {
   return isJSXElement(element) || isJSXFragment(element)
 }
 
-export type JSXElementChildren = Array<JSXElementChild>
+interface ElementWithUid {
+  uid: string
+}
 
-export function clearJSXElementUniqueIDs<T extends JSXElementChild>(element: T): T {
-  if (isJSXElement(element)) {
-    const updatedProps = clearAttributesUniqueIDs(element.props)
-    const updatedChildren: JSXElementChildren = element.children.map(clearJSXElementUniqueIDs)
-    return {
-      ...element,
-      props: updatedProps,
-      children: updatedChildren,
+export function isElementWithUid(element: unknown): element is ElementWithUid {
+  return (element as ElementWithUid).uid != null
+}
+
+export function clearJSXElementLikeUniqueIDs(element: JSXElementLike): JSXElementLike {
+  switch (element.type) {
+    case 'JSX_ELEMENT':
+      return clearJSXElementUniqueIDs(element)
+    case 'JSX_FRAGMENT':
+      return clearJSXFragmentUniqueIDs(element)
+    default:
+      assertNever(element)
+  }
+}
+
+export function clearJSXFragmentUniqueIDs(element: JSXFragment): JSXFragment {
+  const updatedChildren: JSXElementChildren = element.children.map(clearJSXElementChildUniqueIDs)
+  return {
+    ...element,
+    children: updatedChildren,
+    uid: '',
+  }
+}
+
+export function clearJSXElementUniqueIDs(element: JSXElement): JSXElement {
+  const updatedProps = clearAttributesUniqueIDs(element.props)
+  const updatedChildren: JSXElementChildren = element.children.map(clearJSXElementChildUniqueIDs)
+  return {
+    ...element,
+    props: updatedProps,
+    children: updatedChildren,
+    uid: '',
+  }
+}
+
+export function clearJSXElementChildUniqueIDs(element: JSXElementChild): JSXElementChild {
+  switch (element.type) {
+    case 'JSX_ELEMENT': {
+      return clearJSXElementUniqueIDs(element)
     }
-  } else if (isJSXArbitraryBlock(element)) {
-    const updatedElementsWithin = objectMap(clearJSXElementUniqueIDs, element.elementsWithin)
-    return {
-      ...element,
-      uniqueID: '',
-      elementsWithin: updatedElementsWithin,
+    case 'JSX_FRAGMENT': {
+      const updatedChildren: JSXElementChildren = element.children.map(
+        clearJSXElementChildUniqueIDs,
+      )
+      return {
+        ...element,
+        children: updatedChildren,
+        uid: '',
+      }
     }
-  } else if (isJSXFragment(element)) {
-    const updatedChildren: JSXElementChildren = element.children.map(clearJSXElementUniqueIDs)
-    return {
-      ...element,
-      uniqueID: '',
-      children: updatedChildren,
+    case 'JSX_CONDITIONAL_EXPRESSION': {
+      const updatedCondition = clearExpressionUniqueIDs(element.condition)
+      const updatedWhenTrue = clearJSXElementChildUniqueIDs(element.whenTrue)
+      const updatedWhenFalse = clearJSXElementChildUniqueIDs(element.whenFalse)
+      return {
+        ...element,
+        condition: updatedCondition,
+        whenTrue: updatedWhenTrue,
+        whenFalse: updatedWhenFalse,
+        uid: '',
+      }
     }
-  } else {
-    return {
-      ...element,
-      uniqueID: '',
+    case 'JSX_TEXT_BLOCK': {
+      return {
+        ...element,
+        uid: '',
+      }
     }
+    case 'ATTRIBUTE_VALUE':
+    case 'ATTRIBUTE_NESTED_ARRAY':
+    case 'ATTRIBUTE_NESTED_OBJECT':
+    case 'ATTRIBUTE_FUNCTION_CALL':
+    case 'JSX_MAP_EXPRESSION':
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT':
+    case 'JS_IDENTIFIER':
+    case 'JS_PROPERTY_ACCESS':
+    case 'JS_ELEMENT_ACCESS':
+      return clearExpressionUniqueIDs(element)
+    default:
+      assertNever(element)
   }
 }
 
@@ -1057,16 +1953,26 @@ export function jsxElement(
   }
 }
 
+export function jsxElementFromJSXElementWithoutUID(
+  element: JSXElementWithoutUID,
+  uid: string,
+): JSXElement {
+  return {
+    ...element,
+    uid: uid,
+  }
+}
+
 export function jsxTestElement(
   name: JSXElementName | string,
   props: JSXAttributes,
-  children: Array<JSXElement>,
+  children: JSXElementChildren,
   uid: string = 'aaa',
 ): JSXElement {
   return jsxElement(
     name,
     uid,
-    setJSXAttributesAttribute(props, 'data-uid', jsxAttributeValue(uid, emptyComments)),
+    setJSXAttributesAttribute(props, 'data-uid', jsExpressionValue(uid, emptyComments)),
     children,
   )
 }
@@ -1077,9 +1983,38 @@ export function jsxElementWithoutUID(
   children: JSXElementChildren,
 ): JSXElementWithoutUID {
   return {
+    type: 'JSX_ELEMENT',
     name: typeof name === 'string' ? jsxElementName(name, []) : name,
     props: props,
     children: children,
+  }
+}
+
+export function jsxConditionalExpressionWithoutUID(
+  condition: JSExpression,
+  originalConditionString: string,
+  whenTrue: JSXElementChild,
+  whenFalse: JSXElementChild,
+  comments: ParsedComments,
+): JSXConditionalExpressionWithoutUID {
+  return {
+    type: 'JSX_CONDITIONAL_EXPRESSION',
+    condition: condition,
+    originalConditionString: originalConditionString,
+    whenTrue: whenTrue,
+    whenFalse: whenFalse,
+    comments: comments,
+  }
+}
+
+export function jsxFragmentWithoutUID(
+  children: JSXElementChildren,
+  longForm: boolean,
+): JSXFragmentWithoutUID {
+  return {
+    type: 'JSX_FRAGMENT',
+    children: children,
+    longForm: longForm,
   }
 }
 
@@ -1088,7 +2023,8 @@ export function utopiaJSXComponent(
   isFunction: boolean,
   declarationSyntax: FunctionDeclarationSyntax,
   blockOrExpression: BlockOrExpression,
-  param: Param | null,
+  functionWrapping: Array<FunctionWrap>,
+  params: Array<Param> | null,
   propsUsed: Array<string>,
   rootElement: JSXElementChild,
   jsBlock: ArbitraryJSBlock | null,
@@ -1101,7 +2037,8 @@ export function utopiaJSXComponent(
     isFunction: isFunction,
     declarationSyntax: declarationSyntax,
     blockOrExpression: blockOrExpression,
-    param: param,
+    functionWrapping: functionWrapping,
+    params: params,
     propsUsed: propsUsed,
     rootElement: rootElement,
     arbitraryJSBlock: jsBlock,
@@ -1110,23 +2047,29 @@ export function utopiaJSXComponent(
   }
 }
 
+// FIXME we need to inject data-uids using insertDataUIDsIntoCode
 export function arbitraryJSBlock(
+  params: Array<Param>,
   javascript: string,
   transpiledJavascript: string,
   definedWithin: Array<string>,
   definedElsewhere: Array<string>,
   sourceMap: RawSourceMap | null,
   elementsWithin: ElementsWithin,
+  statements: Array<JSArbitraryStatement>,
+  uid: string = UUID(),
 ): ArbitraryJSBlock {
   return {
     type: 'ARBITRARY_JS_BLOCK',
+    params: params,
     javascript: javascript,
     transpiledJavascript: transpiledJavascript,
     definedWithin: definedWithin,
     definedElsewhere: definedElsewhere,
     sourceMap: sourceMap,
-    uniqueID: UUID(),
+    uid: uid,
     elementsWithin: elementsWithin,
+    statements: statements,
   }
 }
 
@@ -1154,15 +2097,9 @@ export function unparsedCode(rawCode: string): UnparsedCode {
   }
 }
 
-interface RegularParam {
-  type: 'REGULAR_PARAM'
-  paramName: string
-  defaultExpression: JSXAttributeOtherJavaScript | null
-}
-
 export function regularParam(
   paramName: string,
-  defaultExpression: JSXAttributeOtherJavaScript | null,
+  defaultExpression: JSExpression | null,
 ): RegularParam {
   return {
     type: 'REGULAR_PARAM',
@@ -1171,27 +2108,16 @@ export function regularParam(
   }
 }
 
-export interface DestructuredParamPart {
-  propertyName: string | undefined
-  param: Param
-  defaultExpression: JSXAttributeOtherJavaScript | null
-}
-
 export function destructuredParamPart(
   propertyName: string | undefined,
   param: Param,
-  defaultExpression: JSXAttributeOtherJavaScript | null,
+  defaultExpression: JSExpression | null,
 ): DestructuredParamPart {
   return {
     propertyName: propertyName,
     param: param,
     defaultExpression: defaultExpression,
   }
-}
-
-interface DestructuredObject {
-  type: 'DESTRUCTURED_OBJECT'
-  parts: Array<DestructuredParamPart>
 }
 
 export function destructuredObject(parts: Array<DestructuredParamPart>): DestructuredObject {
@@ -1211,15 +2137,12 @@ export function omittedParam(): OmittedParam {
   }
 }
 
-export type DestructuredArrayPart = Param | OmittedParam
-
 export function isOmittedParam(param: DestructuredArrayPart): param is OmittedParam {
-  return (param as any).type === 'OMITTED_PARAM'
+  return param.type === 'OMITTED_PARAM'
 }
 
-interface DestructuredArray {
-  type: 'DESTRUCTURED_ARRAY'
-  parts: Array<DestructuredArrayPart>
+export function isParam(param: DestructuredArrayPart): param is Param {
+  return param.type === 'PARAM'
 }
 
 export function destructuredArray(parts: Array<DestructuredArrayPart>): DestructuredArray {
@@ -1228,8 +2151,6 @@ export function destructuredArray(parts: Array<DestructuredArrayPart>): Destruct
     parts: parts,
   }
 }
-
-export type BoundParam = RegularParam | DestructuredObject | DestructuredArray
 
 export function isRegularParam(param: BoundParam): param is RegularParam {
   return param.type === 'REGULAR_PARAM'
@@ -1243,12 +2164,6 @@ export function isDestructuredArray(param: BoundParam): param is DestructuredArr
   return param.type === 'DESTRUCTURED_ARRAY'
 }
 
-export type Param = {
-  type: 'PARAM'
-  dotDotDotToken: boolean
-  boundParam: BoundParam
-}
-
 export function functionParam(dotDotDotToken: boolean, boundParam: BoundParam): Param {
   return {
     type: 'PARAM',
@@ -1257,7 +2172,7 @@ export function functionParam(dotDotDotToken: boolean, boundParam: BoundParam): 
   }
 }
 
-export const defaultPropsParam: Param = functionParam(false, regularParam('props', null))
+export const defaultPropsParam: Array<Param> = [functionParam(false, regularParam('props', null))]
 
 export function propNamesForParam(param: Param): Array<string> {
   const { boundParam } = param
@@ -1280,60 +2195,46 @@ export function propNamesForParam(param: Param): Array<string> {
   }
 }
 
-export type VarLetOrConst = 'var' | 'let' | 'const'
-export type FunctionDeclarationSyntax = 'function' | VarLetOrConst
-export type BlockOrExpression = 'block' | 'parenthesized-expression' | 'expression'
-
-export interface UtopiaJSXComponent {
-  type: 'UTOPIA_JSX_COMPONENT'
-  name: string | null
-  /**
-   * isFunction is true if we are talking about a Function Component
-   * isFunction false means that this is an exported Element with no props
-   * (NOT a component, NOT a class component!)
-   */
-  isFunction: boolean
-  declarationSyntax: FunctionDeclarationSyntax
-  blockOrExpression: BlockOrExpression
-  param: Param | null
-  propsUsed: Array<string>
-  rootElement: JSXElementChild
-  arbitraryJSBlock: ArbitraryJSBlock | null
-  usedInReactDOMRender: boolean
-  returnStatementComments: ParsedComments
+export function propertiesExposedByParams(params: Array<Param>): Array<string> {
+  return params.flatMap(propertiesExposedByParam)
 }
 
-export interface ArbitraryJSBlock {
-  type: 'ARBITRARY_JS_BLOCK'
-  javascript: string
-  transpiledJavascript: string
-  definedWithin: Array<string>
-  definedElsewhere: Array<string>
-  sourceMap: RawSourceMap | null
-  uniqueID: string
-  elementsWithin: ElementsWithin
+export function propertiesExposedByParam(param: Param): Array<string> {
+  switch (param.boundParam.type) {
+    case 'REGULAR_PARAM':
+      return [param.boundParam.paramName]
+    case 'DESTRUCTURED_ARRAY':
+      return param.boundParam.parts.flatMap((part) => {
+        switch (part.type) {
+          case 'PARAM':
+            return propertiesExposedByParam(part)
+          case 'OMITTED_PARAM':
+            return []
+          default:
+            return assertNever(part)
+        }
+      })
+    case 'DESTRUCTURED_OBJECT':
+      return param.boundParam.parts.flatMap((part) => {
+        return propertiesExposedByParam(part.param)
+      })
+    default:
+      assertNever(param.boundParam)
+  }
 }
-
-export interface ImportStatement {
-  type: 'IMPORT_STATEMENT'
-  rawCode: string
-  importStarAs: boolean // Includes `import * as Name from`
-  importWithName: boolean // Includes `import Name from`
-  imports: Array<string> // All other imports inside braces i.e. `import { Name } from`
-  module: string
-}
-
-export interface UnparsedCode {
-  type: 'UNPARSED_CODE'
-  rawCode: string
-}
-
-export type TopLevelElement = UtopiaJSXComponent | ArbitraryJSBlock | ImportStatement | UnparsedCode
 
 export function clearArbitraryJSBlockUniqueIDs(block: ArbitraryJSBlock): ArbitraryJSBlock {
   return {
     ...block,
-    uniqueID: '',
+    statements: block.statements.map(clearJSArbitraryStatementUniqueIDs),
+    uid: '',
+  }
+}
+
+export function clearArbitraryJSBlockSourceMaps(block: ArbitraryJSBlock): ArbitraryJSBlock {
+  return {
+    ...block,
+    statements: block.statements.map(clearJSArbitraryStatementSourceMaps),
   }
 }
 
@@ -1359,7 +2260,7 @@ export function clearDestructuredParamPartUniqueIDs(
     clearParamUniqueIDs(paramPart.param),
     paramPart.defaultExpression == null
       ? null
-      : clearJSXAttributeOtherJavaScriptUniqueIDs(paramPart.defaultExpression),
+      : clearExpressionUniqueIDs(paramPart.defaultExpression),
   )
 }
 
@@ -1374,7 +2275,7 @@ export function clearBoundParamUniqueIDs(boundParam: BoundParam): BoundParam {
         boundParam.paramName,
         boundParam.defaultExpression == null
           ? null
-          : clearJSXAttributeOtherJavaScriptUniqueIDs(boundParam.defaultExpression),
+          : clearExpressionUniqueIDs(boundParam.defaultExpression),
       )
     default:
       const _exhaustiveCheck: never = boundParam
@@ -1382,8 +2283,83 @@ export function clearBoundParamUniqueIDs(boundParam: BoundParam): BoundParam {
   }
 }
 
+export function clearDestructuredArrayPartSourceMaps(
+  arrayPart: DestructuredArrayPart,
+): DestructuredArrayPart {
+  switch (arrayPart.type) {
+    case 'OMITTED_PARAM':
+      return arrayPart
+    case 'PARAM':
+      return clearParamSourceMaps(arrayPart)
+    default:
+      const _exhaustiveCheck: never = arrayPart
+      throw new Error(`Unhandled array part ${JSON.stringify(arrayPart)}`)
+  }
+}
+
+export function clearDestructuredParamPartSourceMaps(
+  paramPart: DestructuredParamPart,
+): DestructuredParamPart {
+  return {
+    propertyName: paramPart.propertyName,
+    param: clearParamSourceMaps(paramPart.param),
+    defaultExpression:
+      paramPart.defaultExpression == null
+        ? null
+        : clearExpressionSourceMaps(paramPart.defaultExpression),
+  }
+}
+
+export function clearParamSourceMaps(param: Param): Param {
+  return {
+    ...param,
+    boundParam: clearBoundParamSourceMaps(param.boundParam),
+  }
+}
+
+export function clearBoundParamSourceMaps(boundParam: BoundParam): BoundParam {
+  switch (boundParam.type) {
+    case 'DESTRUCTURED_ARRAY':
+      return destructuredArray(boundParam.parts.map(clearDestructuredArrayPartSourceMaps))
+    case 'DESTRUCTURED_OBJECT':
+      return destructuredObject(boundParam.parts.map(clearDestructuredParamPartSourceMaps))
+    case 'REGULAR_PARAM':
+      return regularParam(
+        boundParam.paramName,
+        boundParam.defaultExpression == null
+          ? null
+          : clearExpressionSourceMaps(boundParam.defaultExpression),
+      )
+    default:
+      const _exhaustiveCheck: never = boundParam
+      throw new Error(`Unhandled element ${JSON.stringify(boundParam)}`)
+  }
+}
+
+export function clearBoundParamUniqueIDsAndSourceMaps(boundParam: BoundParam): BoundParam {
+  return clearBoundParamSourceMaps(clearBoundParamUniqueIDs(boundParam))
+}
+
 export function clearParamUniqueIDs(param: Param): Param {
   return functionParam(param.dotDotDotToken, clearBoundParamUniqueIDs(param.boundParam))
+}
+
+export function clearFunctionWrapUniqueIDs(wrap: FunctionWrap): FunctionWrap {
+  switch (wrap.type) {
+    case 'SIMPLE_FUNCTION_WRAP':
+      return simpleFunctionWrap(clearExpressionUniqueIDs(wrap.functionExpression))
+  }
+}
+
+export function clearFunctionWrapSourceMaps(wrap: FunctionWrap): FunctionWrap {
+  switch (wrap.type) {
+    case 'SIMPLE_FUNCTION_WRAP':
+      return simpleFunctionWrap(clearExpressionSourceMaps(wrap.functionExpression))
+  }
+}
+
+export function clearFunctionWrapUniqueIDsAndSourceMaps(wrap: FunctionWrap): FunctionWrap {
+  return clearFunctionWrapSourceMaps(clearFunctionWrapUniqueIDs(wrap))
 }
 
 // FIXME: Should only really be in test code.
@@ -1395,15 +2371,16 @@ export function clearTopLevelElementUniqueIDs(element: TopLevelElement): TopLeve
     case 'UTOPIA_JSX_COMPONENT':
       let updatedComponent: UtopiaJSXComponent = {
         ...element,
-        rootElement: clearJSXElementUniqueIDs(element.rootElement),
+        rootElement: clearJSXElementChildUniqueIDs(element.rootElement),
+        functionWrapping: element.functionWrapping.map(clearFunctionWrapUniqueIDsAndSourceMaps),
       }
       if (updatedComponent.arbitraryJSBlock != null) {
         updatedComponent.arbitraryJSBlock = clearArbitraryJSBlockUniqueIDs(
           updatedComponent.arbitraryJSBlock,
         )
       }
-      if (updatedComponent.param != null) {
-        updatedComponent.param = clearParamUniqueIDs(updatedComponent.param)
+      if (updatedComponent.params != null) {
+        updatedComponent.params = updatedComponent.params.map(clearParamUniqueIDs)
       }
       return updatedComponent
     case 'ARBITRARY_JS_BLOCK':
@@ -1417,8 +2394,38 @@ export function clearTopLevelElementUniqueIDs(element: TopLevelElement): TopLeve
   }
 }
 
+export function clearTopLevelElementSourceMaps(element: UtopiaJSXComponent): UtopiaJSXComponent
+export function clearTopLevelElementSourceMaps(element: ArbitraryJSBlock): ArbitraryJSBlock
+export function clearTopLevelElementSourceMaps(element: TopLevelElement): TopLevelElement
+export function clearTopLevelElementSourceMaps(element: TopLevelElement): TopLevelElement {
+  switch (element.type) {
+    case 'UTOPIA_JSX_COMPONENT':
+      let updatedComponent: UtopiaJSXComponent = {
+        ...element,
+        rootElement: clearJSXElementChildSourceMaps(element.rootElement),
+      }
+      if (updatedComponent.arbitraryJSBlock != null) {
+        updatedComponent.arbitraryJSBlock = clearArbitraryJSBlockSourceMaps(
+          updatedComponent.arbitraryJSBlock,
+        )
+      }
+      if (updatedComponent.params != null) {
+        updatedComponent.params = updatedComponent.params.map(clearParamSourceMaps)
+      }
+      return updatedComponent
+    case 'ARBITRARY_JS_BLOCK':
+      return clearArbitraryJSBlockSourceMaps(element)
+    case 'IMPORT_STATEMENT':
+    case 'UNPARSED_CODE':
+      return element
+    default:
+      const _exhaustiveCheck: never = element
+      throw new Error(`Unhandled element ${JSON.stringify(element)}`)
+  }
+}
+
 export function isUtopiaJSXComponent(
-  topLevelElement: TopLevelElement | null | undefined,
+  topLevelElement: TopLevelElement,
 ): topLevelElement is UtopiaJSXComponent {
   return topLevelElement?.type === 'UTOPIA_JSX_COMPONENT'
 }
@@ -1439,94 +2446,368 @@ export function isUnparsedCode(topLevelElement: TopLevelElement): topLevelElemen
   return topLevelElement.type === 'UNPARSED_CODE'
 }
 
-export type ComputedStyle = { [key: string]: string }
-export type StyleAttributeMetadataEntry = { fromStyleSheet: boolean } // TODO rename me to StyleAttributeMetadata, the other one to StyleAttributeMetadataMap
-export type StyleAttributeMetadata = { [key: string]: StyleAttributeMetadataEntry | undefined }
-
-export type ElementInstanceMetadataMap = { [key: string]: ElementInstanceMetadata }
+export type ElementInstanceMetadataMap = { [key: string]: Readonly<ElementInstanceMetadata> }
 export const emptyJsxMetadata: ElementInstanceMetadataMap = {}
 
-export type FoundImportInfo = {
-  variableName: string
-  originalName: string | null
-  path: string
+export function isSameFileOrigin(importInfo: ImportInfo): importInfo is SameFileOrigin {
+  return importInfo.type === 'SAME_FILE_ORIGIN'
 }
 
-export type ImportInfo = Either<'NOT_IMPORTED', FoundImportInfo>
+export function sameFileOrigin(filePath: string, variableName: string): SameFileOrigin {
+  return {
+    type: 'SAME_FILE_ORIGIN',
+    filePath: filePath,
+    variableName: variableName,
+  }
+}
+
+export function isImportedOrigin(importInfo: ImportInfo): importInfo is ImportedOrigin {
+  return importInfo.type === 'IMPORTED_ORIGIN'
+}
+
+export function importedOrigin(
+  filePath: string,
+  variableName: string,
+  exportedName: string | null,
+): ImportedOrigin {
+  return {
+    type: 'IMPORTED_ORIGIN',
+    filePath: filePath,
+    variableName: variableName,
+    exportedName: exportedName,
+  }
+}
 
 export function createImportedFrom(
   variableName: string,
   originalName: string | null,
   path: string,
 ): ImportInfo {
-  return right({
-    variableName: variableName,
-    originalName: originalName,
-    path: path,
-  })
+  return importedOrigin(path, variableName, originalName)
 }
 
-export function createNotImported(): ImportInfo {
-  return left('NOT_IMPORTED')
+export function createNotImported(path: string, variableName: string): ImportInfo {
+  return sameFileOrigin(path, variableName)
 }
+
+export interface EarlyReturnVoid {
+  type: 'EARLY_RETURN_VOID'
+  spiedVariablesDeclaredWithinBlock: VariableData
+}
+
+export function earlyReturnVoid(): EarlyReturnVoid {
+  return {
+    type: 'EARLY_RETURN_VOID',
+    spiedVariablesDeclaredWithinBlock: {},
+  }
+}
+
+export interface EarlyReturnResult {
+  type: 'EARLY_RETURN_RESULT'
+  result: unknown
+  spiedVariablesDeclaredWithinBlock: VariableData
+}
+
+export function earlyReturnResult(result: unknown): EarlyReturnResult {
+  return {
+    type: 'EARLY_RETURN_RESULT',
+    result: result,
+    spiedVariablesDeclaredWithinBlock: {},
+  }
+}
+
+export type EarlyReturn = EarlyReturnVoid | EarlyReturnResult
+
+export interface ArbitraryBlockRanToEnd {
+  type: 'ARBITRARY_BLOCK_RAN_TO_END'
+  scope: MapLike<unknown>
+  spiedVariablesDeclaredWithinBlock: VariableData
+}
+
+export function arbitraryBlockRanToEnd(
+  scope: MapLike<unknown>,
+  spiedVariablesDeclaredWithinBlock: VariableData,
+): ArbitraryBlockRanToEnd {
+  return {
+    type: 'ARBITRARY_BLOCK_RAN_TO_END',
+    scope: scope,
+    spiedVariablesDeclaredWithinBlock: spiedVariablesDeclaredWithinBlock,
+  }
+}
+
+export type ArbitraryBlockResult = EarlyReturn | ArbitraryBlockRanToEnd
 
 export interface ElementInstanceMetadata {
   elementPath: ElementPath
   element: Either<string, JSXElementChild>
-  props: { [key: string]: any } // the final, resolved, static props value
-  globalFrame: CanvasRectangle | null
-  localFrame: LocalRectangle | null
+  globalFrame: MaybeInfinityCanvasRectangle | null
+  nonRoundedGlobalFrame: MaybeInfinityCanvasRectangle | null
   componentInstance: boolean
   isEmotionOrStyledComponent: boolean
   specialSizeMeasurements: SpecialSizeMeasurements
   computedStyle: ComputedStyle | null
-  attributeMetadatada: StyleAttributeMetadata | null
+  attributeMetadata: StyleAttributeMetadata | null
   label: string | null
   importInfo: ImportInfo | null
+  conditionValue: ConditionValue
+  textContent: string | null
+  earlyReturn: EarlyReturn | null
+  assignedToProp: string | null
+}
+
+export interface DomElementMetadata {
+  element: Either<string, JSXElementChild>
+  globalFrame: MaybeInfinityCanvasRectangle | null
+  nonRoundedGlobalFrame: MaybeInfinityCanvasRectangle | null
+  specialSizeMeasurements: SpecialSizeMeasurements
+  textContent: string | null
+
+  computedStyle: ComputedStyle | null
+  attributeMetadata: StyleAttributeMetadata | null
+}
+
+export interface ComputedStyleMetadata {
+  computedStyle: ComputedStyle
+  attributeMetadata: StyleAttributeMetadata
 }
 
 export function elementInstanceMetadata(
   elementPath: ElementPath,
   element: Either<string, JSXElementChild>,
-  props: { [key: string]: any },
-  globalFrame: CanvasRectangle | null,
-  localFrame: LocalRectangle | null,
+  globalFrame: MaybeInfinityCanvasRectangle | null,
+  nonRoundedGlobalFrame: MaybeInfinityCanvasRectangle | null,
   componentInstance: boolean,
   isEmotionOrStyledComponent: boolean,
   sizeMeasurements: SpecialSizeMeasurements,
   computedStyle: ComputedStyle | null,
-  attributeMetadatada: StyleAttributeMetadata | null,
+  attributeMetadata: StyleAttributeMetadata | null,
   label: string | null,
   importInfo: ImportInfo | null,
+  conditionValue: ConditionValue,
+  textContent: string | null,
+  earlyReturn: EarlyReturnResult | EarlyReturnVoid | null,
+  assignedToProp: string | null,
 ): ElementInstanceMetadata {
   return {
     elementPath: elementPath,
     element: element,
-    props: props,
     globalFrame: globalFrame,
-    localFrame: localFrame,
+    nonRoundedGlobalFrame: nonRoundedGlobalFrame,
     componentInstance: componentInstance,
     isEmotionOrStyledComponent: isEmotionOrStyledComponent,
     specialSizeMeasurements: sizeMeasurements,
     computedStyle: computedStyle,
-    attributeMetadatada: attributeMetadatada,
+    attributeMetadata: attributeMetadata,
     label: label,
     importInfo: importInfo,
+    conditionValue: conditionValue,
+    textContent: textContent,
+    earlyReturn: earlyReturn,
+    assignedToProp: assignedToProp,
   }
 }
 
-export type DetectedLayoutSystem = 'flex' | 'grid' | 'flow' | 'none'
+export function domElementMetadata(
+  element: Either<string, JSXElementChild>,
+  globalFrame: MaybeInfinityCanvasRectangle | null,
+  nonRoundedGlobalFrame: MaybeInfinityCanvasRectangle | null,
+  sizeMeasurements: SpecialSizeMeasurements,
+  textContent: string | null,
+): DomElementMetadata {
+  return {
+    element: element,
+    globalFrame: globalFrame,
+    nonRoundedGlobalFrame: nonRoundedGlobalFrame,
+    specialSizeMeasurements: sizeMeasurements,
+    textContent: textContent,
+
+    computedStyle: null,
+    attributeMetadata: null,
+  }
+}
+
+export function computedStyleMetadata(
+  computedStyle: ComputedStyle,
+  attributeMetadata: StyleAttributeMetadata,
+): ComputedStyleMetadata {
+  return {
+    computedStyle: computedStyle,
+    attributeMetadata: attributeMetadata,
+  }
+}
+
+export function metadataHasPositionAbsoluteOrNull(
+  metadata: ElementInstanceMetadata | null | undefined,
+): boolean {
+  if (metadata == null) {
+    return false
+  } else {
+    return (
+      metadata.specialSizeMeasurements.position === 'absolute' ||
+      metadata.specialSizeMeasurements.position === null
+    )
+  }
+}
+
 export type SettableLayoutSystem = 'flex' | 'flow' | 'grid' | LayoutSystem
+
+export interface GridPositionValue {
+  numericalPosition: number | null
+}
+
+export function gridPositionValue(numericalPosition: number | null): GridPositionValue {
+  return {
+    numericalPosition: numericalPosition,
+  }
+}
+
+export function isGridPositionValue(p: GridPositionOrSpan | null): p is GridPositionValue {
+  const maybe = p as GridPositionValue
+  return p != null && typeof p === 'object' && maybe.numericalPosition !== undefined
+}
+
+export const validGridPositionKeywords = ['auto']
+
+export type ValidGridPositionKeyword = string // using <string> because valid keywords are also line names we cannot know in advance
+
+export type GridPosition = GridPositionValue | CSSKeyword<ValidGridPositionKeyword>
+
+export const isValidGridPositionKeyword =
+  (labels: string[]) =>
+  (u: unknown): u is ValidGridPositionKeyword => {
+    if (u == null || typeof u !== 'string') {
+      return false
+    }
+    if (validGridPositionKeywords.includes(u)) {
+      return true
+    }
+    return labels.includes(u)
+  }
+
+export interface GridRange {
+  start: GridPositionOrSpan
+  end: GridPositionOrSpan | null
+}
+
+export function gridRange(start: GridPositionOrSpan, end: GridPositionOrSpan | null): GridRange {
+  return {
+    start: start,
+    end: end,
+  }
+}
+
+export type GridColumnStart = GridPositionOrSpan
+export type GridColumnEnd = GridPositionOrSpan
+export type GridRowStart = GridPositionOrSpan
+export type GridRowEnd = GridPositionOrSpan
+
+export interface GridAutoOrTemplateFallback {
+  type: 'FALLBACK'
+  value: string
+}
+
+export function gridAutoOrTemplateFallback(value: string): GridAutoOrTemplateFallback {
+  return {
+    type: 'FALLBACK',
+    value: value,
+  }
+}
+
+export interface GridAutoOrTemplateDimensions {
+  type: 'DIMENSIONS'
+  dimensions: Array<GridDimension>
+}
+
+export function gridAutoOrTemplateDimensions(
+  dimensions: Array<GridDimension>,
+): GridAutoOrTemplateDimensions {
+  return {
+    type: 'DIMENSIONS',
+    dimensions: dimensions,
+  }
+}
+
+export type GridAutoOrTemplateBase = GridAutoOrTemplateDimensions | GridAutoOrTemplateFallback
+
+export function isGridAutoOrTemplateDimensions(
+  value: GridAutoOrTemplateBase,
+): value is GridAutoOrTemplateDimensions {
+  return value.type === 'DIMENSIONS'
+}
+
+export type GridAuto = GridAutoOrTemplateBase
+export type GridTemplate = GridAutoOrTemplateBase
+
+export type GridTemplateColumns = GridTemplate
+export type GridTemplateRows = GridTemplate
+export type GridAutoColumns = GridAuto
+export type GridAutoRows = GridAuto
+
+export interface GridContainerProperties {
+  gridTemplateColumns: GridTemplateColumns | null
+  gridTemplateRows: GridTemplateRows | null
+  gridAutoColumns: GridAutoColumns | null
+  gridAutoRows: GridAutoRows | null
+  gridAutoFlow: GridAutoFlow | null
+}
+
+export function gridContainerProperties(
+  gridTemplateColumns: GridTemplateColumns | null,
+  gridTemplateRows: GridTemplateRows | null,
+  gridAutoColumns: GridAutoColumns | null,
+  gridAutoRows: GridAutoRows | null,
+  gridAutoFlow: GridAutoFlow | null,
+): GridContainerProperties {
+  return {
+    gridTemplateColumns: gridTemplateColumns,
+    gridTemplateRows: gridTemplateRows,
+    gridAutoColumns: gridAutoColumns,
+    gridAutoRows: gridAutoRows,
+    gridAutoFlow: gridAutoFlow,
+  }
+}
+
+export interface GridElementProperties {
+  gridColumnStart: GridColumnStart | null
+  gridColumnEnd: GridColumnEnd | null
+  gridRowStart: GridRowStart | null
+  gridRowEnd: GridRowEnd | null
+}
+
+export function gridElementProperties(
+  gridColumnStart: GridColumnStart | null,
+  gridColumnEnd: GridColumnEnd | null,
+  gridRowStart: GridRowStart | null,
+  gridRowEnd: GridRowEnd | null,
+): GridElementProperties {
+  return {
+    gridColumnStart: gridColumnStart,
+    gridColumnEnd: gridColumnEnd,
+    gridRowStart: gridRowStart,
+    gridRowEnd: gridRowEnd,
+  }
+}
+
+export type BorderWidths = {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
 
 export interface SpecialSizeMeasurements {
   offset: LocalPoint
   coordinateSystemBounds: CanvasRectangle | null
   immediateParentBounds: CanvasRectangle | null
+  globalFrameWithTextContent: MaybeInfinityCanvasRectangle | null
+  textBounds: CanvasRectangle | null
   immediateParentProvidesLayout: boolean
+  closestOffsetParentPath: ElementPath | null
   usesParentBounds: boolean
   parentLayoutSystem: DetectedLayoutSystem // TODO make a specific boolean prop that tells us the parent is flex or not
-  layoutSystemForChildren: DetectedLayoutSystem
-  providesBoundsForChildren: boolean
+  layoutSystemForChildren: DetectedLayoutSystem | null
+  layoutSystemForChildrenInherited: boolean
+  providesBoundsForAbsoluteChildren: boolean
   display: string
   position: CSSPosition | null
   margin: Sides
@@ -1535,21 +2816,57 @@ export interface SpecialSizeMeasurements {
   naturalHeight: number | null
   clientWidth: number
   clientHeight: number
-  parentFlexDirection: string | null
-  flexDirection: string | null
+  parentFlexDirection: FlexDirection | null
+  parentJustifyContent: FlexJustifyContent | null
+  parentFlexGap: number
+  parentPadding: Sides
+  parentHugsOnMainAxis: boolean
+  gap: number | null
+  flexDirection: FlexDirection | null
+  justifyContent: FlexJustifyContent | null
+  alignContent: AlignContent | null
+  alignItems: FlexAlignment | null
+  alignSelf: SelfAlignment | null
+  justifySelf: SelfAlignment | null
   htmlElementName: string
   renderedChildrenCount: number
+  globalContentBoxForChildren: MaybeInfinityCanvasRectangle | null
+  float: string
+  hasPositionOffset: boolean
+  parentTextDirection: TextDirection | null
+  hasTransform: boolean
+  borderRadius: Sides | null
+  fontSize: string | null
+  fontWeight: string | null
+  fontStyle: string | null
+  textDecorationLine: string | null
+  computedHugProperty: HugPropertyWidthHeight
+  containerGridProperties: GridContainerProperties
+  parentContainerGridProperties: GridContainerProperties
+  elementGridProperties: GridElementProperties
+  containerGridPropertiesFromProps: GridContainerProperties
+  parentContainerGridPropertiesFromProps: GridContainerProperties
+  elementGridPropertiesFromProps: GridElementProperties
+  rowGap: number | null
+  columnGap: number | null
+  gridCellGlobalFrames: GridCellGlobalFrames | null
+  parentGridCellGlobalFrames: GridCellGlobalFrames | null
+  borderWidths: BorderWidths
+  parentGridFrame: CanvasRectangle | null
 }
 
 export function specialSizeMeasurements(
   offset: LocalPoint,
   coordinateSystemBounds: CanvasRectangle | null,
   immediateParentBounds: CanvasRectangle | null,
+  globalFrameWithTextContent: MaybeInfinityCanvasRectangle | null,
   immediateParentProvidesLayout: boolean,
+  closestOffsetParentPath: ElementPath | null,
   usesParentBounds: boolean,
   parentLayoutSystem: DetectedLayoutSystem,
-  layoutSystemForChildren: DetectedLayoutSystem,
-  providesBoundsForChildren: boolean,
+  layoutSystemForChildren: DetectedLayoutSystem | null,
+  layoutSystemForChildrenInherited: boolean,
+  providesBoundsForAbsoluteChildren: boolean,
   display: string,
   position: CSSPosition | null,
   margin: Sides,
@@ -1558,20 +2875,58 @@ export function specialSizeMeasurements(
   naturalHeight: number | null,
   clientWidth: number,
   clientHeight: number,
-  parentFlexDirection: string | null,
-  flexDirection: string | null,
+  parentFlexDirection: FlexDirection | null,
+  parentJustifyContent: FlexJustifyContent | null,
+  parentFlexGap: number,
+  parentPadding: Sides,
+  parentHugsOnMainAxis: boolean,
+  gap: number | null,
+  flexDirection: FlexDirection | null,
+  justifyContent: FlexJustifyContent | null,
+  alignContent: AlignContent | null,
+  alignItems: FlexAlignment | null,
   htmlElementName: string,
   renderedChildrenCount: number,
+  globalContentBoxForChildren: MaybeInfinityCanvasRectangle | null,
+  float: string,
+  hasPositionOffset: boolean,
+  parentTextDirection: TextDirection | null,
+  hasTransform: boolean,
+  borderRadius: Sides | null,
+  fontSize: string | null,
+  fontWeight: string | null,
+  fontStyle: string | null,
+  textDecorationLine: string | null,
+  textBounds: CanvasRectangle | null,
+  computedHugProperty: HugPropertyWidthHeight,
+  containerGridProperties: GridContainerProperties,
+  parentContainerGridProperties: GridContainerProperties,
+  elementGridProperties: GridElementProperties,
+  containerGridPropertiesFromProps: GridContainerProperties,
+  parentContainerGridPropertiesFromProps: GridContainerProperties,
+  elementGridPropertiesFromProps: GridElementProperties,
+  rowGap: number | null,
+  columnGap: number | null,
+  gridCellGlobalFrames: GridCellGlobalFrames | null,
+  parentGridCellGlobalFrames: GridCellGlobalFrames | null,
+  justifySelf: SelfAlignment | null,
+  alignSelf: SelfAlignment | null,
+  borderWidths: BorderWidths,
+  parentGridFrame: CanvasRectangle | null,
 ): SpecialSizeMeasurements {
   return {
     offset,
     coordinateSystemBounds,
     immediateParentBounds,
     immediateParentProvidesLayout,
+    globalFrameWithTextContent,
+    textBounds,
+    closestOffsetParentPath,
     usesParentBounds,
     parentLayoutSystem,
     layoutSystemForChildren,
-    providesBoundsForChildren,
+    layoutSystemForChildrenInherited,
+    providesBoundsForAbsoluteChildren,
     display,
     position,
     margin,
@@ -1581,9 +2936,42 @@ export function specialSizeMeasurements(
     clientWidth,
     clientHeight,
     parentFlexDirection,
+    parentJustifyContent,
+    parentFlexGap,
+    parentPadding,
+    parentHugsOnMainAxis,
+    gap,
     flexDirection,
+    justifyContent,
+    alignContent,
+    alignItems,
     htmlElementName,
     renderedChildrenCount,
+    globalContentBoxForChildren,
+    float,
+    hasPositionOffset,
+    parentTextDirection,
+    hasTransform,
+    borderRadius,
+    fontSize,
+    fontWeight,
+    fontStyle,
+    textDecorationLine,
+    computedHugProperty,
+    containerGridProperties,
+    parentContainerGridProperties,
+    elementGridProperties,
+    containerGridPropertiesFromProps,
+    parentContainerGridPropertiesFromProps,
+    elementGridPropertiesFromProps,
+    rowGap,
+    columnGap,
+    gridCellGlobalFrames,
+    parentGridCellGlobalFrames,
+    justifySelf,
+    alignSelf,
+    borderWidths,
+    parentGridFrame,
   }
 }
 
@@ -1592,33 +2980,102 @@ export const emptySpecialSizeMeasurements = specialSizeMeasurements(
     x: 0,
     y: 0,
   } as LocalPoint,
+  null,
   zeroCanvasRect,
-  zeroCanvasRect,
+  null,
   true,
+  EP.emptyElementPath,
   false,
   'flow',
-  'flow',
+  null,
+  false,
   false,
   'initial',
-  'static',
+  null,
   sides(undefined, undefined, undefined, undefined),
   sides(undefined, undefined, undefined, undefined),
   null,
   null,
   0,
   0,
+  null,
+  null,
+  0,
+  sides(undefined, undefined, undefined, undefined),
+  false,
+  null,
+  null,
+  null,
   null,
   null,
   'div',
   0,
+  null,
+  'none',
+  false,
+  'ltr',
+  false,
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+  { width: null, height: null },
+  {
+    gridTemplateColumns: null,
+    gridTemplateRows: null,
+    gridAutoColumns: null,
+    gridAutoRows: null,
+    gridAutoFlow: null,
+  },
+  {
+    gridTemplateColumns: null,
+    gridTemplateRows: null,
+    gridAutoColumns: null,
+    gridAutoRows: null,
+    gridAutoFlow: null,
+  },
+  {
+    gridColumnStart: null,
+    gridColumnEnd: null,
+    gridRowStart: null,
+    gridRowEnd: null,
+  },
+  {
+    gridTemplateColumns: null,
+    gridTemplateRows: null,
+    gridAutoColumns: null,
+    gridAutoRows: null,
+    gridAutoFlow: null,
+  },
+  {
+    gridTemplateColumns: null,
+    gridTemplateRows: null,
+    gridAutoColumns: null,
+    gridAutoRows: null,
+    gridAutoFlow: null,
+  },
+  {
+    gridColumnStart: null,
+    gridColumnEnd: null,
+    gridRowStart: null,
+    gridRowEnd: null,
+  },
+  null,
+  null,
+  null,
+  null,
+  null,
+  null,
+  {
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  null,
 )
-
-export const emptyComputedStyle: ComputedStyle = {}
-export const emptyAttributeMetadatada: StyleAttributeMetadata = {}
-
-type Omit<T, K> = Pick<T, Exclude<keyof T, K>> // TODO update typescript!!
-
-export type ElementsByUID = { [uid: string]: JSXElement }
 
 export function walkElement(
   element: JSXElementChild,
@@ -1633,6 +3090,11 @@ export function walkElement(
         const path = EP.appendToElementPath(parentPath, uidAttr.value)
         forEach(element, path, depth)
         fastForEach(element.children, (child) => walkElement(child, path, depth + 1, forEach))
+        element.props.forEach((prop) => {
+          if (prop.type === 'JSX_ATTRIBUTES_ENTRY') {
+            walkElement(prop.value, path, depth + 1, forEach)
+          }
+        })
       }
       break
     case 'JSX_FRAGMENT':
@@ -1642,11 +3104,50 @@ export function walkElement(
     case 'JSX_TEXT_BLOCK':
       forEach(element, parentPath, depth)
       break
-    case 'JSX_ARBITRARY_BLOCK':
+    case 'JSX_MAP_EXPRESSION':
+      forEach(element, parentPath, depth)
+      walkElement(element.valueToMap, parentPath, depth + 1, forEach)
+      walkElement(element.mapFunction, parentPath, depth + 1, forEach)
+      break
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT':
       forEach(element, parentPath, depth)
       fastForEach(Object.keys(element.elementsWithin), (childKey) =>
         walkElement(element.elementsWithin[childKey], parentPath, depth + 1, forEach),
       )
+      break
+    case 'JSX_CONDITIONAL_EXPRESSION':
+      forEach(element, parentPath, depth)
+      walkElement(element.whenTrue, parentPath, depth + 1, forEach)
+      walkElement(element.whenFalse, parentPath, depth + 1, forEach)
+      break
+    case 'ATTRIBUTE_VALUE':
+      break
+    case 'ATTRIBUTE_NESTED_ARRAY':
+      fastForEach(element.content, (elem) => {
+        forEach(elem.value, parentPath, depth + 1)
+      })
+      break
+    case 'ATTRIBUTE_NESTED_OBJECT':
+      fastForEach(element.content, (elem) => {
+        forEach(elem.value, parentPath, depth + 1)
+      })
+      break
+    case 'ATTRIBUTE_FUNCTION_CALL':
+      fastForEach(element.parameters, (elem) => {
+        forEach(elem, parentPath, depth + 1)
+      })
+      break
+    case 'JS_IDENTIFIER':
+      forEach(element, parentPath, depth)
+      break
+    case 'JS_PROPERTY_ACCESS':
+      forEach(element, parentPath, depth)
+      walkElement(element.onValue, parentPath, depth + 1, forEach)
+      break
+    case 'JS_ELEMENT_ACCESS':
+      forEach(element, parentPath, depth)
+      walkElement(element.onValue, parentPath, depth + 1, forEach)
+      walkElement(element.element, parentPath, depth + 1, forEach)
       break
     default:
       const _exhaustiveCheck: never = element
@@ -1658,7 +3159,7 @@ export function walkElements(
   topLevelElements: Array<TopLevelElement>,
   forEach: (element: JSXElementChild, path: StaticElementPathPart) => void,
 ): void {
-  const emptyPath = ([] as any) as StaticElementPathPart // Oh my word
+  const emptyPath = EP.emptyStaticElementPathPart()
   fastForEach(topLevelElements, (rootComponent) => {
     if (isUtopiaJSXComponent(rootComponent)) {
       walkElement(rootComponent.rootElement, emptyPath, 0, forEach)
@@ -1684,4 +3185,103 @@ export function getElementsByUIDFromTopLevelElements(
     }
   })
   return result
+}
+
+export function clearJSAssignmentUniqueIDs(assignment: JSAssignment): JSAssignment {
+  return {
+    ...assignment,
+    leftHandSide: clearBoundParamUniqueIDs(assignment.leftHandSide),
+    rightHandSide: clearExpressionUniqueIDs(assignment.rightHandSide),
+  }
+}
+
+export function clearJSAssignmentSourceMaps(assignment: JSAssignment): JSAssignment {
+  return {
+    ...assignment,
+    leftHandSide: clearBoundParamSourceMaps(assignment.leftHandSide),
+    rightHandSide: clearExpressionSourceMaps(assignment.rightHandSide),
+  }
+}
+
+export function clearJSArbitraryStatementUniqueIDs(
+  statement: JSArbitraryStatement,
+): JSArbitraryStatement {
+  switch (statement.type) {
+    case 'JS_ASSIGNMENT_STATEMENT':
+      return {
+        ...statement,
+        assignments: statement.assignments.map(clearJSAssignmentUniqueIDs),
+        uid: '',
+      }
+    case 'JS_OPAQUE_ARBITRARY_STATEMENT':
+      return {
+        ...statement,
+        uid: '',
+      }
+    default:
+      assertNever(statement)
+  }
+}
+
+export function clearJSArbitraryStatementSourceMaps(
+  statement: JSArbitraryStatement,
+): JSArbitraryStatement {
+  switch (statement.type) {
+    case 'JS_ASSIGNMENT_STATEMENT':
+      return {
+        ...statement,
+        assignments: statement.assignments.map(clearJSAssignmentSourceMaps),
+      }
+    case 'JS_OPAQUE_ARBITRARY_STATEMENT':
+      return statement
+    default:
+      assertNever(statement)
+  }
+}
+
+export type GridPositionOrSpan = GridPosition | GridSpan
+
+export type GridSpan = GridSpanNumeric | GridSpanArea
+
+export function isGridSpan(u: unknown): u is GridSpan {
+  const maybe = u as GridSpan
+  return (
+    maybe != null && typeof u === 'object' && (isGridSpanNumeric(maybe) || isGridSpanArea(maybe))
+  )
+}
+
+export function stringifyGridSpan(span: GridSpan): string {
+  return `span ${span.value}`
+}
+
+export type GridSpanNumeric = {
+  type: 'SPAN_NUMERIC'
+  value: number
+}
+
+export function gridSpanNumeric(value: number): GridSpanNumeric {
+  return {
+    type: 'SPAN_NUMERIC',
+    value: value,
+  }
+}
+
+function isGridSpanNumeric(span: GridSpan): span is GridSpanNumeric {
+  return span.type === 'SPAN_NUMERIC'
+}
+
+export type GridSpanArea = {
+  type: 'SPAN_AREA'
+  value: string
+}
+
+export function gridSpanArea(areaName: string): GridSpanArea {
+  return {
+    type: 'SPAN_AREA',
+    value: areaName,
+  }
+}
+
+function isGridSpanArea(span: GridSpan): span is GridSpanArea {
+  return span.type === 'SPAN_AREA'
 }

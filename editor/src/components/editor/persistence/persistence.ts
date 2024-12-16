@@ -1,30 +1,20 @@
-import {
-  actions,
-  assign,
-  createMachine,
-  DoneInvokeEvent,
-  interpret,
-  Interpreter,
-  send,
-} from 'xstate'
-import type { Model } from 'xstate/lib/model.types'
-import { ProjectFile } from '../../../core/shared/project-file-types'
-import { projectURLForProject } from '../../../core/shared/utils'
-import { defaultProject } from '../../../sample-projects/sample-project-utils'
+import type { Interpreter } from 'xstate'
+import { interpret } from 'xstate'
+import type { ProjectFile } from '../../../core/shared/project-file-types'
+import { NO_OP } from '../../../core/shared/utils'
 import { notice } from '../../common/notice'
-import { EditorAction, EditorDispatch } from '../action-types'
+import type { EditorAction, EditorDispatch } from '../action-types'
 import {
   setForkedFromProjectID,
+  setForking,
   setProjectID,
   setProjectName,
   showToast,
   updateFile,
 } from '../actions/action-creators'
-import { createNewProjectName, PersistentModel } from '../store/editor-state'
+import type { PersistentModel } from '../store/editor-state'
+import type { PersistenceEvent, SaveEvent } from './generic/persistence-machine'
 import {
-  PersistenceContext,
-  PersistenceEvent,
-  SaveEvent,
   createPersistenceMachine,
   LoggedIn,
   Forking,
@@ -37,20 +27,8 @@ import {
   userLogInEvent,
   userLogOutEvent,
 } from './generic/persistence-machine'
-import {
-  PersistenceBackendAPI,
-  ProjectLoadResult,
-  ProjectModel,
-  ProjectWithFileChanges,
-} from './generic/persistence-types'
-
-export function pushProjectURLToBrowserHistory(projectId: string, projectName: string): void {
-  // Make sure we don't replace the query params
-  const queryParams = window.top.location.search
-  const projectURL = projectURLForProject(projectId, projectName)
-  const title = `Utopia ${projectName}`
-  window.top.history.pushState({}, title, `${projectURL}${queryParams}`)
-}
+import type { PersistenceBackendAPI, PersistenceContext } from './generic/persistence-types'
+import { CollaborationEndpoints } from '../collaborative-endpoints'
 
 export class PersistenceMachine {
   private interpreter: Interpreter<
@@ -63,16 +41,21 @@ export class PersistenceMachine {
   private waitingThrottledSaveEvent: SaveEvent<PersistentModel> | null = null
   private queuedActions: Array<EditorAction> = [] // Queue up actions during events and transitions, then dispatch when ready
   private projectCreatedOrLoadedThisTick: boolean = false
+  private projectUploadedToServer: boolean = false
 
   constructor(
     backendAPI: PersistenceBackendAPI<PersistentModel, ProjectFile>,
     dispatch: EditorDispatch,
-    onProjectNotFound: () => void,
+    onProjectNotFound: (projectId: string) => void,
     onCreatedOrLoadedProject: (
       projectId: string,
       projectName: string,
       project: PersistentModel,
     ) => void,
+    onContextChange: (
+      newContext: PersistenceContext<PersistentModel>,
+      oldContext: PersistenceContext<PersistentModel> | undefined,
+    ) => void = NO_OP,
     private saveThrottle: number = 30000,
   ) {
     this.interpreter = interpret(createPersistenceMachine<PersistentModel, ProjectFile>(backendAPI))
@@ -81,7 +64,9 @@ export class PersistenceMachine {
       if (state.changed) {
         switch (event.type) {
           case 'NEW_PROJECT_CREATED':
+            this.queuedActions.push(setProjectID(event.projectId))
             if (state.matches({ user: LoggedIn })) {
+              this.projectUploadedToServer = true
               this.queuedActions.push(showToast(notice('Project successfully uploaded!')))
             } else {
               this.queuedActions.push(
@@ -92,19 +77,24 @@ export class PersistenceMachine {
             this.projectCreatedOrLoadedThisTick = true
             break
           case 'LOAD_COMPLETE':
+            this.projectUploadedToServer = true
             this.projectCreatedOrLoadedThisTick = true
             break
           case 'PROJECT_ID_CREATED':
             this.queuedActions.push(setProjectID(event.projectId))
             break
           case 'LOAD_FAILED':
-            onProjectNotFound()
+            onProjectNotFound(event.projectId)
+            break
+          case 'LOAD_FAILED_NOT_AUTHORIZED':
+            onProjectNotFound(event.projectId)
             break
           case 'DOWNLOAD_ASSETS_COMPLETE': {
             if (state.matches({ core: { [Forking]: CreatingProjectId } })) {
               this.queuedActions.push(setForkedFromProjectID(state.context.projectId!))
               this.queuedActions.push(setProjectName(state.context.project!.name))
               this.queuedActions.push(showToast(notice('Project successfully forked!')))
+              this.queuedActions.push(setForking(false))
             }
 
             const updateFileActions = event.downloadAssetsResult.filesWithFileNames.map(
@@ -119,7 +109,16 @@ export class PersistenceMachine {
             )
             this.queuedActions.push(...updateFileActions)
             this.lastSavedTS = Date.now()
-            // TODO Show toasts after first server save of a previously local project
+            if (!this.projectUploadedToServer && event.source === 'server') {
+              this.projectUploadedToServer = true
+              this.queuedActions.push(showToast(notice('Project successfully uploaded!')))
+            }
+            break
+          case 'BACKEND_ERROR':
+            // Clear the queued actions and instead show a toast with the error
+            const error = event.error
+            const message = typeof error === 'string' ? error : error.message
+            this.queuedActions = [showToast(notice(message, 'ERROR'))]
             break
         }
 
@@ -136,13 +135,6 @@ export class PersistenceMachine {
 
           if (this.queuedActions.length > 0) {
             const actionsToDispatch = this.queuedActions
-            const projectIdOrNameChanged = actionsToDispatch.some(
-              (action) =>
-                action.action === 'SET_PROJECT_ID' || action.action === 'SET_PROJECT_NAME',
-            )
-            if (projectIdOrNameChanged) {
-              pushProjectURLToBrowserHistory(state.context.projectId!, state.context.project!.name)
-            }
             this.queuedActions = []
             dispatch(actionsToDispatch)
           }
@@ -150,10 +142,14 @@ export class PersistenceMachine {
       }
     })
 
+    this.interpreter.onChange(onContextChange)
+
     this.interpreter.start()
 
-    window.addEventListener('beforeunload', (e) => {
-      if (!this.isSafeToClose()) {
+    window.addEventListener('beforeunload', async (e) => {
+      if (this.isSafeToClose()) {
+        void CollaborationEndpoints.clearAllControlFromThisEditor()
+      } else {
         this.sendThrottledSave()
         e.preventDefault()
         e.returnValue = ''
@@ -215,8 +211,8 @@ export class PersistenceMachine {
     this.interpreter.send(newEvent({ name: projectName, content: project }))
   }
 
-  fork = (): void => {
-    this.interpreter.send(forkEvent())
+  fork = (projectName: string, project: PersistentModel): void => {
+    this.interpreter.send(forkEvent({ name: projectName, content: project }))
   }
 
   login = (): void => {

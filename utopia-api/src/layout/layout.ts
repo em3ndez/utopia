@@ -1,4 +1,4 @@
-import {
+import type {
   FlexParentProps,
   FlexElementProps,
   FlexPosition,
@@ -9,7 +9,7 @@ import {
   Sides,
   FlexLength,
 } from './flex'
-import { Frame, FramePin } from './frame'
+import type { Frame, FramePin } from './frame'
 
 export enum LayoutSystem {
   PinSystem = 'pinSystem',
@@ -41,7 +41,7 @@ export interface LayoutBaseProps {
   flexShrink?: number
   // flex parent
   flexDirection?: FlexDirection
-  alignContent?: FlexAlignment
+  alignContent?: FlexJustifyContent
   alignItems?: FlexAlignment
   justifyContent?: FlexJustifyContent
   wrap?: FlexWrap

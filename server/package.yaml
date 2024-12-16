@@ -1,19 +1,37 @@
 name: utopia-web
-version: 0.1.0.4
+version: 0.1.1.0
 synopsis: Utopia Web
 description: Utopia Web
 github: concrete-utopia/utopia
 category: Development
 license: MIT
-ghc-options: -Wall -threaded -rtsopts
+
+ghc-options:
+  - -Wall
+  - -Werror
+  - -threaded
+  - -fno-warn-orphans
+  - -Wno-unused-imports
+  - -Wno-deprecations
+  - -rtsopts
+  - -O2
+
+default-extensions:
+  - NoImplicitPrelude
+
+flags:
+  enable-external-tests:
+    description: Enable the external tests.
+    manual: true
+    default: true
 dependencies:
-  - aeson
+  - aeson ==2.0.3.0
   - aeson-pretty
-  - amazonka ==1.6.1
-  - amazonka-core ==1.6.1
-  - amazonka-s3 ==1.6.1
+  - async
+  - aws
   - base >= 4.7 && < 5
   - base16-bytestring
+  - base64
   - binary
   - blaze-html
   - bytestring
@@ -21,32 +39,40 @@ dependencies:
   - cereal
   - concurrent-extra
   - conduit
+  - containers
   - cookie
   - cryptohash-sha256
+  - cryptonite
   - data-default
   - directory
   - exceptions
   - fast-logger
   - filepath
   - free
-  - zlib
+  - generic-lens
+  - generic-lens-core
+  - github ==0.27
+  - hashable
+  - hoauth2
   - http-api-data
   - http-client
   - http-client-tls
   - http-media
   - http-types
-  - generic-lens
+  - JuicyPixels
   - lens
-  - lens-aeson
+  - lens-aeson ==1.1.3
+  - lifted-async
   - lifted-base
+  - magic
+  - mime
   - mime-types
   - modern-uri
   - monad-control
   - monad-logger
   - mtl
   - network-uri
-  - opaleye
-  - opaleye-trans
+  - opaleye ==0.9.6.1
   - path
   - path-pieces
   - pathwalk
@@ -54,19 +80,20 @@ dependencies:
   - postgresql-simple-migration
   - process
   - product-profunctors
-  - protolude ==0.3.0
+  - protolude
   - resource-pool
   - rio
-  - servant ==0.18.2
+  - servant ==0.19.1
   - servant-blaze
-  - servant-client ==0.18.2
+  - servant-client
   - servant-conduit
   - servant-rawm-client
-  - servant-rawm-server
-  - servant-server ==0.18.2
-  - servant-websockets ==2.0.0
+  - servant-rawm-server ==1.0.0.1
+  - servant-server ==0.19.2
+  - servant-websockets
   - serversession ==1.0.2
   - split
+  - string-conversions
   - tagsoup
   - tar
   - temporary
@@ -74,37 +101,47 @@ dependencies:
   - time
   - time-manager
   - transformers
+  - unliftio
   - unix
   - unordered-containers
+  - uri-bytestring
+  - utf8-string
+  - utopia-clientmodel
   - uuid
   - vector
   - wai
   - wai-app-static
-  - wai-extra ==3.0.29.1
+  - wai-extra
   - wai-websockets
   - warp
   - websockets
   - wreq
+  - zlib
 extra-libraries:
   - z
-default-extensions:
-  - NoImplicitPrelude
 executable:
   main: Main.hs
-  source-dirs: src
+  source-dirs:
+    - src
+    - app
 tests:
   utopia-web-test:
+    when:
+      - condition: flag(enable-external-tests)
+        then:
+          cpp-options: -DENABLE_EXTERNAL_TESTS=True
+        else:
+          cpp-options: -DENABLE_EXTERNAL_TESTS=False
     main: Main.hs
     source-dirs:
       - test
       - src
     dependencies:
-      - servant-client-core
-      - hspec
       - hedgehog
       - port-utils
       - random
-      - tasty
+      - servant-client-core
+      - tasty ==1.5
       - tasty-hedgehog
-      - tasty-hspec
       - tasty-hunit
+      - HUnit

@@ -1,29 +1,28 @@
 import deepEqual from 'fast-deep-equal'
 import { useContextSelector } from 'use-context-selector'
 import { flatMapArray, last, mapArrayToDictionary } from '../../../core/shared/array-utils'
-import { emptyComments, jsxAttributeValue } from '../../../core/shared/element-template'
+import { emptyComments, jsExpressionValue } from '../../../core/shared/element-template'
 import { objectMap } from '../../../core/shared/object-utils'
-import { ElementPath } from '../../../core/shared/project-file-types'
-import { arrayEquals, NO_OP } from '../../../core/shared/utils'
+import type { ElementPath } from '../../../core/shared/project-file-types'
+import { arrayEqualsByReference, NO_OP } from '../../../core/shared/utils'
 import { useKeepReferenceEqualityIfPossible } from '../../../utils/react-performance'
 import {
   setProp_UNSAFE,
   transientActions,
   unsetProperty,
 } from '../../editor/actions/action-creators'
+import { useDispatch } from '../../editor/store/dispatch-context'
 import { useEditorState } from '../../editor/store/store-hook'
+import type { PropertyStatus } from './control-status'
+import { getControlStatusFromPropertyStatus } from './control-status'
+import { getControlStyles } from './control-styles'
+import type { ParsedProperties, ParsedPropertiesKeys } from './css-utils'
+import { printCSSValue } from './css-utils'
+import type { ReadonlyRef } from './inspector-utils'
+import type { InspectorInfo, PathMappingFn } from './property-path-hooks'
 import {
-  getControlStatusFromPropertyStatus,
-  getControlStyles,
-  PropertyStatus,
-} from './control-status'
-import { ParsedProperties, ParsedPropertiesKeys, printCSSValue } from './css-utils'
-import { ReadonlyRef } from './inspector-utils'
-import {
-  InspectorInfo,
   InspectorPropsContext,
   ParsedValues,
-  PathMappingFn,
   useGetOrderedPropertyKeys,
   useInspectorContext,
   useInspectorInfo,
@@ -31,7 +30,7 @@ import {
 
 function getShadowedLonghandShorthandValue<
   LonghandKey extends ParsedPropertiesKeys,
-  ShorthandKey extends ParsedPropertiesKeys
+  ShorthandKey extends ParsedPropertiesKeys,
 >(
   longhand: LonghandKey,
   shorthand: ShorthandKey,
@@ -42,7 +41,7 @@ function getShadowedLonghandShorthandValue<
   orderedPropKeys: (LonghandKey | ShorthandKey)[][], // multiselect
 ): { value: ParsedProperties[LonghandKey]; propertyStatus: PropertyStatus } {
   const allPropKeysEqual = orderedPropKeys.every((propKeys) => {
-    return arrayEquals(propKeys, orderedPropKeys[0])
+    return arrayEqualsByReference(propKeys, orderedPropKeys[0])
   })
 
   const propKeys = orderedPropKeys[0] ?? []
@@ -69,7 +68,7 @@ function getShadowedLonghandShorthandValue<
     } else {
       // Important: we assume that shorthandValue is an object
       // where the keys are the longhand keys and the values are the individual longhand values
-      if (longhand in shorthandValueObject) {
+      if (shorthandValueObject != null && longhand in shorthandValueObject) {
         return {
           value: (shorthandValueObject as any)?.[longhand] as ParsedProperties[LonghandKey],
           propertyStatus: allPropKeysEqual
@@ -93,14 +92,14 @@ function getShadowedLonghandShorthandValue<
 
 export type InspectorInfoWithPropKeys<
   LonghandKey extends ParsedPropertiesKeys,
-  ShorthandKey extends ParsedPropertiesKeys
+  ShorthandKey extends ParsedPropertiesKeys,
 > = Omit<InspectorInfo<ParsedProperties[LonghandKey]>, 'useSubmitValueFactory'> & {
   orderedPropKeys: Array<Array<LonghandKey | ShorthandKey>>
 }
 
 export function useInspectorInfoLonghandShorthand<
   LonghandKey extends ParsedPropertiesKeys,
-  ShorthandKey extends ParsedPropertiesKeys
+  ShorthandKey extends ParsedPropertiesKeys,
 >(
   longhands: Array<LonghandKey>,
   shorthand: ShorthandKey,
@@ -108,10 +107,7 @@ export function useInspectorInfoLonghandShorthand<
 ): {
   [longhand in LonghandKey]: InspectorInfoWithPropKeys<LonghandKey, ShorthandKey>
 } {
-  const dispatch = useEditorState(
-    (store) => store.dispatch,
-    'useInspectorInfoLonghandShorthand dispatch',
-  )
+  const dispatch = useDispatch()
   const inspectorTargetPath = useKeepReferenceEqualityIfPossible(
     useContextSelector(InspectorPropsContext, (contextData) => contextData.targetPath, deepEqual),
   )
@@ -159,7 +155,7 @@ export function useInspectorInfoLonghandShorthand<
       transient?: boolean | undefined,
     ) => {
       const allPropKeysEqual = orderedPropKeys.every((propKeys) => {
-        return arrayEquals(propKeys, orderedPropKeys[0])
+        return arrayEqualsByReference(propKeys, orderedPropKeys[0])
       })
       if (!allPropKeysEqual) {
         // we do nothing for now. we cannot ensure that we can make a sensible update and surface it on the UI as well
@@ -179,10 +175,10 @@ export function useInspectorInfoLonghandShorthand<
         // the shorthand key is the dominant AND it can be updated
         // let's figure out the new value for the prop
         const currentValue = shorthandInfo.value
-        const updatedValue = ({
+        const updatedValue = {
           ...(currentValue as any),
           [longhand]: newTransformedValues, // VERY IMPORTANT here we assume that the longhand key is a valid key in the parsed shorthand value!!
-        } as any) as ParsedProperties[ShorthandKey]
+        } as any as ParsedProperties[ShorthandKey]
         const longhandPropertyPath = pathMappingFn(longhand, inspectorTargetPath)
         const shorthandPropertyPath = pathMappingFn(shorthand, inspectorTargetPath)
         const printedValue = printCSSValue(shorthand, updatedValue)
@@ -194,7 +190,11 @@ export function useInspectorInfoLonghandShorthand<
             setProp_UNSAFE(selectedView, shorthandPropertyPath, printedValue),
           ]
         }, selectedViewsRef.current)
-        dispatch(transient ? [transientActions(actionsToDispatch)] : actionsToDispatch)
+        dispatch(
+          transient
+            ? [transientActions(actionsToDispatch, selectedViewsRef.current)]
+            : actionsToDispatch,
+        )
       } else {
         // we either have a dominant longhand key, or we need to append a new one
         const propertyPath = pathMappingFn(longhand, inspectorTargetPath)
@@ -207,7 +207,11 @@ export function useInspectorInfoLonghandShorthand<
             setProp_UNSAFE(selectedView, propertyPath, printedValue),
           ]
         }, selectedViewsRef.current)
-        dispatch(transient ? [transientActions(actionsToDispatch)] : actionsToDispatch)
+        dispatch(
+          transient
+            ? [transientActions(actionsToDispatch, selectedViewsRef.current)]
+            : actionsToDispatch,
+        )
       }
     }
 
@@ -236,7 +240,7 @@ export function useInspectorInfoLonghandShorthand<
   const longhandResultsWithUnset = objectMap((longhandResult, longhandToUnset) => {
     const onUnsetValues = () => {
       const allPropKeysEqual = allOrderedPropKeys.every((propKeys) => {
-        return arrayEquals(propKeys, allOrderedPropKeys[0])
+        return arrayEqualsByReference(propKeys, allOrderedPropKeys[0])
       })
       if (!allPropKeysEqual) {
         // we do nothing for now. we cannot ensure that we can make a sensible update and surface it on the UI as well
@@ -270,7 +274,7 @@ export function useInspectorInfoLonghandShorthand<
 
 function createUnsetActions<
   LonghandKey extends ParsedPropertiesKeys,
-  ShorthandKey extends ParsedPropertiesKeys
+  ShorthandKey extends ParsedPropertiesKeys,
 >(
   pathMappingFn: PathMappingFn<LonghandKey | ShorthandKey>,
   inspectorTargetPath: readonly string[],
@@ -298,7 +302,7 @@ function createUnsetActions<
           setProp_UNSAFE(
             selectedView,
             longhandPropertyPath,
-            jsxAttributeValue(undefined, emptyComments),
+            jsExpressionValue(undefined, emptyComments),
           ),
         ]
       }, selectedViewsRef.current)

@@ -1,5 +1,6 @@
-import Utils, { Axis, DiagonalAxis } from '../../utils/utils'
-import {
+import type { Axis, DiagonalAxis } from '../../utils/utils'
+import Utils from '../../utils/utils'
+import type {
   CanvasPoint,
   CanvasVector,
   CoordinateMarker,
@@ -9,6 +10,7 @@ import {
   LocalRectangle,
   CanvasRectangle,
 } from '../../core/shared/math-utils'
+import { canvasPoint, roundToNearestWhole } from '../../core/shared/math-utils'
 
 export interface XAxisGuideline {
   type: 'XAxisGuideline'
@@ -33,6 +35,11 @@ export interface CornerGuideline {
 }
 
 export type Guideline = XAxisGuideline | YAxisGuideline | CornerGuideline
+
+export interface GuidelineWithRelevantPoints {
+  guideline: Guideline
+  pointsOfRelevance: Array<CanvasPoint>
+}
 
 export function xAxisGuideline(x: number, yTop: number, yBottom: number): XAxisGuideline {
   return {
@@ -67,15 +74,22 @@ export function cornerGuideline(
   }
 }
 
-type GuidelineWithDistance = {
-  guideline: Guideline
-  distance: number
-}
-
-export type GuidelineWithSnappingVector = {
+export interface GuidelineWithSnappingVectorAndPointsOfRelevance {
   guideline: Guideline
   snappingVector: CanvasVector
-  activateSnap: boolean
+  pointsOfRelevance: Array<CanvasPoint>
+}
+
+export function guidelineWithSnappingVectorAndPointsOfRelevance(
+  guideline: Guideline,
+  snappingVector: CanvasVector,
+  pointsOfRelevance: Array<CanvasPoint>,
+): GuidelineWithSnappingVectorAndPointsOfRelevance {
+  return {
+    guideline: guideline,
+    snappingVector: snappingVector,
+    pointsOfRelevance: pointsOfRelevance,
+  }
 }
 
 export type ConstrainedDragAxis = Axis | DiagonalAxis
@@ -154,6 +168,36 @@ function cornerGuidelinePoint(point: CanvasPoint): CornerGuidelinePoint {
 
 type GuidelinePoints = EdgeGuidelinePoints | CornerGuidelinePoint
 
+function pointsForGuidelinesForFrame(
+  frame: LocalRectangle | CanvasRectangle,
+  includeCentre: boolean,
+): {
+  xs: Array<number>
+  ys: Array<number>
+  xLeft: number
+  xRight: number
+  yTop: number
+  yBottom: number
+} {
+  const xLeft = roundToNearestWhole(frame.x)
+  const xCentre = roundToNearestWhole(frame.x + frame.width / 2)
+  const xRight = roundToNearestWhole(frame.x + frame.width)
+  const yTop = roundToNearestWhole(frame.y)
+  const yCentre = roundToNearestWhole(frame.y + frame.height / 2)
+  const yBottom = roundToNearestWhole(frame.y + frame.height)
+  const xs = includeCentre ? [xLeft, xCentre, xRight] : [xLeft, xRight]
+  const ys = includeCentre ? [yTop, yCentre, yBottom] : [yTop, yBottom]
+
+  return {
+    xs: xs,
+    ys: ys,
+    xLeft: xLeft,
+    xRight: xRight,
+    yTop: yTop,
+    yBottom: yBottom,
+  }
+}
+
 export const Guidelines = {
   applyDirectionConstraint: applyDirectionConstraint,
   convertGuidelineToPoints: function (guideline: Guideline): GuidelinePoints {
@@ -203,48 +247,44 @@ export const Guidelines = {
     console.error('This code path should be dead')
     return dragResult
   },
-  applySnappingToPoint<C extends CoordinateMarker>(
-    point: Point<C>,
-    guidelines: Array<Guideline>,
-    snappingThreshold: number,
-    scale: number,
-    constrainedDragAxis: ConstrainedDragAxis | null,
-  ): Vector<C> {
-    return guidelines.reduce((workingPoint, guideline) => {
-      const snappingVector = Guidelines.getOffsetToSnapToGuideline(
-        [workingPoint.x],
-        [workingPoint.y],
-        [],
-        guideline,
-        constrainedDragAxis,
-      )
-      const distance = Utils.magnitude(snappingVector)
-      if (distance <= snappingThreshold / scale) {
-        return Utils.roundPointToNearestHalf(Utils.offsetPoint(workingPoint, snappingVector))
-      } else {
-        return workingPoint
-      }
-    }, point)
-  },
   guidelinesForFrame: function (
     frame: LocalRectangle | CanvasRectangle,
     includeCentre: boolean,
   ): Array<Guideline> {
-    const xLeft = frame.x
-    const xRight = frame.x + frame.width
-    const yTop = frame.y
-    const yBottom = frame.y + frame.height
-    const xs = includeCentre
-      ? [frame.x, frame.x + frame.width / 2, frame.x + frame.width]
-      : [frame.x, frame.x + frame.width]
-    const ys = includeCentre
-      ? [frame.y, frame.y + frame.height / 2, frame.y + frame.height]
-      : [frame.y, frame.y + frame.height]
+    const { xs, ys, xLeft, xRight, yTop, yBottom } = pointsForGuidelinesForFrame(
+      frame,
+      includeCentre,
+    )
     const xGuidelines = xs.map((x) => {
       return Guidelines.xAxisGuideline(x, yTop, yBottom)
     })
     const yGuidelines = ys.map((y) => {
       return Guidelines.yAxisGuideline(y, xLeft, xRight)
+    })
+
+    return [...xGuidelines, ...yGuidelines]
+  },
+  guidelinesWithRelevantPointsForFrame: function (
+    frame: LocalRectangle | CanvasRectangle,
+    includeCentre: 'include' | 'exclude',
+  ): Array<GuidelineWithRelevantPoints> {
+    const { xs, ys, xLeft, xRight, yTop, yBottom } = pointsForGuidelinesForFrame(
+      frame,
+      includeCentre === 'include',
+    )
+
+    const xGuidelines: Array<GuidelineWithRelevantPoints> = xs.map((x) => {
+      return {
+        guideline: Guidelines.xAxisGuideline(x, yTop, yBottom),
+        pointsOfRelevance: [canvasPoint({ x: x, y: yTop }), canvasPoint({ x: x, y: yBottom })],
+      }
+    })
+
+    const yGuidelines: Array<GuidelineWithRelevantPoints> = ys.map((y) => {
+      return {
+        guideline: Guidelines.yAxisGuideline(y, xLeft, xRight),
+        pointsOfRelevance: [canvasPoint({ x: xLeft, y: y }), canvasPoint({ x: xRight, y: y })],
+      }
     })
 
     return [...xGuidelines, ...yGuidelines]
@@ -273,8 +313,8 @@ export const Guidelines = {
           from: point as Point<C>,
           to: guidelinePoint,
         }
-      default:
-        const _exhaustiveCheck: never = guideline // TODO ts-migration
+      default: // TODO ts-migration
+        const _exhaustiveCheck: never = guideline
         throw 'Unexpected value for guideline of type: ' + (guideline as any).type // TODO ts-migration
     }
   },
@@ -407,8 +447,8 @@ export const Guidelines = {
         return Guidelines.getOffsetToSnapToYGuideline(ys, guideline, constrainedDragAxis)
       case 'CornerGuideline':
         return Guidelines.getOffsetToSnapToCornerGuideline(corners, guideline)
-      default:
-        const _exhaustiveCheck: never = guideline // TODO ts-migration
+      default: // TODO ts-migration
+        const _exhaustiveCheck: never = guideline
         throw 'Unexpected value for guideline of type: ' + (guideline as any).type // TODO ts-migration
     }
   },
@@ -418,45 +458,51 @@ export const Guidelines = {
   newSnappingVectorIsEqual<C extends CoordinateMarker>(l: Point<C>, r: Point<C>): boolean {
     return Utils.magnitude(l) === Utils.magnitude(r)
   },
+  shouldSnap(snappingVector: Vector<any>, snappingThreshold: number, scale: number): boolean {
+    return Utils.magnitude(snappingVector) < snappingThreshold / scale
+  },
   getClosestGuidelinesAndOffsets(
     xs: Array<number>,
     ys: Array<number>,
     corners: Array<CanvasPoint>,
-    guidelines: Array<Guideline>,
+    guidelines: Array<GuidelineWithRelevantPoints>,
     constrainedDragAxis: ConstrainedDragAxis | null,
     snappingThreshold: number,
     scale: number,
-  ): Array<GuidelineWithSnappingVector> {
-    let xGuidelinesAndOffsets: Array<GuidelineWithSnappingVector> = []
-    let yGuidelinesAndOffsets: Array<GuidelineWithSnappingVector> = []
-    for (const guideline of guidelines) {
+  ): Array<GuidelineWithSnappingVectorAndPointsOfRelevance> {
+    let xGuidelinesAndOffsets: Array<GuidelineWithSnappingVectorAndPointsOfRelevance> = []
+    let yGuidelinesAndOffsets: Array<GuidelineWithSnappingVectorAndPointsOfRelevance> = []
+    for (const { guideline, pointsOfRelevance } of guidelines) {
       if (guideline.type === 'XAxisGuideline' && constrainedDragAxis !== 'y') {
         const snappingVector = Guidelines.getOffsetToSnapToXGuideline(
           xs,
           guideline,
           constrainedDragAxis,
         )
-        const guidelineAndOffset = {
-          guideline: guideline,
-          snappingVector: snappingVector,
-          activateSnap: Utils.magnitude(snappingVector) < snappingThreshold / scale,
-        }
+        const activateSnap = this.shouldSnap(snappingVector, snappingThreshold, scale)
+        if (activateSnap) {
+          const guidelineAndOffset: GuidelineWithSnappingVectorAndPointsOfRelevance = {
+            guideline: guideline,
+            snappingVector: snappingVector,
+            pointsOfRelevance,
+          }
 
-        if (
-          xGuidelinesAndOffsets.length === 0 ||
-          Guidelines.newSnappingVectorIsSmallest(
-            snappingVector,
-            xGuidelinesAndOffsets[0].snappingVector,
-          )
-        ) {
-          xGuidelinesAndOffsets = [guidelineAndOffset]
-        } else if (
-          Guidelines.newSnappingVectorIsEqual(
-            snappingVector,
-            xGuidelinesAndOffsets[0].snappingVector,
-          )
-        ) {
-          xGuidelinesAndOffsets.push(guidelineAndOffset)
+          if (
+            xGuidelinesAndOffsets.length === 0 ||
+            Guidelines.newSnappingVectorIsSmallest(
+              snappingVector,
+              xGuidelinesAndOffsets[0].snappingVector,
+            )
+          ) {
+            xGuidelinesAndOffsets = [guidelineAndOffset]
+          } else if (
+            Guidelines.newSnappingVectorIsEqual(
+              snappingVector,
+              xGuidelinesAndOffsets[0].snappingVector,
+            )
+          ) {
+            xGuidelinesAndOffsets.push(guidelineAndOffset)
+          }
         }
       } else if (guideline.type === 'YAxisGuideline' && constrainedDragAxis !== 'x') {
         const snappingVector = Guidelines.getOffsetToSnapToYGuideline(
@@ -464,70 +510,76 @@ export const Guidelines = {
           guideline,
           constrainedDragAxis,
         )
-        const guidelineAndOffset = {
-          guideline: guideline,
-          snappingVector: snappingVector,
-          activateSnap: Utils.magnitude(snappingVector) < snappingThreshold / scale,
-        }
+        const activateSnap = this.shouldSnap(snappingVector, snappingThreshold, scale)
+        if (activateSnap) {
+          const guidelineAndOffset: GuidelineWithSnappingVectorAndPointsOfRelevance = {
+            guideline: guideline,
+            snappingVector: snappingVector,
+            pointsOfRelevance,
+          }
 
-        if (
-          yGuidelinesAndOffsets.length === 0 ||
-          Guidelines.newSnappingVectorIsSmallest(
-            snappingVector,
-            yGuidelinesAndOffsets[0].snappingVector,
-          )
-        ) {
-          yGuidelinesAndOffsets = [guidelineAndOffset]
-        } else if (
-          Guidelines.newSnappingVectorIsEqual(
-            snappingVector,
-            yGuidelinesAndOffsets[0].snappingVector,
-          )
-        ) {
-          yGuidelinesAndOffsets.push(guidelineAndOffset)
+          if (
+            yGuidelinesAndOffsets.length === 0 ||
+            Guidelines.newSnappingVectorIsSmallest(
+              snappingVector,
+              yGuidelinesAndOffsets[0].snappingVector,
+            )
+          ) {
+            yGuidelinesAndOffsets = [guidelineAndOffset]
+          } else if (
+            Guidelines.newSnappingVectorIsEqual(
+              snappingVector,
+              yGuidelinesAndOffsets[0].snappingVector,
+            )
+          ) {
+            yGuidelinesAndOffsets.push(guidelineAndOffset)
+          }
         }
       }
     }
-    Utils.fastForEach(guidelines, (guideline) => {
+    Utils.fastForEach(guidelines, ({ guideline, pointsOfRelevance }) => {
       if (guideline.type === 'CornerGuideline') {
         const snappingVector = Guidelines.getOffsetToSnapToCornerGuideline(corners, guideline)
-        const guidelineAndOffset = {
-          guideline: guideline,
-          snappingVector: snappingVector,
-          activateSnap: Utils.magnitude(snappingVector) < snappingThreshold / scale,
-        }
+        const activateSnap = this.shouldSnap(snappingVector, snappingThreshold, scale)
+        if (activateSnap) {
+          const guidelineAndOffset: GuidelineWithSnappingVectorAndPointsOfRelevance = {
+            guideline: guideline,
+            snappingVector: snappingVector,
+            pointsOfRelevance,
+          }
 
-        if (
-          xGuidelinesAndOffsets.length === 0 ||
-          Guidelines.newSnappingVectorIsSmallest(
-            snappingVector,
-            xGuidelinesAndOffsets[0].snappingVector,
-          )
-        ) {
-          xGuidelinesAndOffsets = [guidelineAndOffset]
-        } else if (
-          Guidelines.newSnappingVectorIsEqual(
-            snappingVector,
-            xGuidelinesAndOffsets[0].snappingVector,
-          )
-        ) {
-          xGuidelinesAndOffsets.push(guidelineAndOffset)
-        }
-        if (
-          yGuidelinesAndOffsets.length === 0 ||
-          Guidelines.newSnappingVectorIsSmallest(
-            snappingVector,
-            yGuidelinesAndOffsets[0].snappingVector,
-          )
-        ) {
-          yGuidelinesAndOffsets = [guidelineAndOffset]
-        } else if (
-          Guidelines.newSnappingVectorIsEqual(
-            snappingVector,
-            yGuidelinesAndOffsets[0].snappingVector,
-          )
-        ) {
-          yGuidelinesAndOffsets.push(guidelineAndOffset)
+          if (
+            xGuidelinesAndOffsets.length === 0 ||
+            Guidelines.newSnappingVectorIsSmallest(
+              snappingVector,
+              xGuidelinesAndOffsets[0].snappingVector,
+            )
+          ) {
+            xGuidelinesAndOffsets = [guidelineAndOffset]
+          } else if (
+            Guidelines.newSnappingVectorIsEqual(
+              snappingVector,
+              xGuidelinesAndOffsets[0].snappingVector,
+            )
+          ) {
+            xGuidelinesAndOffsets.push(guidelineAndOffset)
+          }
+          if (
+            yGuidelinesAndOffsets.length === 0 ||
+            Guidelines.newSnappingVectorIsSmallest(
+              snappingVector,
+              yGuidelinesAndOffsets[0].snappingVector,
+            )
+          ) {
+            yGuidelinesAndOffsets = [guidelineAndOffset]
+          } else if (
+            Guidelines.newSnappingVectorIsEqual(
+              snappingVector,
+              yGuidelinesAndOffsets[0].snappingVector,
+            )
+          ) {
+            yGuidelinesAndOffsets.push(guidelineAndOffset)
+          }
         }
       }
     })
@@ -559,8 +611,8 @@ export const Guidelines = {
           guideline.xMovement + offset.x,
           guideline.yMovement + offset.y,
         )
-      default:
-        const _exhaustiveCheck: never = guideline // TODO ts-migration
+      default: // TODO ts-migration
+        const _exhaustiveCheck: never = guideline
         throw 'Unexpected value for guideline of type: ' + (guideline as any).type // TODO ts-migration
     }
   },

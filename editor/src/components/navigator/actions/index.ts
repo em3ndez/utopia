@@ -1,64 +1,7 @@
-import { ElementPath } from '../../../core/shared/project-file-types'
-import { NavigatorReorder, RenameComponent } from '../../editor/action-types'
-import { DropTargetType } from '../../editor/store/editor-state'
-
-export function reparentComponents(
-  draggedComponents: Array<ElementPath>,
-  targetParent: ElementPath,
-): NavigatorReorder {
-  return {
-    action: 'NAVIGATOR_REORDER',
-    dragSources: draggedComponents,
-    dropTarget: {
-      type: 'REPARENT_ROW',
-      target: targetParent,
-    },
-  }
-}
-
-export function reparentComponentsToIndex(
-  draggedComponents: Array<ElementPath>,
-  targetParent: ElementPath,
-  index: number,
-): NavigatorReorder {
-  return {
-    action: 'NAVIGATOR_REORDER',
-    dragSources: draggedComponents,
-    dropTarget: {
-      type: 'REPARENT_TO_INDEX',
-      target: targetParent,
-      index: index,
-    },
-  }
-}
-
-export function placeComponentsAfter(
-  draggedComponents: Array<ElementPath>,
-  targetSibling: ElementPath,
-): NavigatorReorder {
-  return {
-    action: 'NAVIGATOR_REORDER',
-    dragSources: draggedComponents,
-    dropTarget: {
-      type: 'MOVE_ROW_AFTER',
-      target: targetSibling,
-    },
-  }
-}
-
-export function placeComponentsBefore(
-  draggedComponents: Array<ElementPath>,
-  targetSibling: ElementPath,
-): NavigatorReorder {
-  return {
-    action: 'NAVIGATOR_REORDER',
-    dragSources: draggedComponents,
-    dropTarget: {
-      type: 'MOVE_ROW_BEFORE',
-      target: targetSibling,
-    },
-  }
-}
+import type { ElementPath } from '../../../core/shared/project-file-types'
+import type { IndexPosition } from '../../../utils/utils'
+import type { RenameComponent } from '../../editor/action-types'
+import type { DropTargetType, NavigatorEntry } from '../../editor/store/editor-state'
 
 export function renameComponent(target: ElementPath, newName: string | null): RenameComponent {
   return {
@@ -68,21 +11,37 @@ export function renameComponent(target: ElementPath, newName: string | null): Re
   }
 }
 
-export type LocalNavigatorAction = ShowNavigatorDropTargetHint
+export type LocalNavigatorAction = ShowNavigatorDropTargetHint | HideNavigatorDropTargetHint
 
 export interface ShowNavigatorDropTargetHint {
-  action: 'DROP_TARGET_HINT'
+  action: 'SHOW_DROP_TARGET_HINT'
   type: DropTargetType
-  target: ElementPath | null
+  targetParentEntry: NavigatorEntry
+  displayAtEntry: NavigatorEntry
+  indexInTargetParent: IndexPosition
 }
 
 export function showNavigatorDropTargetHint(
   type: DropTargetType,
-  target: ElementPath | null,
+  moveToElementPath: NavigatorEntry,
+  displayAtElementPath: NavigatorEntry,
+  indexPosition: IndexPosition,
 ): ShowNavigatorDropTargetHint {
   return {
-    action: 'DROP_TARGET_HINT',
+    action: 'SHOW_DROP_TARGET_HINT',
     type: type,
-    target: target,
+    targetParentEntry: moveToElementPath,
+    displayAtEntry: displayAtElementPath,
+    indexInTargetParent: indexPosition,
+  }
+}
+
+export interface HideNavigatorDropTargetHint {
+  action: 'HIDE_DROP_TARGET_HINT'
+}
+
+export function hideNavigatorDropTargetHint(): HideNavigatorDropTargetHint {
+  return {
+    action: 'HIDE_DROP_TARGET_HINT',
   }
 }

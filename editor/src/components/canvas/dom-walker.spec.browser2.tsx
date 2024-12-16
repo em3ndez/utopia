@@ -1,3098 +1,815 @@
-import { act, render } from '@testing-library/react'
-import React from 'react'
-import create from 'zustand'
-import { notLoggedIn } from '../../common/user'
-import {
-  ElementInstanceMetadata,
-  ElementInstanceMetadataMap,
-} from '../../core/shared/element-template'
-import {
-  FakeLinterWorker,
-  FakeParserPrinterWorker,
-  FakeWatchdogWorker,
-} from '../../core/workers/test-workers'
-import { UtopiaTsWorkersImplementation } from '../../core/workers/workers'
-import { EditorRoot } from '../../templates/editor'
-import { left } from '../../core/shared/either'
-import { EditorDispatch } from '../editor/action-types'
-import { load } from '../editor/actions/actions'
-import * as History from '../editor/history'
-import { editorDispatch } from '../editor/store/dispatch'
-import { createEditorState, deriveState, EditorStore } from '../editor/store/editor-state'
-import Utils from '../../utils/utils'
+/* eslint-disable jest/expect-expect */
 import { BakedInStoryboardUID } from '../../core/model/scene-utils'
-import { NO_OP } from '../../core/shared/utils'
-import { mapValues } from '../../core/shared/object-utils'
-import { emptyUiJsxCanvasContextData } from './ui-jsx-canvas'
-import { TestAppUID, TestSceneUID } from './ui-jsx.test-utils'
-import { createTestProjectWithCode } from '../../sample-projects/sample-project-utils.test-utils'
-import { DummyPersistenceMachine } from '../editor/persistence/persistence.test-utils'
+import { objectMap } from '../../core/shared/object-utils'
+import { renderTestEditorWithCode, TestAppUID, TestSceneUID } from './ui-jsx.test-utils'
 import { disableStoredStateforTests } from '../editor/stored-state'
-import { matchInlineSnapshotBrowser } from '../../../test/karma-snapshots'
+import * as EP from '../../core/shared/element-path'
+import * as PP from '../../core/shared/property-path'
+import { selectComponents } from '../editor/actions/meta-actions'
+import type {
+  MaybeInfinityCanvasRectangle,
+  MaybeInfinityLocalRectangle,
+} from '../../core/shared/math-utils'
+import {
+  canvasPoint,
+  canvasRectangle,
+  infinityCanvasRectangle,
+  infinityLocalRectangle,
+  localRectangle,
+  offsetPoint,
+  zeroRectIfNullOrInfinity,
+} from '../../core/shared/math-utils'
+import type { MapLike } from 'typescript'
+import {
+  clearSelection,
+  duplicateSelected,
+  setProp_UNSAFE,
+  switchEditorMode,
+} from '../editor/actions/action-creators'
+import { emptyComments, jsExpressionValue } from '../../core/shared/element-template'
+import { CanvasControlsContainerID } from './controls/new-canvas-controls'
+import { slightlyOffsetPointBecauseVeryWeirdIssue, wait } from '../../utils/utils.test-utils'
+import { mouseClickAtPoint, mouseDownAtPoint, mouseMoveToPoint } from './event-helpers.test-utils'
+import { EditorModes } from '../editor/editor-modes'
+import { MetadataUtils } from '../../core/model/element-metadata-utils'
+import { optionalMap } from '../../core/shared/optional-utils'
+import type { SinonFakeTimers } from 'sinon'
+import sinon from 'sinon'
 
 disableStoredStateforTests()
 
-function sanitizeElementMetadata(element: ElementInstanceMetadata): ElementInstanceMetadata {
-  delete element.props['children']
-  return {
-    ...element,
-    element: left('REMOVED_FROM_TEST'),
-  }
+function configureSetupTeardown(): { clock: { current: SinonFakeTimers } } {
+  let clock: { current: SinonFakeTimers } = { current: null as any } // it will be non-null thanks to beforeEach
+  beforeEach(function () {
+    // TODO there is something wrong with sinon fake timers here that remotely break other tests that come after these. If your new browser tests are broken, this may be the reason.
+    clock.current = sinon.useFakeTimers({
+      // the timers will tick so the editor is not totally broken, but we can fast-forward time at will
+      // WARNING: the Sinon fake timers will advance in 20ms increments
+      shouldAdvanceTime: true,
+    })
+  })
+  afterEach(function () {
+    clock.current?.restore()
+  })
+  return { clock: clock }
 }
 
-function sanitizeJsxMetadata(metadata: ElementInstanceMetadataMap) {
-  return mapValues(sanitizeElementMetadata, metadata)
-}
+describe('DOM Walker', () => {
+  it('Test Project metadata contains entry for all elements', async () => {
+    const renderResult = await renderTestEditorWithCode(TestProject, 'await-first-dom-report')
+    const metadata = renderResult.getEditorState().editor.jsxMetadata
 
-async function renderTestEditorWithCode(appUiJsFileCode: string) {
-  let emptyEditorState = createEditorState(NO_OP)
-  const derivedState = deriveState(emptyEditorState, null)
+    const expectedKeys = [
+      BakedInStoryboardUID,
+      `${BakedInStoryboardUID}/${TestSceneUID}`,
+      `${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}`,
+      `${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c`,
+      `${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0`,
+      `${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0/488`,
+      `${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0/d63`,
+      `${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0/d63/bbb~~~1`,
+      `${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0/d63/bbb~~~2`,
+    ]
+    expect(Object.keys(metadata)).toEqual(expectedKeys)
+  })
 
-  const history = History.init(emptyEditorState, derivedState)
-  const spyCollector = emptyUiJsxCanvasContextData()
+  it('Test Project metadata contains global frames for all elements', async () => {
+    const renderResult = await renderTestEditorWithCode(TestProject, 'await-first-dom-report')
+    const metadata = renderResult.getEditorState().editor.jsxMetadata
 
-  const dispatch: EditorDispatch = (actions) => {
-    const result = editorDispatch(dispatch, actions, storeHook.getState(), spyCollector)
-    storeHook.setState(result)
-  }
+    const expectedGlobalFrames: MapLike<MaybeInfinityCanvasRectangle> = {
+      [BakedInStoryboardUID]: infinityCanvasRectangle,
+      [`${BakedInStoryboardUID}/${TestSceneUID}`]: canvasRectangle({
+        x: 0,
+        y: 0,
+        width: 375,
+        height: 812,
+      }),
+      [`${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}`]: canvasRectangle({
+        x: 0,
+        y: 0,
+        width: 375,
+        height: 812,
+      }),
+      [`${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c`]: canvasRectangle({
+        x: 0,
+        y: 0,
+        width: 375,
+        height: 812,
+      }),
+      [`${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0`]: canvasRectangle({
+        x: 55,
+        y: 98,
+        width: 266,
+        height: 124,
+      }),
+      [`${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0/488`]: canvasRectangle({
+        x: 126,
+        y: 125,
+        width: 125,
+        height: 70,
+      }),
+      [`${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0/d63`]: canvasRectangle({
+        x: 55,
+        y: 98,
+        width: 266,
+        height: 0,
+      }),
+      [`${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0/d63/bbb~~~1`]:
+        canvasRectangle({
+          x: 55,
+          y: 98,
+          width: 266,
+          height: 0,
+        }),
+      [`${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0/d63/bbb~~~2`]:
+        canvasRectangle({
+          x: 55,
+          y: 98,
+          width: 266,
+          height: 0,
+        }),
+    }
 
-  const initialEditorStore: EditorStore = {
-    editor: emptyEditorState,
-    derived: derivedState,
-    history: history,
-    userState: {
-      loginState: notLoggedIn,
-      shortcutConfig: {},
-    },
-    workers: new UtopiaTsWorkersImplementation(
-      new FakeParserPrinterWorker(),
-      new FakeLinterWorker(),
-      new FakeWatchdogWorker(),
-    ),
-    persistence: DummyPersistenceMachine,
-    dispatch: dispatch,
-    alreadySaved: false,
-  }
+    const resultGlobalFrames = objectMap((element) => element.globalFrame, metadata)
+    expect(resultGlobalFrames).toEqual(expectedGlobalFrames)
+  })
 
-  const storeHook = create<EditorStore>((set) => initialEditorStore)
+  it('Test Project metadata contains computedStyle only for selected view', async () => {
+    const renderResult = await renderTestEditorWithCode(TestProject, 'await-first-dom-report')
 
-  render(
-    <EditorRoot
-      api={storeHook}
-      useStore={storeHook}
-      spyCollector={spyCollector}
-      propertyControlsInfoSupported={false}
-      vscodeBridgeReady={false}
-    />,
+    const target = `${BakedInStoryboardUID}/${TestSceneUID}/${TestAppUID}:05c/ef0`
+    await renderResult.dispatch(selectComponents([EP.fromString(target)], false), true)
+    await renderResult.getDispatchFollowUpActionsFinished()
+
+    const metadata = renderResult.getEditorState().editor.jsxMetadata
+
+    Object.keys(metadata).forEach((pathAsString) => {
+      const computedStyle = metadata[pathAsString].computedStyle
+      const computedStyleIsEmpty = computedStyle == null || Object.keys(computedStyle).length === 0
+      if (pathAsString === target) {
+        expect(computedStyleIsEmpty).toEqual(false)
+      } else {
+        expect(computedStyleIsEmpty).toEqual(true)
+      }
+    })
+  })
+
+  it('Fragments at the root of a component result in correctly sized elements', async () => {
+    const renderResult = await renderTestEditorWithCode(
+      `import * as React from 'react'
+import { Scene, Storyboard } from 'utopia-api'
+
+const MyComp = (props) => {
+  return (
+    <>
+      <div
+        data-uid='first-div'
+        style={{
+          backgroundColor: '#FFFF0B',
+          position: 'absolute',
+          left: 71,
+          top: 141,
+          width: 226,
+          height: 56,
+        }}
+      >
+        MyComp
+      </div>
+      {props.children}
+      <div
+        data-uid='second-div'
+        style={{
+          backgroundColor: '#0CE3FF',
+          position: 'absolute',
+          left: 72,
+          top: 246,
+          width: 232,
+          height: 54,
+        }}
+      >
+        Also MyComp
+      </div>
+    </>
   )
-
-  await act(async () => {
-    await load(dispatch, createTestProjectWithCode(appUiJsFileCode), 'Test', '0', false)
-  })
-  const sanitizedMetadata = sanitizeJsxMetadata(storeHook.getState().editor.jsxMetadata)
-  return sanitizedMetadata
 }
 
-describe('DOM Walker tests', () => {
-  it('Simple Project with one child View', async () => {
-    const sanitizedMetadata = await renderTestEditorWithCode(
-      `
-      import * as React from 'react'
-      import {
-        View,
-        Scene,
-        Storyboard,
-      } from 'utopia-api'
-      export var App = (props) => {
-        return (
-          <View style={{ ...props.style, backgroundColor: '#FFFFFF'}} data-uid={'05c'}>
-            <View
-              style={{ backgroundColor: '#DDDDDD', position: 'absolute', left: 55, top: 98, width: 266, height: 124  }}
-              data-uid={'ef0'}
-            >
-              <View
-                style={{ backgroundColor: '#DDDDDD', position: 'absolute', left: 71, top: 27, width: 125, height: 70 }}
-                data-uid={'488'}
-              />
-            </View>
-          </View>
-        )
-      }
-      export var storyboard = (props) => {
-        return (
-          <Storyboard data-uid={'${BakedInStoryboardUID}'}>
-            <Scene
-              style={{ position: 'relative', left: 0, top: 0, width: 375, height: 812 }}
-              data-uid={'${TestSceneUID}'}
-            >
-              <App
-                data-uid='${TestAppUID}' 
-                style={{ position: 'absolute', bottom: 0, left: 0, right: 0, top: 0 }}
-              />
-            </Scene>
-          </Storyboard>
-        )
-      }
-      `,
+export var storyboard = (
+  <Storyboard data-uid='storyboard'>
+    <div
+      data-uid='container'
+      style={{
+        backgroundColor: '#aaaaaa33',
+        position: 'absolute',
+        left: 300,
+        top: 163,
+        width: 395,
+        height: 453,
+      }}
+    >
+      <MyComp data-uid='mycomp'>
+        <div
+          data-uid='inner-div'
+          style={{
+            backgroundColor: 'pink',
+            position: 'absolute',
+            left: 20,
+            top: 20,
+            width: 50,
+            height: 50,
+          }}
+        />
+      </MyComp>
+    </div>
+  </Storyboard>
+)`,
+      'await-first-dom-report',
     )
-    matchInlineSnapshotBrowser(
-      sanitizedMetadata,
-      `
-    Object {
-      "utopia-storyboard-uid": Object {
-        "attributeMetadatada": Object {},
-        "componentInstance": true,
-        "computedStyle": Object {},
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Storyboard",
-            "path": "utopia-api",
-            "variableName": "Storyboard",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid",
-          "data-uid": "utopia-storyboard-uid",
-          "skipDeepFreeze": true,
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 0,
-          "clientWidth": 0,
-          "coordinateSystemBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "initial",
-          "flexDirection": null,
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {},
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {},
-          "parentFlexDirection": null,
-          "parentLayoutSystem": "flow",
-          "position": "static",
-          "providesBoundsForChildren": false,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": false,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Scene",
-            "path": "utopia-api",
-            "variableName": "Scene",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa",
-          "data-uid": "scene-aaa",
-          "data-utopia-scene-id": "utopia-storyboard-uid/scene-aaa",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "height": 812,
-            "left": 0,
-            "position": "relative",
-            "top": 0,
-            "width": 375,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "relative",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "app-entity",
-          "data-utopia-instance-path": Object {
-            "parts": Array [
-              Array [
-                "utopia-storyboard-uid",
-                "scene-aaa",
-                "app-entity",
-              ],
-            ],
-            "type": "elementpath",
-          },
-          "skipDeepFreeze": true,
-          "style": Object {
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "View",
-            "path": "utopia-api",
-            "variableName": "View",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "05c app-entity",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#FFFFFF",
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-              "ef0",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 124,
-          "width": 266,
-          "x": 55,
-          "y": 98,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "View",
-            "path": "utopia-api",
-            "variableName": "View",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 124,
-          "width": 266,
-          "x": 55,
-          "y": 98,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0",
-          "data-uid": "ef0",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#DDDDDD",
-            "height": 124,
-            "left": 55,
-            "position": "absolute",
-            "top": 98,
-            "width": 266,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 124,
-          "clientWidth": 266,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 55,
-            "y": 98,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0/488": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-              "ef0",
-              "488",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 70,
-          "width": 125,
-          "x": 126,
-          "y": 125,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "View",
-            "path": "utopia-api",
-            "variableName": "View",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 70,
-          "width": 125,
-          "x": 71,
-          "y": 27,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0/488",
-          "data-uid": "488",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#DDDDDD",
-            "height": 70,
-            "left": 71,
-            "position": "absolute",
-            "top": 27,
-            "width": 125,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 70,
-          "clientWidth": 125,
-          "coordinateSystemBounds": Object {
-            "height": 124,
-            "width": 266,
-            "x": 55,
-            "y": 98,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 124,
-            "width": 266,
-            "x": 55,
-            "y": 98,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 71,
-            "y": 27,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": true,
-        },
-      },
-    }
-    `,
+    const metadata = renderResult.getEditorState().editor.jsxMetadata
+    expect(metadata['storyboard/container/mycomp'].globalFrame).toEqual({
+      x: 320,
+      y: 183,
+      width: 284,
+      height: 280,
+    })
+  })
+
+  it('Handles path invalidation when no scene is present', async () => {
+    const renderResult = await renderTestEditorWithCode(
+      TestProjectWithoutScene,
+      'await-first-dom-report',
+    )
+    const metadataBeforeUpdate = renderResult.getEditorState().editor.jsxMetadata
+    const globalFramesBeforeUpdate = objectMap(
+      (element) => zeroRectIfNullOrInfinity(element.globalFrame),
+      metadataBeforeUpdate,
+    )
+
+    const target = `${BakedInStoryboardUID}/flex-container/child-1`
+    await renderResult.dispatch(selectComponents([EP.fromString(target)], false), true)
+    await renderResult.dispatch([duplicateSelected()], true)
+    await renderResult.getDispatchFollowUpActionsFinished()
+
+    const metadataAfterUpdate = renderResult.getEditorState().editor.jsxMetadata
+    const globalFramesAfterUpdate = objectMap(
+      (element) => zeroRectIfNullOrInfinity(element.globalFrame),
+      metadataAfterUpdate,
+    )
+
+    // Duplicating the element should have caused the rendered frames of the previously existing elements to shrink
+
+    expect(
+      globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/child-1`].width,
+    ).toBeLessThan(globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/child-1`].width)
+    expect(
+      globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/bbb`].width,
+    ).toBeLessThan(globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/bbb`].width)
+    expect(
+      globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/ccc`].width,
+    ).toBeLessThan(globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/ccc`].width)
+  })
+
+  it('Handles path invalidation caused by the observers when no scene is present', async () => {
+    const renderResult = await renderTestEditorWithCode(
+      TestProjectWithoutScene,
+      'await-first-dom-report',
+    )
+    const metadataBeforeUpdate = renderResult.getEditorState().editor.jsxMetadata
+    const globalFramesBeforeUpdate = objectMap(
+      (element) => zeroRectIfNullOrInfinity(element.globalFrame),
+      metadataBeforeUpdate,
+    )
+
+    const targetString = `${BakedInStoryboardUID}/flex-container`
+    const targetElement = EP.fromString(targetString)
+    await renderResult.dispatch(selectComponents([targetElement], false), true)
+    await renderResult.dispatch(
+      [
+        setProp_UNSAFE(
+          targetElement,
+          PP.create('style', 'left'),
+          jsExpressionValue(5, emptyComments),
+        ),
+      ],
+      true,
+    )
+    await renderResult.getDispatchFollowUpActionsFinished()
+
+    const metadataAfterUpdate = renderResult.getEditorState().editor.jsxMetadata
+    const globalFramesAfterUpdate = objectMap(
+      (element) => zeroRectIfNullOrInfinity(element.globalFrame),
+      metadataAfterUpdate,
+    )
+
+    // Adjusting the left value of the parent should have shifted all of the children to the left
+
+    expect(
+      globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/child-1`].x,
+    ).toBeLessThan(globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/child-1`].x)
+    expect(globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/bbb`].x).toBeLessThan(
+      globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/bbb`].x,
+    )
+    expect(globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/ccc`].x).toBeLessThan(
+      globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/ccc`].x,
     )
   })
 
-  it('Simple Project with divs', async () => {
-    const sanitizedMetadata = await renderTestEditorWithCode(
-      `
-      import * as React from 'react'
-      import {
-        View,
-        Scene,
-        Storyboard,
-      } from 'utopia-api'
-      export var App = (props) => {
-        return (
-          <div style={{ ...props.style, backgroundColor: '#FFFFFF' }} data-uid={'05c'}>
-            <div
-              style={{ backgroundColor: '#DDDDDD', position: 'fixed', padding: 20, left: 55, top: 98, width: 266, height: 124 }}
-              data-uid={'ef0'}
-            >
-              <div
-                style={{ backgroundColor: '#DDDDDD', position: 'absolute', left: 71, top: 27, width: 125, height: 70 }}
-                data-uid={'488'}
-              />
-            </div>
-          </div>
-        )
-      }
-      export var storyboard = (props) => {
-        return (
-          <Storyboard data-uid={'${BakedInStoryboardUID}'}>
-            <Scene
-              style={{ position: 'relative', left: 0, top: 0, width: 375, height: 812 }}
-              data-uid={'${TestSceneUID}'}
-            >
-              <App
-                data-uid='${TestAppUID}' 
-                style={{ position: 'absolute', bottom: 0, left: 0, right: 0, top: 0 }}
-              />
-            </Scene>
-          </Storyboard>
-        )
-      }
-      `,
+  it('Selective dom walking includes children', async () => {
+    const renderResult = await renderTestEditorWithCode(
+      TestProjectWithoutScene,
+      'await-first-dom-report',
     )
-    matchInlineSnapshotBrowser(
-      sanitizedMetadata,
-      `
-    Object {
-      "utopia-storyboard-uid": Object {
-        "attributeMetadatada": Object {},
-        "componentInstance": true,
-        "computedStyle": Object {},
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Storyboard",
-            "path": "utopia-api",
-            "variableName": "Storyboard",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid",
-          "data-uid": "utopia-storyboard-uid",
-          "skipDeepFreeze": true,
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 0,
-          "clientWidth": 0,
-          "coordinateSystemBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "initial",
-          "flexDirection": null,
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {},
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {},
-          "parentFlexDirection": null,
-          "parentLayoutSystem": "flow",
-          "position": "static",
-          "providesBoundsForChildren": false,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": false,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Scene",
-            "path": "utopia-api",
-            "variableName": "Scene",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa",
-          "data-uid": "scene-aaa",
-          "data-utopia-scene-id": "utopia-storyboard-uid/scene-aaa",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "height": 812,
-            "left": 0,
-            "position": "relative",
-            "top": 0,
-            "width": 375,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "relative",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "app-entity",
-          "data-utopia-instance-path": Object {
-            "parts": Array [
-              Array [
-                "utopia-storyboard-uid",
-                "scene-aaa",
-                "app-entity",
-              ],
-            ],
-            "type": "elementpath",
-          },
-          "skipDeepFreeze": true,
-          "style": Object {
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "05c app-entity",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#FFFFFF",
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-              "ef0",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 164,
-          "width": 306,
-          "x": 55,
-          "y": 98,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 164,
-          "width": 306,
-          "x": 55,
-          "y": 98,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0",
-          "data-uid": "ef0",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#DDDDDD",
-            "height": 124,
-            "left": 55,
-            "padding": 20,
-            "position": "fixed",
-            "top": 98,
-            "width": 266,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 164,
-          "clientWidth": 306,
-          "coordinateSystemBounds": null,
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": false,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 55,
-            "y": 98,
-          },
-          "padding": Object {
-            "bottom": 20,
-            "left": 20,
-            "right": 20,
-            "top": 20,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "fixed",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0/488": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-              "ef0",
-              "488",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 70,
-          "width": 125,
-          "x": 126,
-          "y": 125,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 70,
-          "width": 125,
-          "x": 71,
-          "y": 27,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0/488",
-          "data-uid": "488",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#DDDDDD",
-            "height": 70,
-            "left": 71,
-            "position": "absolute",
-            "top": 27,
-            "width": 125,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 70,
-          "clientWidth": 125,
-          "coordinateSystemBounds": Object {
-            "height": 164,
-            "width": 306,
-            "x": 55,
-            "y": 98,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 164,
-            "width": 306,
-            "x": 55,
-            "y": 98,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 71,
-            "y": 27,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": true,
-        },
-      },
-    }
-    `,
+    const metadataBeforeUpdate = renderResult.getEditorState().editor.jsxMetadata
+    const globalFramesBeforeUpdate = objectMap(
+      (element) => zeroRectIfNullOrInfinity(element.globalFrame),
+      metadataBeforeUpdate,
     )
-  })
 
-  it('Simple Project with flex parent', async () => {
-    const sanitizedMetadata = await renderTestEditorWithCode(
-      `
-      import * as React from 'react'
-      import {
-        View,
-        Scene,
-        Storyboard,
-      } from 'utopia-api'
-      export var App = (props) => {
-        return (
-          <div style={{ ...props.style, backgroundColor: '#FFFFFF', display: 'flex' }} data-uid={'05c'}>
-            <div
-              style={{ backgroundColor: '#DDDDDD', position: 'fixed', padding: 20, left: 55, top: 98, width: 266, height: 124 }}
-              data-uid={'ef0'}
-            >
-              <div
-                style={{ backgroundColor: '#DDDDDD', position: 'absolute', left: 71, top: 27, width: 125, height: 70 }}
-                data-uid={'488'}
-              />
-            </div>
-          </div>
-        )
-      }
-      export var storyboard = (props) => {
-        return (
-          <Storyboard data-uid={'${BakedInStoryboardUID}'}>
-            <Scene
-              style={{ position: 'relative', left: 0, top: 0, width: 375, height: 812 }}
-              data-uid={'${TestSceneUID}'}
-            >
-              <App
-                data-uid='${TestAppUID}' 
-                style={{ position: 'absolute', bottom: 0, left: 0, right: 0, top: 0 }}
-              />
-            </Scene>
-          </Storyboard>
-        )
-      }
-      `,
-    )
-    matchInlineSnapshotBrowser(
-      sanitizedMetadata,
-      `
-    Object {
-      "utopia-storyboard-uid": Object {
-        "attributeMetadatada": Object {},
-        "componentInstance": true,
-        "computedStyle": Object {},
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Storyboard",
-            "path": "utopia-api",
-            "variableName": "Storyboard",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid",
-          "data-uid": "utopia-storyboard-uid",
-          "skipDeepFreeze": true,
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 0,
-          "clientWidth": 0,
-          "coordinateSystemBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "initial",
-          "flexDirection": null,
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {},
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {},
-          "parentFlexDirection": null,
-          "parentLayoutSystem": "flow",
-          "position": "static",
-          "providesBoundsForChildren": false,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": false,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Scene",
-            "path": "utopia-api",
-            "variableName": "Scene",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa",
-          "data-uid": "scene-aaa",
-          "data-utopia-scene-id": "utopia-storyboard-uid/scene-aaa",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "height": 812,
-            "left": 0,
-            "position": "relative",
-            "top": 0,
-            "width": 375,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "relative",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "app-entity",
-          "data-utopia-instance-path": Object {
-            "parts": Array [
-              Array [
-                "utopia-storyboard-uid",
-                "scene-aaa",
-                "app-entity",
-              ],
-            ],
-            "type": "elementpath",
-          },
-          "skipDeepFreeze": true,
-          "style": Object {
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "flex",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flex",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "05c app-entity",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#FFFFFF",
-            "bottom": 0,
-            "display": "flex",
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "flex",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flex",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-              "ef0",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 164,
-          "width": 306,
-          "x": 55,
-          "y": 98,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 164,
-          "width": 306,
-          "x": 55,
-          "y": 98,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0",
-          "data-uid": "ef0",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#DDDDDD",
-            "height": 124,
-            "left": 55,
-            "padding": 20,
-            "position": "fixed",
-            "top": 98,
-            "width": 266,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 164,
-          "clientWidth": 306,
-          "coordinateSystemBounds": null,
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": false,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 55,
-            "y": 98,
-          },
-          "padding": Object {
-            "bottom": 20,
-            "left": 20,
-            "right": 20,
-            "top": 20,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flex",
-          "position": "fixed",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0/488": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "05c",
-              "ef0",
-              "488",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 70,
-          "width": 125,
-          "x": 126,
-          "y": 125,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 70,
-          "width": 125,
-          "x": 71,
-          "y": 27,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:05c/ef0/488",
-          "data-uid": "488",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "backgroundColor": "#DDDDDD",
-            "height": 70,
-            "left": 71,
-            "position": "absolute",
-            "top": 27,
-            "width": 125,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 70,
-          "clientWidth": 125,
-          "coordinateSystemBounds": Object {
-            "height": 164,
-            "width": 306,
-            "x": 55,
-            "y": 98,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 164,
-            "width": 306,
-            "x": 55,
-            "y": 98,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 71,
-            "y": 27,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": true,
-        },
-      },
-    }
-    `,
-    )
-  })
+    const targetString = `${BakedInStoryboardUID}/flex-container`
+    const targetElement = EP.fromString(targetString)
+    await renderResult.dispatch(selectComponents([targetElement], false), true)
 
-  it('Label carried through for normal elements', async () => {
-    const sanitizedMetadata = await renderTestEditorWithCode(
-      `
-      import * as React from 'react'
-      import {
-        View,
-        Scene,
-        Storyboard,
-      } from 'utopia-api'
-      export var App = (props) => {
-        return <div style={{ ...props.style}} data-uid={'aaa'} data-label={'Hat'} />
-      }
-      export var storyboard = (props) => {
-        return (
-          <Storyboard data-uid={'${BakedInStoryboardUID}'}>
-            <Scene
-              style={{ position: 'relative', left: 0, top: 0, width: 375, height: 812 }}
-              data-uid={'${TestSceneUID}'}
-            >
-              <App
-                data-uid='${TestAppUID}' 
-                style={{ position: 'absolute', bottom: 0, left: 0, right: 0, top: 0 }}
-              />
-            </Scene>
-          </Storyboard>
-        )
-      }
-      `,
+    // Drag to resize, which will trigger the selective dom walker on the target only during the drag
+    const resizeControl = renderResult.renderedDOM.getByTestId(`resize-control-0-0.5`)
+    const resizeControlBounds = resizeControl.getBoundingClientRect()
+    const canvasControlsLayer = renderResult.renderedDOM.getByTestId(CanvasControlsContainerID)
+    const startPoint = canvasPoint(
+      slightlyOffsetPointBecauseVeryWeirdIssue({
+        x: resizeControlBounds.x + resizeControlBounds.width / 2,
+        y: resizeControlBounds.y + resizeControlBounds.height / 2,
+      }),
     )
-    matchInlineSnapshotBrowser(
-      sanitizedMetadata,
-      `
-    Object {
-      "utopia-storyboard-uid": Object {
-        "attributeMetadatada": Object {},
-        "componentInstance": true,
-        "computedStyle": Object {},
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Storyboard",
-            "path": "utopia-api",
-            "variableName": "Storyboard",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid",
-          "data-uid": "utopia-storyboard-uid",
-          "skipDeepFreeze": true,
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 0,
-          "clientWidth": 0,
-          "coordinateSystemBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "initial",
-          "flexDirection": null,
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {},
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {},
-          "parentFlexDirection": null,
-          "parentLayoutSystem": "flow",
-          "position": "static",
-          "providesBoundsForChildren": false,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": false,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Scene",
-            "path": "utopia-api",
-            "variableName": "Scene",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa",
-          "data-uid": "scene-aaa",
-          "data-utopia-scene-id": "utopia-storyboard-uid/scene-aaa",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "height": 812,
-            "left": 0,
-            "position": "relative",
-            "top": 0,
-            "width": 375,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "relative",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "app-entity",
-          "data-utopia-instance-path": Object {
-            "parts": Array [
-              Array [
-                "utopia-storyboard-uid",
-                "scene-aaa",
-                "app-entity",
-              ],
-            ],
-            "type": "elementpath",
-          },
-          "skipDeepFreeze": true,
-          "style": Object {
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:aaa": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "aaa",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-label": "Hat",
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:aaa utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "aaa app-entity",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": true,
-        },
-      },
-    }
-    `,
-    )
-  })
 
-  it('Label carried through for generated elements', async () => {
-    const sanitizedMetadata = await renderTestEditorWithCode(
-      `
-      import * as React from 'react'
-      import {
-        View,
-        Scene,
-        Storyboard,
-      } from 'utopia-api'
-      export var App = (props) => {
-        return <div style={{ ...props.style}} data-uid={'aaa'}>
-          {[1, 2, 3].map(n => {
-            return <div data-uid={'bbb'} data-label={'Plane'} />
-          })}
-        </div>
-      }
-      export var storyboard = (props) => {
-        return (
-          <Storyboard data-uid={'${BakedInStoryboardUID}'}>
-            <Scene
-              style={{ position: 'relative', left: 0, top: 0, width: 375, height: 812 }}
-              data-uid={'${TestSceneUID}'}
-            >
-              <App
-                data-uid='${TestAppUID}' 
-                style={{ position: 'absolute', bottom: 0, left: 0, right: 0, top: 0 }}
-              />
-            </Scene>
-          </Storyboard>
-        )
-      }
-      `,
+    const endPoint = offsetPoint(startPoint, canvasPoint({ x: -10, y: 0 }))
+
+    await mouseMoveToPoint(resizeControl, startPoint)
+    await mouseDownAtPoint(resizeControl, startPoint)
+    await mouseMoveToPoint(canvasControlsLayer, endPoint, { eventOptions: { buttons: 1 } })
+
+    await renderResult.getDispatchFollowUpActionsFinished()
+
+    const metadataAfterUpdate = renderResult.getEditorState().editor.jsxMetadata
+    const globalFramesAfterUpdate = objectMap(
+      (element) => zeroRectIfNullOrInfinity(element.globalFrame),
+      metadataAfterUpdate,
     )
-    matchInlineSnapshotBrowser(
-      sanitizedMetadata,
-      `
-    Object {
-      "utopia-storyboard-uid": Object {
-        "attributeMetadatada": Object {},
-        "componentInstance": true,
-        "computedStyle": Object {},
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Storyboard",
-            "path": "utopia-api",
-            "variableName": "Storyboard",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 0,
-          "width": 0,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid",
-          "data-uid": "utopia-storyboard-uid",
-          "skipDeepFreeze": true,
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 0,
-          "clientWidth": 0,
-          "coordinateSystemBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "initial",
-          "flexDirection": null,
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 0,
-            "width": 0,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {},
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {},
-          "parentFlexDirection": null,
-          "parentLayoutSystem": "flow",
-          "position": "static",
-          "providesBoundsForChildren": false,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": false,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "RIGHT",
-          "value": Object {
-            "originalName": "Scene",
-            "path": "utopia-api",
-            "variableName": "Scene",
-          },
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa",
-          "data-uid": "scene-aaa",
-          "data-utopia-scene-id": "utopia-storyboard-uid/scene-aaa",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "height": 812,
-            "left": 0,
-            "position": "relative",
-            "top": 0,
-            "width": 375,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "relative",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 1,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity": Object {
-        "attributeMetadatada": null,
-        "componentInstance": true,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "app-entity",
-          "data-utopia-instance-path": Object {
-            "parts": Array [
-              Array [
-                "utopia-storyboard-uid",
-                "scene-aaa",
-                "app-entity",
-              ],
-            ],
-            "type": "elementpath",
-          },
-          "skipDeepFreeze": true,
-          "style": Object {
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 3,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:aaa": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "aaa",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 812,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:aaa utopia-storyboard-uid/scene-aaa/app-entity",
-          "data-uid": "aaa app-entity",
-          "skipDeepFreeze": true,
-          "style": Object {
-            "bottom": 0,
-            "left": 0,
-            "position": "absolute",
-            "right": 0,
-            "top": 0,
-          },
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 812,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "absolute",
-          "providesBoundsForChildren": true,
-          "renderedChildrenCount": 3,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:aaa/bbb~~~1": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "aaa",
-              "bbb~~~1",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 0,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 0,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-label": "Plane",
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:aaa/bbb~~~1",
-          "data-uid": "bbb~~~1",
-          "skipDeepFreeze": true,
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 0,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "static",
-          "providesBoundsForChildren": false,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:aaa/bbb~~~2": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "aaa",
-              "bbb~~~2",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 0,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 0,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-label": "Plane",
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:aaa/bbb~~~2",
-          "data-uid": "bbb~~~2",
-          "skipDeepFreeze": true,
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 0,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "static",
-          "providesBoundsForChildren": false,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": true,
-        },
-      },
-      "utopia-storyboard-uid/scene-aaa/app-entity:aaa/bbb~~~3": Object {
-        "attributeMetadatada": null,
-        "componentInstance": false,
-        "computedStyle": null,
-        "element": Object {
-          "type": "LEFT",
-          "value": "REMOVED_FROM_TEST",
-        },
-        "elementPath": Object {
-          "parts": Array [
-            Array [
-              "utopia-storyboard-uid",
-              "scene-aaa",
-              "app-entity",
-            ],
-            Array [
-              "aaa",
-              "bbb~~~3",
-            ],
-          ],
-          "type": "elementpath",
-        },
-        "globalFrame": Object {
-          "height": 0,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "importInfo": Object {
-          "type": "LEFT",
-          "value": "NOT_IMPORTED",
-        },
-        "isEmotionOrStyledComponent": false,
-        "label": null,
-        "localFrame": Object {
-          "height": 0,
-          "width": 375,
-          "x": 0,
-          "y": 0,
-        },
-        "props": Object {
-          "data-label": "Plane",
-          "data-paths": "utopia-storyboard-uid/scene-aaa/app-entity:aaa/bbb~~~3",
-          "data-uid": "bbb~~~3",
-          "skipDeepFreeze": true,
-        },
-        "specialSizeMeasurements": Object {
-          "clientHeight": 0,
-          "clientWidth": 375,
-          "coordinateSystemBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "display": "block",
-          "flexDirection": "row",
-          "htmlElementName": "div",
-          "immediateParentBounds": Object {
-            "height": 812,
-            "width": 375,
-            "x": 0,
-            "y": 0,
-          },
-          "immediateParentProvidesLayout": true,
-          "layoutSystemForChildren": "flow",
-          "margin": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "naturalHeight": null,
-          "naturalWidth": null,
-          "offset": Object {
-            "x": 0,
-            "y": 0,
-          },
-          "padding": Object {
-            "bottom": 0,
-            "left": 0,
-            "right": 0,
-            "top": 0,
-          },
-          "parentFlexDirection": "row",
-          "parentLayoutSystem": "flow",
-          "position": "static",
-          "providesBoundsForChildren": false,
-          "renderedChildrenCount": 0,
-          "usesParentBounds": true,
-        },
-      },
-    }
-    `,
+
+    // Adjusting the left value of the parent should have shifted all of the children to the left
+
+    expect(
+      globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/child-1`].x,
+    ).toBeLessThan(globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/child-1`].x)
+    expect(globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/bbb`].x).toBeLessThan(
+      globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/bbb`].x,
+    )
+    expect(globalFramesAfterUpdate[`${BakedInStoryboardUID}/flex-container/ccc`].x).toBeLessThan(
+      globalFramesBeforeUpdate[`${BakedInStoryboardUID}/flex-container/ccc`].x,
     )
   })
 })
+
+describe('Capturing closest offset parent', () => {
+  it('offset comes from inside the parent component', async () => {
+    const renderResult = await renderTestEditorWithCode(
+      `
+      import * as React from 'react'
+      import { Scene, Storyboard } from 'utopia-api'
+      
+      export var App = (props) => {
+        return (
+          <div data-uid='app-root'>
+            <div
+              data-uid='inner-div'
+              style={{ position: 'absolute', top: 100 }}
+            >
+              <div data-uid='immediate-parent'>
+                {props.children}
+              </div>
+            </div>
+          </div>
+        )
+      }
+      
+      export var storyboard = (
+        <Storyboard data-uid='sb'>
+          <Scene
+            data-uid='scene'
+            style={{
+              position: 'absolute',
+              width: 375,
+              height: 812,
+            }}
+          >
+            <App data-uid='app'>
+              <div
+                data-uid='child'
+                style={{
+                  position: 'absolute',
+                  width: 200,
+                  height: 200,
+                  backgroundColor: '#d3d3d3',
+                }}
+              />
+            </App>
+          </Scene>
+        </Storyboard>
+      )
+      `,
+      'await-first-dom-report',
+    )
+
+    const metadataOfInnerElement =
+      renderResult.getEditorState().editor.jsxMetadata['sb/scene/app/child']
+    const expectedClosestOffsetParent = 'sb/scene/app:app-root/inner-div'
+    expect(
+      optionalMap(
+        EP.toString,
+        metadataOfInnerElement.specialSizeMeasurements.closestOffsetParentPath,
+      ),
+    ).toBe(expectedClosestOffsetParent)
+  })
+})
+
+describe('Observing runtime changes', () => {
+  const { clock } = configureSetupTeardown()
+  const changingProjectCode = `
+    import * as React from 'react'
+    import { Scene, Storyboard } from 'utopia-api'
+
+    const App = (props) => {
+      const [showDiv, setShowDiv] = React.useState(false)
+
+      return (
+        <div
+          style={{ width: '100%', height: '100%' }}
+          data-uid='app-root'
+        >
+          <div
+            style={{
+              backgroundColor: 'lightblue',
+              position: 'absolute',
+              left: 49,
+              top: 59,
+              width: 200,
+              height: 44,
+              textAlign: 'center',
+            }}
+            onMouseUp={() => {
+              setTimeout(() => setShowDiv(true), 0) // setTimeout so that this happens after we handle mouse events
+            }}
+            data-uid='button'
+            data-testid='click-me'
+          >
+            Click me
+          </div>
+          {
+            // @utopia/uid=conditional
+            showDiv ? (
+            <div
+              style={{
+                backgroundColor: 'lightblue',
+                position: 'absolute',
+                left: 49,
+                top: 150,
+                width: 200,
+                height: 44,
+                textAlign: 'center',
+              }}
+              data-uid='target-div'
+              data-testid='target-div'
+            >
+              Hello!
+            </div>
+          ) : null}
+        </div>
+      )
+    }
+
+    export var storyboard = (
+      <Storyboard data-uid='sb'>
+        <Scene
+          style={{
+            backgroundColor: '#aaaaaa33',
+            position: 'absolute',
+            left: 532,
+            top: 66,
+            width: 296,
+            height: 457,
+          }}
+          data-uid='sc'
+        >
+          <App data-uid='app' />
+        </Scene>
+      </Storyboard>
+    )
+  `
+
+  it('Updates the metadata in live mode', async () => {
+    const renderResult = await renderTestEditorWithCode(
+      changingProjectCode,
+      'await-first-dom-report',
+    )
+    await renderResult.dispatch([switchEditorMode(EditorModes.liveMode())], true)
+    await renderResult.getDispatchFollowUpActionsFinished()
+
+    const targetPath = EP.fromString('sb/sc/app:app-root/conditional/target-div')
+
+    // Check no metadata for the target at the start
+    const metadataBefore = MetadataUtils.findElementByElementPath(
+      renderResult.getEditorState().editor.jsxMetadata,
+      targetPath,
+    )
+    expect(metadataBefore).toBeNull()
+
+    const buttonToClick = renderResult.renderedDOM.getByTestId('click-me')
+    const buttonToClickBounds = buttonToClick.getBoundingClientRect()
+    const clickPoint = {
+      x: buttonToClickBounds.width / 2,
+      y: buttonToClickBounds.height / 2,
+    }
+
+    await mouseClickAtPoint(buttonToClick, clickPoint)
+    clock.current.tick(100)
+    await renderResult.getDispatchFollowUpActionsFinished()
+    clock.current.tick(100)
+
+    // Check there is metadata for the target at the end
+    const metadataAfter = MetadataUtils.findElementByElementPath(
+      renderResult.getEditorState().editor.jsxMetadata,
+      targetPath,
+    )
+    expect(metadataAfter).not.toBeNull()
+  })
+
+  xit('Does not update the metadata in select mode', async () => {
+    const renderResult = await renderTestEditorWithCode(
+      changingProjectCode,
+      'await-first-dom-report',
+    )
+
+    const targetPath = EP.fromString('sb/sc/app:app-root/conditional/target-div')
+
+    // Check no metadata for the target at the start
+    const metadataBefore = MetadataUtils.findElementByElementPath(
+      renderResult.getEditorState().editor.jsxMetadata,
+      targetPath,
+    )
+    expect(metadataBefore).toBeNull()
+
+    const recordedActionsBefore = [...renderResult.getRecordedActions()]
+
+    const buttonToClick = renderResult.renderedDOM.getByTestId('click-me')
+    const buttonToClickBounds = buttonToClick.getBoundingClientRect()
+    const clickPoint = {
+      x: buttonToClickBounds.width / 2,
+      y: buttonToClickBounds.height / 2,
+    }
+
+    await mouseClickAtPoint(buttonToClick, clickPoint)
+    await wait(0)
+    await renderResult.getDispatchFollowUpActionsFinished()
+
+    const recordedActionsAfter = [...renderResult.getRecordedActions()]
+    const recordedActionsDuring = recordedActionsAfter.slice(recordedActionsBefore.length)
+
+    const runDomWalkerActions = recordedActionsDuring.filter((a) => a.action === 'RUN_DOM_WALKER')
+    expect(runDomWalkerActions.length).toEqual(0)
+
+    // Check there is still no metadata for the target at the end
+    const metadataAfter = MetadataUtils.findElementByElementPath(
+      renderResult.getEditorState().editor.jsxMetadata,
+      targetPath,
+    )
+    expect(metadataAfter).toBeNull()
+  })
+})
+
+describe('Text content', () => {
+  it('Is only captured for leaf elements', async () => {
+    const renderResult = await renderTestEditorWithCode(
+      `
+      import * as React from 'react'
+      import { Storyboard } from 'utopia-api'
+
+      export var storyboard = (
+        <Storyboard data-uid='sb'>
+          <div
+            style={{
+              backgroundColor: '#aaaaaa33',
+              position: 'absolute',
+              left: 293,
+              top: 176,
+              width: 355,
+              height: 453,
+            }}
+            data-uid='parent'
+          >
+            <div data-uid='text-only'>Text Only</div>
+            <div data-uid='text-with-br'>
+              Text <br data-uid='br' /> with br
+            </div>
+            <div data-uid='text-with-span'>
+              Text with <span data-uid='span'>span</span>
+            </div>
+          </div>
+        </Storyboard>
+      )
+      `,
+      'await-first-dom-report',
+    )
+
+    const metadata = renderResult.getEditorState().editor.jsxMetadata
+
+    const pathsToCheck = [
+      { path: 'sb', expectsText: false },
+      { path: 'sb/parent', expectsText: false },
+      { path: 'sb/parent/text-only', expectsText: true },
+      { path: 'sb/parent/text-with-br', expectsText: false },
+      { path: 'sb/parent/text-with-br/br', expectsText: false },
+      { path: 'sb/parent/text-with-span', expectsText: false },
+      { path: 'sb/parent/text-with-span/span', expectsText: true },
+    ]
+
+    pathsToCheck.forEach(({ path, expectsText }) => {
+      const elementMetadata = MetadataUtils.findElementByElementPath(metadata, EP.fromString(path))
+      expect(elementMetadata).not.toBeNull()
+      const textLength = elementMetadata!.textContent?.length ?? 0
+      const hasText = textLength > 0
+      expect(hasText).toEqual(expectsText)
+    })
+  })
+})
+
+const TestProject = `
+import * as React from 'react'
+import {
+  View,
+  Scene,
+  Storyboard,
+} from 'utopia-api'
+export var App = (props) => {
+  return (
+    <View style={{ ...props.style, backgroundColor: '#FFFFFF'}} data-uid={'05c'}>
+      <View
+        style={{ backgroundColor: '#DDDDDD', position: 'absolute', left: 55, top: 98, width: 266, height: 124  }}
+        data-uid={'ef0'}
+      >
+        <View
+          style={{ backgroundColor: '#DDDDDD', position: 'absolute', left: 71, top: 27, width: 125, height: 70 }}
+          data-uid={'488'}
+        />
+        {
+          // @utopia/uid=d63
+          [1, 2].map(n => {
+            return <div data-uid={'bbb'} />
+          })
+        }
+      </View>
+    </View>
+  )
+}
+export var storyboard = (props) => {
+  return (
+    <Storyboard data-uid={'${BakedInStoryboardUID}'}>
+      <Scene
+        style={{ position: 'relative', left: 0, top: 0, width: 375, height: 812 }}
+        data-uid={'${TestSceneUID}'}
+      >
+        <App
+          data-uid='${TestAppUID}' 
+          style={{ position: 'absolute', bottom: 0, left: 0, right: 0, top: 0 }}
+        />
+      </Scene>
+    </Storyboard>
+  )
+}
+`
+
+const TestProjectWithSVG = `
+import * as React from 'react'
+import {
+  View,
+  Scene,
+  Storyboard,
+} from 'utopia-api'
+
+export var SVGComponent = () => {
+  return (
+    <svg
+      width='92'
+      height='92'
+      viewBox='0 0 72 72'
+      fill='none'
+      xmlns='http://www.w3.org/2000/svg'
+    >
+      <path
+        fill-rule='evenodd'
+        clip-rule='evenodd'
+        d='M41 5C41 2.23858 38.7614 0 36 0C33.2386 0 31 2.23858 31 5L31 31L5 31C2.23858 31 0 33.2386 0 36C0 38.7614 2.23858 41 5 41H31L31 67C31 69.7614 33.2386 72 36 72C38.7614 72 41 69.7614 41 67V41H67C69.7614 41 72 38.7614 72 36C72 33.2386 69.7614 31 67 31L41 31V5Z'
+        fill='green'
+      />
+    </svg>
+  )
+}
+
+export var App = (props) => {
+  return (
+    <View style={{ ...props.style, backgroundColor: '#FFFFFF'}} data-uid={'05c'}>
+      <View
+        style={{ backgroundColor: '#DDDDDD', position: 'absolute', left: 55, top: 98, width: 266, height: 124  }}
+        data-uid={'ef0'}
+      >
+        <View
+          style={{ backgroundColor: '#DDDDDD', position: 'absolute', left: 71, top: 27, width: 125, height: 70 }}
+          data-uid={'488'}
+        />
+        <SVGComponent />
+        <svg
+          width='92'
+          height='92'
+          viewBox='0 0 72 72'
+          fill='none'
+          xmlns='http://www.w3.org/2000/svg'
+        >
+          <path
+            fill-rule='evenodd'
+            clip-rule='evenodd'
+            d='M41 5C41 2.23858 38.7614 0 36 0C33.2386 0 31 2.23858 31 5L31 31L5 31C2.23858 31 0 33.2386 0 36C0 38.7614 2.23858 41 5 41H31L31 67C31 69.7614 33.2386 72 36 72C38.7614 72 41 69.7614 41 67V41H67C69.7614 41 72 38.7614 72 36C72 33.2386 69.7614 31 67 31L41 31V5Z'
+            fill='green'
+          />
+        </svg>
+        {[1, 2].map(n => {
+          return <div data-uid={'bbb'} />
+        })}
+      </View>
+    </View>
+  )
+}
+
+export var storyboard = (props) => {
+  return (
+    <Storyboard data-uid={'${BakedInStoryboardUID}'}>
+      <Scene
+        style={{ position: 'relative', left: 0, top: 0, width: 375, height: 812 }}
+        data-uid={'${TestSceneUID}'}
+      >
+        <App
+          data-uid='${TestAppUID}' 
+          style={{ position: 'absolute', bottom: 0, left: 0, right: 0, top: 0 }}
+        />
+      </Scene>
+    </Storyboard>
+  )
+}
+`
+const TestProjectWithoutScene = `
+import * as React from 'react'
+import { Storyboard } from 'utopia-api'
+
+export var storyboard = (props) => {
+  return (
+    <Storyboard data-uid={'${BakedInStoryboardUID}'}>
+      <div
+        style={{
+          backgroundColor: '#aaaaaa33',
+          position: 'absolute',
+          left: 10,
+          top: 10,
+          width: 400,
+          height: 100,
+          display: 'flex',
+        }}
+        data-uid='flex-container'
+      >
+        <div
+          style={{
+            backgroundColor: '#00FFFB33',
+            flexGrow: 1,
+            height: 100,
+            contain: 'layout',
+          }}
+          data-uid='child-1'
+        />
+        <div
+          style={{
+            backgroundColor: '#B300FF33',
+            flexGrow: 1,
+            height: 100,
+            contain: 'layout',
+          }}
+          data-uid='bbb'
+        />
+        <div
+          style={{
+            backgroundColor: '#55FF0033',
+            flexGrow: 1,
+            height: 100,
+            contain: 'layout',
+          }}
+          data-uid='ccc'
+        />
+      </div>
+    </Storyboard>
+  )
+}
+`

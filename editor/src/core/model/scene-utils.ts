@@ -1,69 +1,54 @@
-import Hash from 'object-hash'
-import {
-  SceneMetadata,
-  StaticElementPath,
-  PropertyPath,
-  isTextFile,
-  isParseSuccess,
-} from '../shared/project-file-types'
-import {
+import type { SceneMetadata, StaticElementPath, PropertyPath } from '../shared/project-file-types'
+import { isTextFile, isParseSuccess } from '../shared/project-file-types'
+import type {
   UtopiaJSXComponent,
-  utopiaJSXComponent,
-  jsxElement,
   JSXElement,
-  jsxAttributeValue,
-  isJSXElement,
   JSXElementChild,
   TopLevelElement,
-  isUtopiaJSXComponent,
   JSXAttributes,
-  defaultPropsParam,
-  jsxAttributeOtherJavaScript,
-  ElementInstanceMetadataMap,
+  JSExpression,
+} from '../shared/element-template'
+import {
+  utopiaJSXComponent,
+  jsxElement,
+  jsExpressionValue,
+  isJSXElement,
+  isUtopiaJSXComponent,
+  jsExpressionOtherJavaScript,
   jsxAttributesFromMap,
-  ElementInstanceMetadata,
-  walkElements,
   emptyComments,
+  jsOpaqueArbitraryStatement,
 } from '../shared/element-template'
 import * as EP from '../shared/element-path'
 import * as PP from '../shared/property-path'
-import {
-  eitherToMaybe,
-  applicative5Either,
-  flatMapEither,
-  isLeft,
-  applicative6Either,
-  right,
-} from '../shared/either'
+import { eitherToMaybe, flatMapEither, isLeft, applicative6Either, right } from '../shared/either'
 import { memoize } from '../shared/memoize'
 import fastDeepEqual from 'fast-deep-equal'
 import {
   getModifiableJSXAttributeAtPath,
   jsxSimpleAttributeToValue,
-} from '../shared/jsx-attributes'
+} from '../shared/jsx-attribute-utils'
 import { stripNulls } from '../shared/array-utils'
-import { UTOPIA_UIDS_KEY } from './utopia-constants'
-import { getUtopiaID } from './element-template-utils'
-import { getContentsTreeFileFromString, ProjectContentTreeRoot } from '../../components/assets'
+import { UTOPIA_UID_KEY } from './utopia-constants'
+import type { ProjectContentTreeRoot } from '../../components/assets'
+import { getProjectFileByFilePath } from '../../components/assets'
 import { getUtopiaJSXComponentsFromSuccess } from './project-file-utils'
-import { generateConsistentUID, generateUID } from '../shared/uid-utils'
-import { emptySet } from '../shared/set-utils'
+import { generateConsistentUID, getUtopiaID } from '../shared/uid-utils'
+import { hashObject } from '../shared/hash'
+import type { MapLike } from 'typescript'
 
-export const PathForSceneComponent = PP.create(['component'])
-export const PathForSceneDataUid = PP.create(['data-uid'])
-export const PathForSceneDataLabel = PP.create(['data-label'])
-export const PathForSceneFrame = PP.create(['style'])
+export const PathForSceneComponent = PP.create('component')
+export const PathForSceneDataUid = PP.create('data-uid')
+export const PathForSceneDataLabel = PP.create('data-label')
+export const PathForSceneFrame = PP.create('style')
 
 export const BakedInStoryboardUID = 'utopia-storyboard-uid'
 export const BakedInStoryboardVariableName = 'storyboard'
 
 export const EmptyUtopiaCanvasComponent = convertScenesToUtopiaCanvasComponent([])
 
-export const PathForSceneProps = PP.create(['props'])
-export const PathForSceneStyle = PP.create(['style'])
-
-export const ResizesContentProp = 'resizeContent'
-export const PathForResizeContent = PP.create([ResizesContentProp])
+export const PathForSceneProps = PP.create('props')
+export const PathForSceneStyle = PP.create('style')
 
 export function createSceneUidFromIndex(sceneIndex: number): string {
   return `scene-${sceneIndex}`
@@ -71,17 +56,20 @@ export function createSceneUidFromIndex(sceneIndex: number): string {
 
 export function mapScene(scene: SceneMetadata): JSXElement {
   const sceneProps = jsxAttributesFromMap({
-    component: jsxAttributeOtherJavaScript(
+    component: jsExpressionOtherJavaScript(
+      [],
+      scene.component ?? 'null',
       scene.component ?? 'null',
       `return ${scene.component}`,
       [],
       null,
       {},
+      emptyComments,
     ),
-    props: jsxAttributeValue(scene.props, emptyComments),
-    style: jsxAttributeValue(scene.frame, emptyComments),
-    'data-uid': jsxAttributeValue(scene.uid, emptyComments),
-    'data-label': jsxAttributeValue(scene.label, emptyComments),
+    props: jsExpressionValue(scene.props, emptyComments),
+    style: jsExpressionValue(scene.frame, emptyComments),
+    'data-uid': jsExpressionValue(scene.uid, emptyComments),
+    'data-label': jsExpressionValue(scene.label, emptyComments),
   })
   return jsxElement('Scene', scene.uid, sceneProps, [])
 }
@@ -102,12 +90,12 @@ export function unmapScene(element: JSXElementChild): SceneMetadata | null {
         }
         return scene
       },
-      getSimpleAttributeAtPathCustom(element.props, PP.create(['component'])),
-      getSimpleAttributeAtPathCustom(element.props, PP.create(['props'])),
-      getSimpleAttributeAtPathCustom(element.props, PP.create(['style'])),
-      getSimpleAttributeAtPathCustom(element.props, PP.create(['layout'])),
-      getSimpleAttributeAtPathCustom(element.props, PP.create(['data-label'])),
-      getSimpleAttributeAtPathCustom(element.props, PP.create(['data-uid'])),
+      getSimpleAttributeAtPathCustom(element.props, PP.create('component')),
+      getSimpleAttributeAtPathCustom(element.props, PP.create('props')),
+      getSimpleAttributeAtPathCustom(element.props, PP.create('style')),
+      getSimpleAttributeAtPathCustom(element.props, PP.create('layout')),
+      getSimpleAttributeAtPathCustom(element.props, PP.create('data-label')),
+      getSimpleAttributeAtPathCustom(element.props, PP.create('data-uid')),
     ),
   )
 }
@@ -128,14 +116,15 @@ export function convertScenesToUtopiaCanvasComponent(
   return utopiaJSXComponent(
     BakedInStoryboardVariableName,
     false,
-    'var',
+    'const',
     'block',
+    [],
     null,
     [],
     jsxElement(
       'Storyboard',
       BakedInStoryboardUID,
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue(BakedInStoryboardUID, emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue(BakedInStoryboardUID, emptyComments) }),
       scenes.map(mapScene),
     ),
     null,
@@ -148,10 +137,11 @@ export function createSceneFromComponent(
   filePath: string,
   componentImportedAs: string,
   uid: string,
+  additionalAttributes: MapLike<JSExpression> = {},
 ): JSXElement {
   const sceneProps = jsxAttributesFromMap({
-    [UTOPIA_UIDS_KEY]: jsxAttributeValue(uid, emptyComments),
-    style: jsxAttributeValue(
+    [UTOPIA_UID_KEY]: jsExpressionValue(uid, emptyComments),
+    style: jsExpressionValue(
       {
         position: 'absolute',
         left: 0,
@@ -161,19 +151,20 @@ export function createSceneFromComponent(
       },
       emptyComments,
     ),
+    ...additionalAttributes,
   })
-  const hash = Hash({
+  const hash = hashObject({
     fileName: filePath,
     name: componentImportedAs,
     props: jsxAttributesFromMap({}),
   })
-  const componentUID = generateConsistentUID(emptySet(), hash)
+  const componentUID = generateConsistentUID(hash, new Set())
   return jsxElement('Scene', uid, sceneProps, [
     jsxElement(
       componentImportedAs,
       componentUID,
       jsxAttributesFromMap({
-        [UTOPIA_UIDS_KEY]: jsxAttributeValue(componentUID, emptyComments),
+        [UTOPIA_UID_KEY]: jsExpressionValue(componentUID, emptyComments),
       }),
       [],
     ),
@@ -182,7 +173,7 @@ export function createSceneFromComponent(
 
 export function createStoryboardElement(scenes: Array<JSXElement>, uid: string): JSXElement {
   const storyboardProps = jsxAttributesFromMap({
-    [UTOPIA_UIDS_KEY]: jsxAttributeValue(uid, emptyComments),
+    [UTOPIA_UID_KEY]: jsExpressionValue(uid, emptyComments),
   })
   return jsxElement('Storyboard', uid, storyboardProps, scenes)
 }
@@ -206,7 +197,7 @@ const convertScenesAndTopLevelElementsToUtopiaCanvasComponentMemoized = memoize(
     ...topLevelElements,
     convertScenesToUtopiaCanvasComponent(scenes),
   ],
-  { equals: fastDeepEqual }, // delete me as soon as possible
+  { matchesArg: fastDeepEqual }, // delete me as soon as possible
 )
 
 export function convertScenesAndTopLevelElementsToUtopiaCanvasComponent(
@@ -239,7 +230,7 @@ function getSimpleAttributeAtPathCustom(attributes: JSXAttributes, path: Propert
   return flatMapEither((attr) => {
     const simpleValue = jsxSimpleAttributeToValue(attr)
     if (isLeft(simpleValue) && attr.type === 'ATTRIBUTE_OTHER_JAVASCRIPT') {
-      return right(attr.javascript)
+      return right(attr.javascriptWithUIDs)
     } else {
       return simpleValue
     }
@@ -286,11 +277,11 @@ export function getStoryboardUID(openComponents: UtopiaJSXComponent[]): string |
 
 export function getStoryboardElementPath(
   projectContents: ProjectContentTreeRoot,
-  openFile: string | null,
+  openFile: string | null | undefined,
 ): StaticElementPath | null {
   if (openFile != null) {
-    const file = getContentsTreeFileFromString(projectContents, openFile)
-    if (isTextFile(file) && isParseSuccess(file.fileContents.parsed)) {
+    const file = getProjectFileByFilePath(projectContents, openFile)
+    if (file != null && isTextFile(file) && isParseSuccess(file.fileContents.parsed)) {
       const possiblyStoryboard = getUtopiaJSXComponentsFromSuccess(file.fileContents.parsed).find(
         (component) => component.name === BakedInStoryboardVariableName,
       )

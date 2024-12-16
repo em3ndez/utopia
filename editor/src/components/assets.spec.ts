@@ -1,86 +1,25 @@
 import * as FastCheck from 'fast-check'
-import { directory, imageFile, isDirectory } from '../core/model/project-file-utils'
+import fastDeepEquals from 'fast-deep-equal'
+import type { ProjectContents } from '../core/shared/project-file-types'
 import {
-  TextFile,
-  Directory,
-  ImageFile,
-  ProjectContents,
-  ProjectFile,
-  codeFile,
+  directory,
+  isDirectory,
+  RevisionsState,
+  textFile,
+  textFileContents,
+  unparsed,
 } from '../core/shared/project-file-types'
+import { codeFile } from '../core/shared/project-file-types'
+import type { ProjectContentTreeRoot } from './assets'
 import {
   contentsToTree,
+  getProjectDependencies,
   projectContentDirectory,
   projectContentFile,
-  ProjectContentTreeRoot,
   treeToContents,
 } from './assets'
-import fastDeepEquals from 'fast-deep-equal'
-
-function codeFileArbitrary(): FastCheck.Arbitrary<TextFile> {
-  return FastCheck.string().map((content) => codeFile(content, null))
-}
-
-function remoteImageFileArbitrary(): FastCheck.Arbitrary<ImageFile> {
-  return FastCheck.constant(imageFile(undefined, undefined, 100, 100, 123456))
-}
-
-function localImageFileArbitrary(): FastCheck.Arbitrary<ImageFile> {
-  return FastCheck.tuple(FastCheck.string(), FastCheck.string()).map(([imageType, base64]) =>
-    imageFile(imageType, base64, 100, 100, 123456),
-  )
-}
-
-function notDirectoryContentFileArbitrary(): FastCheck.Arbitrary<TextFile | ImageFile> {
-  return FastCheck.oneof<TextFile | ImageFile>(
-    codeFileArbitrary(),
-    remoteImageFileArbitrary(),
-    localImageFileArbitrary(),
-  )
-}
-
-function directoryContentFileArbitrary(): FastCheck.Arbitrary<Directory> {
-  return FastCheck.constant(directory())
-}
-
-function pathArbitrary(): FastCheck.Arbitrary<string> {
-  return FastCheck.array(
-    FastCheck.stringOf(
-      FastCheck.char().filter((char) => char !== '/'),
-      1,
-      30,
-    ),
-    1,
-    5,
-  ).map((arr) => {
-    return `/${arr.join('/')}`
-  })
-}
-
-function projectContentsFilter(projectContents: ProjectContents): boolean {
-  const allKeys = Object.keys(projectContents)
-  for (const key of allKeys) {
-    const pathElements = key.split('/')
-    for (let size = 1; size < pathElements.length; size++) {
-      const subPath = pathElements.slice(0, size).join('/')
-      const possibleContent = projectContents[subPath]
-      if (possibleContent != null && !isDirectory(possibleContent)) {
-        return false
-      }
-    }
-  }
-  return true
-}
-
-function projectContentsArbitrary(): FastCheck.Arbitrary<ProjectContents> {
-  return FastCheck.dictionary<ProjectFile>(
-    pathArbitrary(),
-    FastCheck.oneof<ProjectFile>(
-      notDirectoryContentFileArbitrary(),
-      directoryContentFileArbitrary(),
-    ),
-  ).filter(projectContentsFilter)
-}
+import { projectContentsArbitrary } from './assets.test-utils'
+import { simpleDefaultProject } from '../sample-projects/sample-project-utils'
 
 function checkContentsToTree(contents: ProjectContents): boolean {
   const result = treeToContents(contentsToTree(contents))
@@ -119,5 +58,39 @@ describe('contentsToTree', () => {
       }),
     }
     expect(contentsToTree(contents)).toEqual(expectedResult)
+  })
+})
+
+describe('getProjectDependencies', () => {
+  it('should merge the dependencies from package.json and package-lock.json', () => {
+    const project = simpleDefaultProject({
+      additionalFiles: {
+        '/package-lock.json': textFile(
+          textFileContents(
+            JSON.stringify(
+              {
+                dependencies: {
+                  react: {
+                    version: '1.0.0',
+                  },
+                },
+              },
+              null,
+              2,
+            ),
+            unparsed,
+            RevisionsState.CodeAhead,
+          ),
+          null,
+          null,
+          0,
+        ),
+      },
+    })
+    const dependencies = getProjectDependencies(project.projectContents)
+    // from package.json
+    expect(dependencies?.['react-dom']).toEqual('16.13.1')
+    // from package-lock.json
+    expect(dependencies?.react).toEqual('1.0.0')
   })
 })

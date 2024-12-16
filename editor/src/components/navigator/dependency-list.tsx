@@ -1,31 +1,29 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx } from '@emotion/react'
 import React from 'react'
-import {
-  requestedNpmDependency,
+import type {
   RequestedNpmDependency,
   PackageStatusMap,
   PackageStatus,
 } from '../../core/shared/npm-dependency-types'
-import { ProjectFile } from '../../core/shared/project-file-types'
-import { betterReactMemo } from '../../utils/react-performance'
+import { requestedNpmDependency } from '../../core/shared/npm-dependency-types'
+import type { ProjectFile } from '../../core/shared/project-file-types'
 import Utils from '../../utils/utils'
-import { EditorPanel, setFocus } from '../common/actions'
-import { EditorDispatch } from '../editor/action-types'
+import type { EditorPanel } from '../common/actions'
+import { setFocus } from '../common/actions'
+import type { EditorDispatch } from '../editor/action-types'
 import * as EditorActions from '../editor/actions/action-creators'
 import { clearSelection, addToast } from '../editor/actions/action-creators'
+import type { VersionLookupResult } from '../editor/npm-dependency/npm-dependency'
 import {
   dependenciesFromPackageJson,
   findLatestVersion,
   checkPackageVersionExists,
-  VersionLookupResult,
 } from '../editor/npm-dependency/npm-dependency'
-import {
-  DefaultPackagesList,
-  DependencyPackageDetails,
-  packageJsonFileFromProjectContents,
-} from '../editor/store/editor-state'
-import { useEditorState } from '../editor/store/store-hook'
+import type { DependencyPackageDetails } from '../editor/store/editor-state'
+import { DefaultPackagesList } from '../editor/store/editor-state'
+import { Substores, useEditorState } from '../editor/store/store-hook'
 import { DependencyListItems } from './dependency-list-items'
 import { fetchNodeModules } from '../../core/es-modules/package-manager/fetch-packages'
 import {
@@ -38,9 +36,13 @@ import {
   Section,
   FlexColumn,
   Button,
+  colorTheme,
 } from '../../uuiui'
 import { notice } from '../common/notice'
 import { isFeatureEnabled } from '../../utils/feature-switches'
+import type { BuiltInDependencies } from '../../core/es-modules/package-manager/built-in-dependencies-list'
+import { useDispatch } from '../editor/store/dispatch-context'
+import { packageJsonFileFromProjectContents } from '../assets'
 
 type DependencyListProps = {
   editorDispatch: EditorDispatch
@@ -49,6 +51,7 @@ type DependencyListProps = {
   focusedPanel: EditorPanel | null
   packageJsonFile: ProjectFile | null
   packageStatus: PackageStatusMap
+  builtInDependencies: BuiltInDependencies
 }
 
 function packageDetails(
@@ -88,18 +91,32 @@ function packageDetailsFromDependencies(
   return userAddedPackages
 }
 
-export const DependencyList = betterReactMemo('DependencyList', () => {
-  const props = useEditorState((store) => {
-    return {
-      editorDispatch: store.dispatch,
-      minimised: store.editor.dependencyList.minimised,
-      focusedPanel: store.editor.focusedPanel,
-      packageJsonFile: packageJsonFileFromProjectContents(store.editor.projectContents),
-      packageStatus: store.editor.nodeModules.packageStatus,
-    }
-  }, 'DependencyList')
+export const DependencyList = React.memo(() => {
+  const props = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return {
+        minimised: store.editor.dependencyList.minimised,
+        focusedPanel: store.editor.focusedPanel,
+        packageStatus: store.editor.nodeModules.packageStatus,
+      }
+    },
+    'DependencyList',
+  )
 
-  const dispatch = props.editorDispatch
+  const builtInDependencies = useEditorState(
+    Substores.builtInDependencies,
+    (store) => store.builtInDependencies,
+    'DependencyList builtInDependencies',
+  )
+
+  const packageJsonFile = useEditorState(
+    Substores.projectContents,
+    (store) => packageJsonFileFromProjectContents(store.editor.projectContents),
+    'DependencyList packageJsonFile',
+  )
+
+  const dispatch = useDispatch()
 
   const toggleMinimised = React.useCallback(() => {
     dispatch([EditorActions.togglePanel('dependencylist')], 'leftpane')
@@ -107,7 +124,14 @@ export const DependencyList = betterReactMemo('DependencyList', () => {
 
   const dependencyProps = { ...props, toggleMinimised: toggleMinimised }
 
-  return <DependencyListInner {...dependencyProps} />
+  return (
+    <DependencyListInner
+      editorDispatch={dispatch}
+      {...dependencyProps}
+      packageJsonFile={packageJsonFile}
+      builtInDependencies={builtInDependencies}
+    />
+  )
 })
 
 function unwrapLookupResult(lookupResult: VersionLookupResult): string | null {
@@ -170,7 +194,11 @@ class DependencyListInner extends React.PureComponent<DependencyListProps, Depen
 
       this.props.editorDispatch([EditorActions.updatePackageJson(npmDependencies)])
 
-      fetchNodeModules(npmDependencies).then((fetchNodeModulesResult) => {
+      void fetchNodeModules(
+        this.props.editorDispatch,
+        npmDependencies,
+        this.props.builtInDependencies,
+      ).then((fetchNodeModulesResult) => {
         if (fetchNodeModulesResult.dependenciesWithError.length > 0) {
           this.packagesUpdateFailed(
             `Failed to download the following dependencies: ${JSON.stringify(
@@ -181,7 +209,7 @@ class DependencyListInner extends React.PureComponent<DependencyListProps, Depen
         }
         this.setState({ dependencyLoadingStatus: 'not-loading' })
         this.props.editorDispatch([
-          EditorActions.updateNodeModulesContents(fetchNodeModulesResult.nodeModules, 'full-build'),
+          EditorActions.updateNodeModulesContents(fetchNodeModulesResult.nodeModules),
         ])
       })
 
@@ -331,7 +359,11 @@ class DependencyListInner extends React.PureComponent<DependencyListProps, Depen
                 EditorActions.setPackageStatus(editedPackageName, loadingOrUpdating),
                 EditorActions.updatePackageJson(updatedNpmDeps),
               ])
-              fetchNodeModules([requestedNpmDependency(editedPackageName, editedPackageVersion!)])
+              fetchNodeModules(
+                this.props.editorDispatch,
+                [requestedNpmDependency(editedPackageName, editedPackageVersion!)],
+                this.props.builtInDependencies,
+              )
                 .then((fetchNodeModulesResult) => {
                   if (fetchNodeModulesResult.dependenciesWithError.length > 0) {
                     this.packagesUpdateFailed(
@@ -343,10 +375,7 @@ class DependencyListInner extends React.PureComponent<DependencyListProps, Depen
                   } else {
                     this.packagesUpdateSuccess(editedPackageName)
                     this.props.editorDispatch([
-                      EditorActions.updateNodeModulesContents(
-                        fetchNodeModulesResult.nodeModules,
-                        'incremental',
-                      ),
+                      EditorActions.updateNodeModulesContents(fetchNodeModulesResult.nodeModules),
                     ])
                   }
                 })
@@ -426,7 +455,12 @@ class DependencyListInner extends React.PureComponent<DependencyListProps, Depen
           {!this.props.minimised ? (
             <FlexColumn
               role='listContainer'
-              style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4 }}
+              style={{
+                paddingLeft: 8,
+                paddingRight: 8,
+                paddingTop: 4,
+                paddingBottom: 4,
+              }}
             >
               <AddTailwindButton packagesWithStatus={packagesWithStatus} />
               <DependencyListItems
@@ -453,14 +487,14 @@ interface AddTailwindButtonProps {
 }
 
 const AddTailwindButton = (props: AddTailwindButtonProps) => {
-  const dispatch = useEditorState((store) => store.dispatch, 'AddTailwindButton')
+  const dispatch = useDispatch()
   const onButtonClicked = React.useCallback(() => {
     dispatch([EditorActions.addTailwindConfig()])
   }, [dispatch])
 
   const tailwindAlreadyAdded =
-    props.packagesWithStatus.find((p) => p.name === 'tailwindcss') &&
-    props.packagesWithStatus.find((p) => p.name === 'postcss')
+    props.packagesWithStatus.some((p) => p.name === 'tailwindcss') &&
+    props.packagesWithStatus.some((p) => p.name === 'postcss')
   if (tailwindAlreadyAdded) {
     return null
   }
@@ -474,6 +508,7 @@ const AddTailwindButton = (props: AddTailwindButtonProps) => {
         backgroundImage: 'linear-gradient(3deg, #92ABFF 0%, #1FCCB7 99%)',
         boxShadow: 'inset 0 0 0 1px rgba(94,94,94,0.20)',
         borderRadius: 2,
+        color: colorTheme.bg1.value,
       }}
       onClick={onButtonClicked}
     >

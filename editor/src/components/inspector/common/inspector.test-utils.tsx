@@ -1,8 +1,10 @@
 import { produce } from 'immer'
 import React from 'react'
 import create from 'zustand'
-import { emptyComments, jsxAttributeValue, JSXElement } from '../../../core/shared/element-template'
-import { setJSXValueAtPath } from '../../../core/shared/jsx-attributes'
+import { subscribeWithSelector } from 'zustand/middleware'
+import type { JSXElement } from '../../../core/shared/element-template'
+import { emptyComments, jsExpressionValue } from '../../../core/shared/element-template'
+import { setJSXValueAtPath } from '../../../core/shared/jsx-attribute-utils'
 import { isRight } from '../../../core/shared/either'
 import type {
   PropertyPath,
@@ -12,39 +14,56 @@ import type {
 import { createEditorStates } from '../../../utils/utils.test-utils'
 import utils from '../../../utils/utils'
 import { EditorDispatch } from '../../editor/action-types'
+import type { EditorStorePatched } from '../../editor/store/editor-state'
 import {
-  EditorStore,
-  modifyOpenJsxElementAtStaticPath,
   defaultUserState,
   StoryboardFilePath,
+  modifyUnderlyingElementForOpenFile,
+  emptyCollaborativeEditingSupport,
 } from '../../editor/store/editor-state'
-import { EditorStateContext, EditorStateContextData } from '../../editor/store/store-hook'
+import type { UtopiaStoreAPI } from '../../editor/store/store-hook'
+import {
+  createStoresAndState,
+  EditorStateContext,
+  OriginalMainEditorStateContext,
+} from '../../editor/store/store-hook'
 import * as EP from '../../../core/shared/element-path'
 import { InspectorContextProvider } from '../inspector'
-import { getControlStyles, PropertyStatus } from './control-status'
-import { InspectorInfo } from './property-path-hooks'
+import type { PropertyStatus } from './control-status'
+import { getControlStyles } from './control-styles'
+import type { InspectorInfo } from './property-path-hooks'
 import { ScenePathForTestUiJsFile } from '../../../core/model/test-ui-js-file.test-utils'
-import { Frame } from 'utopia-api'
-import { PinsInfo } from './layout-property-path-hooks'
-import { CSSNumber } from './css-utils'
+import type { Frame } from 'utopia-api/core'
+import type { PinsInfo } from './layout-property-path-hooks'
+import type { CSSNumber } from './css-utils'
+import { cssNumber } from './css-utils'
 import { mapValues } from '../../../core/shared/object-utils'
-import { LayoutPinnedProp } from '../../../core/layout/layout-helpers-new'
-import { LocalRectangle, localRectangle } from '../../../core/shared/math-utils'
+import type { LayoutPinnedProp } from '../../../core/layout/layout-helpers-new'
+import type { LocalRectangle } from '../../../core/shared/math-utils'
+import { localRectangle } from '../../../core/shared/math-utils'
+import { createBuiltInDependenciesList } from '../../../core/es-modules/package-manager/built-in-dependencies-list'
+import { DispatchContext } from '../../editor/store/dispatch-context'
+import { NO_OP } from '../../../core/shared/utils'
+import { styleStringInArray } from '../../../utils/common-constants'
+import { fireEvent } from '@testing-library/react'
+import type { EditorRenderResult } from '../../canvas/ui-jsx.test-utils'
+import { emptyProjectServerState } from '../../editor/store/project-server-state'
+import { InitialOnlineState } from '../../editor/online-status'
 
 type UpdateFunctionHelpers = {
-  updateStoreWithImmer: (fn: (store: EditorStore) => void) => void
-  updateStore: (fn: (store: EditorStore) => EditorStore) => void
+  updateStoreWithImmer: (fn: (store: EditorStorePatched) => void) => void
+  updateStore: (fn: (store: EditorStorePatched) => EditorStorePatched) => void
 }
 
-export function getStoreHook(
-  mockDispatch: EditorDispatch,
-): EditorStateContextData & UpdateFunctionHelpers {
+export function getStoreHook(): UtopiaStoreAPI & UpdateFunctionHelpers {
   const editor = createEditorStates([
-    EP.appendNewElementPath(ScenePathForTestUiJsFile, ['aaa', 'bbb']),
+    EP.appendNewElementPath(ScenePathForTestUiJsFile, ['aaa', 'mmm', 'bbb']),
   ])
-  const defaultState: EditorStore = {
+  const defaultState: EditorStorePatched = {
+    storeName: 'editor-store',
     editor: editor.editor,
     derived: editor.derivedState,
+    strategyState: editor.strategyState,
     history: {
       previous: [],
       next: [],
@@ -53,50 +72,65 @@ export function getStoreHook(
     userState: defaultUserState,
     workers: null as any,
     persistence: null as any,
-    dispatch: mockDispatch,
-    alreadySaved: false,
+    saveCountThisSession: 0,
+    elementMetadata: null as any,
+    postActionInteractionSession: null,
+    builtInDependencies: createBuiltInDependenciesList(null),
+    projectServerState: emptyProjectServerState(),
+    collaborativeEditingSupport: emptyCollaborativeEditingSupport(),
+    onlineState: InitialOnlineState,
   }
 
-  const storeHook = create<EditorStore & UpdateFunctionHelpers>((set) => ({
-    ...defaultState,
-    updateStoreWithImmer: (fn: (store: EditorStore) => void) => set(produce(fn)),
-    updateStore: (fn: (store: EditorStore) => EditorStore) => set(fn),
-  }))
+  const storeHook: UtopiaStoreAPI = createStoresAndState(defaultState)
+  const updateStoreWithImmer = (fn: (store: EditorStorePatched) => void) =>
+    storeHook.setState(produce(fn)(storeHook.getState()))
+  const updateStore = (fn: (store: EditorStorePatched) => EditorStorePatched) =>
+    storeHook.setState(fn(storeHook.getState()))
+
   return {
-    api: storeHook,
-    useStore: storeHook,
-    updateStoreWithImmer: storeHook.getState().updateStoreWithImmer,
-    updateStore: storeHook.getState().updateStore,
+    ...storeHook,
+    updateStoreWithImmer: updateStoreWithImmer,
+    updateStore: updateStore,
   }
 }
 
-export const TestInspectorContextProvider: React.FunctionComponent<{
-  selectedViews: Array<ElementPath>
-  editorStoreData: EditorStateContextData
-}> = (props) => {
+export const TestInspectorContextProvider: React.FunctionComponent<
+  React.PropsWithChildren<{
+    selectedViews: Array<ElementPath>
+    editorStoreData: UtopiaStoreAPI
+  }>
+> = (props) => {
   return (
-    <EditorStateContext.Provider value={props.editorStoreData}>
-      <InspectorContextProvider selectedViews={props.selectedViews} targetPath={['style']}>
-        {props.children}
-      </InspectorContextProvider>
-    </EditorStateContext.Provider>
+    <DispatchContext.Provider value={NO_OP}>
+      <OriginalMainEditorStateContext.Provider value={props.editorStoreData}>
+        <EditorStateContext.Provider value={props.editorStoreData}>
+          <InspectorContextProvider
+            selectedViews={props.selectedViews}
+            targetPath={styleStringInArray}
+          >
+            {props.children}
+          </InspectorContextProvider>
+        </EditorStateContext.Provider>
+      </OriginalMainEditorStateContext.Provider>
+    </DispatchContext.Provider>
   )
 }
 
 export function editPropOfSelectedView(
-  store: EditorStore,
+  store: EditorStorePatched,
   path: PropertyPath,
   newValue: number | string,
-): EditorStore {
+): EditorStorePatched {
   return {
     ...store,
-    editor: modifyOpenJsxElementAtStaticPath(
+    editor: modifyUnderlyingElementForOpenFile(
       store.editor.selectedViews[0] as StaticElementPath,
+      store.editor,
       (element): JSXElement => {
         const updatedAttributes = setJSXValueAtPath(
           element.props,
           path,
-          jsxAttributeValue(newValue, emptyComments),
+          jsExpressionValue(newValue, emptyComments),
         )
         if (isRight(updatedAttributes)) {
           return {
@@ -107,7 +141,6 @@ export function editPropOfSelectedView(
           throw new Error(`Couldn't set property in test`)
         }
       },
-      store.editor,
     ),
   }
 }
@@ -154,51 +187,84 @@ export function pinsInfoForPins(pins: SimplePinsInfo): PinsInfo {
   return mapValues((pin) => testInspectorInfo(pin), pins) as PinsInfo
 }
 
+function getDimensionCenter(
+  start: CSSNumber | undefined,
+  end: CSSNumber | undefined,
+  gap: CSSNumber | undefined,
+): CSSNumber | undefined {
+  if (start == null) {
+    if (end == null) {
+      return undefined
+    } else {
+      if (gap == null) {
+        return undefined
+      } else {
+        return cssNumber(end.value - gap.value / 2)
+      }
+    }
+  } else {
+    if (end == null) {
+      if (gap == null) {
+        return undefined
+      } else {
+        return cssNumber(start.value + gap.value / 2)
+      }
+    } else {
+      if (gap == null) {
+        return cssNumber(start.value + (end.value - start.value) / 2)
+      } else {
+        return cssNumber(start.value + gap.value / 2)
+      }
+    }
+  }
+}
+
 export function frameForPins(pins: SimplePinsInfo): Frame {
   return {
-    left: pins.PinnedLeft?.value,
-    centerX: pins.PinnedCenterX?.value,
-    right: pins.PinnedRight?.value,
-    width: pins.Width?.value,
-    top: pins.PinnedTop?.value,
-    centerY: pins.PinnedCenterY?.value,
-    bottom: pins.PinnedBottom?.value,
-    height: pins.Height?.value,
+    left: pins.left?.value,
+    centerX: getDimensionCenter(pins.left, pins.right, pins.width)?.value,
+    right: pins.right?.value,
+    width: pins.width?.value,
+    top: pins.top?.value,
+    centerY: getDimensionCenter(pins.top, pins.bottom, pins.height)?.value,
+    bottom: pins.bottom?.value,
+    height: pins.height?.value,
   }
 }
 
 export const TLWHSimplePins: SimplePinsInfo = {
-  PinnedLeft: {
+  left: {
     value: SimpleRect.x,
     unit: null,
   },
-  Width: { value: SimpleRect.width, unit: null },
-  PinnedTop: { value: SimpleRect.y, unit: null },
-  Height: { value: SimpleRect.height, unit: null },
-  PinnedBottom: undefined,
-  PinnedRight: undefined,
-  PinnedCenterX: undefined,
-  PinnedCenterY: undefined,
+  width: { value: SimpleRect.width, unit: null },
+  top: { value: SimpleRect.y, unit: null },
+  height: { value: SimpleRect.height, unit: null },
+  bottom: undefined,
+  right: undefined,
 }
 
 export const TLBRSimplePins: SimplePinsInfo = {
-  PinnedLeft: { value: SimpleRect.x, unit: null },
-  Width: undefined,
-  PinnedTop: { value: SimpleRect.y, unit: null },
-  Height: undefined,
-  PinnedBottom: { value: SimpleRect.y + SimpleRect.height, unit: null },
-  PinnedRight: { value: SimpleRect.x + SimpleRect.width, unit: null },
-  PinnedCenterX: undefined,
-  PinnedCenterY: undefined,
+  left: { value: SimpleRect.x, unit: null },
+  width: undefined,
+  top: { value: SimpleRect.y, unit: null },
+  height: undefined,
+  bottom: { value: SimpleRect.y + SimpleRect.height, unit: null },
+  right: { value: SimpleRect.x + SimpleRect.width, unit: null },
 }
 
-export const CxCyWHSimplePins: SimplePinsInfo = {
-  PinnedLeft: undefined,
-  Width: { value: SimpleRect.width, unit: null },
-  PinnedTop: undefined,
-  Height: { value: SimpleRect.height, unit: null },
-  PinnedBottom: undefined,
-  PinnedRight: undefined,
-  PinnedCenterX: { value: SimpleRect.x, unit: null }, // Offset by 10 since both parent and element frames are the same width
-  PinnedCenterY: { value: SimpleRect.y, unit: null }, // Offset by 10 since both parent and element frames are the same height
+export async function changeInspectorNumberControl(
+  editor: EditorRenderResult,
+  testId: string,
+  newValue: string,
+): Promise<void> {
+  const numberInput = editor.renderedDOM.getByTestId(testId) as HTMLInputElement
+
+  numberInput.focus()
+
+  fireEvent.change(numberInput, {
+    target: { value: newValue },
+  })
+
+  numberInput.blur()
 }

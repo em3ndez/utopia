@@ -60,6 +60,10 @@ export function oneLevelNestedEquals(objA: any, objB: any, debugMode: boolean = 
   return abstractEquals(objA, objB, debugMode, shallowEqual)
 }
 
+export function twoLevelNestedEquals(objA: any, objB: any, debugMode: boolean = false) {
+  return abstractEquals(objA, objB, debugMode, oneLevelNestedEquals)
+}
+
 export function keepReferenceIfShallowEqual<T>(original: T, maybeNew: T) {
   if (shallowEqual(original, maybeNew)) {
     return original
@@ -67,3 +71,27 @@ export function keepReferenceIfShallowEqual<T>(original: T, maybeNew: T) {
     return maybeNew
   }
 }
+
+function keyEquality<T>(key: keyof T, a: T, b: T): boolean {
+  return a[key] === b[key]
+}
+
+export function keysEquality<T>(keys: ReadonlyArray<keyof T>, a: T, b: T): boolean {
+  return keys.every((key) => keyEquality(key, a, b))
+}
+
+type AtLeastOne<T> = [T, ...T[]]
+
+export const keysEqualityExhaustive =
+  <O extends { [key: string]: any }>() =>
+  <L1 extends AtLeastOne<keyof O>, L2 extends Array<Exclude<keyof O, L1[number]>>>(options: {
+    include: L1
+    exclude: L2 extends any
+      ? Exclude<keyof O, L1[number] | L2[number]> extends never
+        ? L2
+        : Exclude<keyof O, L1[number] | L2[number]>[]
+      : never
+  }) =>
+  (a: O, b: O): boolean => {
+    return keysEquality(options.include, a, b)
+  }

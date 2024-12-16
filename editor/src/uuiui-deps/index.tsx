@@ -1,7 +1,5 @@
-import { betterReactMemo } from '../utils/react-performance'
-export { betterReactMemo }
-
-import { Resizable as _Resizable, ResizableProps as _ResizableProps } from 're-resizable'
+import type { ResizableProps as _ResizableProps } from 're-resizable'
+import { Resizable as _Resizable } from 're-resizable'
 
 import _onClickOutside from 'react-onclickoutside'
 
@@ -10,26 +8,25 @@ import * as _utils_star from '../utils/utils'
 import * as _user from '../common/user'
 import * as _common_utils from '../core/shared/utils'
 import * as _math_utils from '../core/shared/math-utils'
+import type { ControlStatus, PropertyStatus } from '../components/inspector/common/control-status'
+import type { ControlStyles } from '../components/inspector/common/control-styles'
 import {
-  ControlStyles,
-  ControlStatus,
   isControlledStatus,
-  getControlStyles,
-  PropertyStatus,
   getControlStatusFromPropertyStatus,
   calculateMultiPropertyStatusForSelection,
   calculateMultiStringPropertyStatusForSelection,
 } from '../components/inspector/common/control-status'
+import { getControlStyles } from '../components/inspector/common/control-styles'
 import * as _react_performance from '../utils/react-performance'
 import * as CSSUtils from '../components/inspector/common/css-utils'
 import * as EitherUtils from '../core/shared/either'
 import { CSSCursor } from '../components/canvas/canvas-types'
-import {
+import type {
   OnSubmitValue,
   OnSubmitValueOrEmpty,
   OnSubmitValueOrUnknownOrEmpty,
 } from '../components/inspector/controls/control'
-import { usePropControlledState } from '../components/inspector/common/inspector-utils'
+import { usePropControlledState_DEPRECATED } from '../components/inspector/common/inspector-utils'
 import * as InspectorHooks from '../components/inspector/common/property-path-hooks'
 import * as InspectorContextMenuItems from '../components/inspector/common/context-menu-items'
 
@@ -61,7 +58,7 @@ export {
   CSSUtils,
   EitherUtils,
   CSSCursor,
-  usePropControlledState,
+  usePropControlledState_DEPRECATED,
   InspectorHooks,
   InspectorContextMenuItems,
 }

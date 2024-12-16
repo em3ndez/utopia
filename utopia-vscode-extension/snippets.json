@@ -1,0 +1,138 @@
+{
+  "Checkbox Property Control": {
+    "prefix": "Utopia.checkboxControl()",
+    "body": "Utopia.checkboxControl()"
+  },
+  "Color Property Control": {
+    "prefix": "Utopia.colorControl()",
+    "body": "Utopia.colorControl()"
+  },
+  "Expression Property Control": {
+    "prefix": "Utopia.expressionControl()",
+    "body": "Utopia.expressionControl()"
+  },
+  "Expression PopupList Property Control": {
+    "prefix": "Utopia.expressionPopupListControl()",
+    "body": [
+      "Utopia.expressionPopupListControl([",
+      "  Utopia.expression(",
+      "    ${1:'value'},",
+      "    ${2:'code as string'},",
+      "    Utopia.importStar( // optional param for adding an import",
+      "      ${3:'module'},",
+      "      ${4:'imported as'}",
+      "    ),",
+      "  ),",
+      "])"
+    ]
+  },
+  "Euler Property Control": {
+    "prefix": "Utopia.eulerControl()",
+    "body": "Utopia.eulerControl()"
+  },
+  "Matrix3 Property Control": {
+    "prefix": "Utopia.matrix3Control()",
+    "body": "Utopia.matrix3Control()"
+  },
+  "Matrix4 Property Control": {
+    "prefix": "Utopia.matrix4Control()",
+    "body": "Utopia.matrix4Control()"
+  },
+  "No Property Control": {
+    "prefix": "Utopia.noControl()",
+    "body": "Utopia.noControl()"
+  },
+  "Number Property Control": {
+    "prefix": "Utopia.numberControl()",
+    "body": "Utopia.numberControl()"
+  },
+  "PopupList Property Control": {
+    "prefix": "Utopia.popupListControl()",
+    "body": [
+      "Utopia.popupListControl([",
+      "  {",
+      "    label: ${1:'Option 1'}",
+      "    value: ${2:'value'}",
+      "  }",
+      "])"
+    ]
+  },
+  "Radio Property Control": {
+    "prefix": "Utopia.radioControl()",
+    "body": [
+      "Utopia.radioControl([",
+      "  {",
+      "    label: ${1:'Option 1'}",
+      "    value: ${2:'value'}",
+      "  }",
+      "])"
+    ]
+  },
+  "Slider Property Control": {
+    "prefix": "Utopia.sliderControl()",
+    "body": "Utopia.sliderControl(${1:0 /* min */}, ${2:10 /* max */}, ${3:1 /* step */}, ${4:'optional unit'})"
+  },
+  "String Property Control": {
+    "prefix": "Utopia.stringControl()",
+    "body": "Utopia.stringControl()"
+  },
+  "Style Property Control": {
+    "prefix": "Utopia.styleControl()",
+    "body": "Utopia.styleControl()"
+  },
+  "Vector2 Property Control": {
+    "prefix": "Utopia.vector2Control()",
+    "body": "Utopia.vector2Control()"
+  },
+  "Vector3 Property Control": {
+    "prefix": "Utopia.vector3Control()",
+    "body": "Utopia.vector3Control()"
+  },
+  "Vector4 Property Control": {
+    "prefix": "Utopia.vector4Control()",
+    "body": "Utopia.vector4Control()"
+  },
+  "Array Property Control": {
+    "prefix": "Utopia.arrayControl()",
+    "body": [
+      "Utopia.arrayControl(",
+      "  ${1:Utopia.stringControl()} // control to use for each value in the array",
+      ")"
+    ]
+  },
+  "Fixed Size Array Property Control": {
+    "prefix": "Utopia.fixedSizeArrayControl()",
+    "body": [
+      "Utopia.fixedSizeArrayControl(",
+      "  ${1:Utopia.stringControl()}, // control to use for each value in the array",
+      "  ${2:10 /* length */}",
+      ")"
+    ]
+  },
+  "Object Property Control": {
+    "prefix": "Utopia.objectControl()",
+    "body": ["Utopia.objectControl({", "  ${1:key}: ${2:Utopia.stringControl()},", "})"]
+  },
+  "Tuple Property Control": {
+    "prefix": "Utopia.tupleControl()",
+    "body": [
+      "Utopia.tupleControl([",
+      "  ${1:Utopia.stringControl()},",
+      "  ${2:Utopia.numberControl()},",
+      "])"
+    ]
+  },
+  "Union Property Control": {
+    "prefix": "Utopia.unionControl()",
+    "body": [
+      "Utopia.unionControl([",
+      "  ${1:Utopia.stringControl()}",
+      "  ${2:Utopia.numberControl()},",
+      "])"
+    ]
+  },
+  "Folder Property Control": {
+    "prefix": "Utopia.folderControl()",
+    "body": ["Utopia.folderControl({", "  ${1:prop}: ${2:Utopia.stringControl()}", "})"]
+  }
+}

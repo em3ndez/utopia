@@ -1,10 +1,13 @@
 import React from 'react'
+import { colorTheme } from './styles/theme'
 
 type IsolatorProps = {
   onAbandonIntent: () => void
 }
 
-export const Isolator: React.FunctionComponent<IsolatorProps> = (props) => {
+export const Isolator: React.FunctionComponent<React.PropsWithChildren<IsolatorProps>> = (
+  props,
+) => {
   const onAbandonIntent = props.onAbandonIntent
   React.useEffect(() => {
     const handleKeyPressed = (e: any) => {
@@ -31,11 +34,12 @@ export const Isolator: React.FunctionComponent<IsolatorProps> = (props) => {
         top: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: 'hsla(0,100%,100%, .6)',
-        backdropFilter: 'blur(1px)',
+        background: colorTheme.isolator.value,
+        transition: 'all .1s ease-in-out',
       }}
       onClick={() => props.onAbandonIntent()}
-      {...props}
-    />
+    >
+      {props.children}
+    </div>
   )
 }

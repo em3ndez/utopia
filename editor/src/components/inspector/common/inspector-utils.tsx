@@ -1,16 +1,18 @@
 import React from 'react'
-import { ElementPath } from 'src/core/shared/project-file-types'
+import type { ElementPath } from '../../../core/shared/project-file-types'
 import * as EP from '../../../core/shared/element-path'
-import { fastForEach } from '../../../core/shared/utils'
-import { useColorTheme } from '../../../uuiui'
+import { assertNever, fastForEach } from '../../../core/shared/utils'
+import { Icn, SquareButton, useColorTheme } from '../../../uuiui'
 import { useForceUpdate } from '../../editor/hook-utils'
-import { OnSubmitValue } from '../controls/control'
-import { ControlStatus } from './control-status'
-import { CSSBackgroundLayer, CSSTransformItem, CSSUnknownArrayItem } from './css-utils'
+import type { OnSubmitValue } from '../controls/control'
+import type { ControlStatus } from './control-status'
+import type { CSSBackgroundLayer, CSSTransformItem, CSSUnknownArrayItem } from './css-utils'
+import type { ControlMode } from '../sections/layout-section/layout-system-subsection/split-chained-number-input'
+import { useRefEditorState } from '../../editor/store/store-hook'
+import { wrapValue } from '../../../core/shared/math-utils'
 
 const isControlledStyling = (colorTheme: any) => ({
-  backgroundColor: colorTheme.primary.shade(5).value,
-  color: colorTheme.primary.value,
+  color: colorTheme.dynamicBlue.value,
 })
 
 const isNotControlledStyling = {
@@ -42,7 +44,10 @@ export function getIndexedSpliceArrayItem<T extends CSSArrayItem>(index: number)
 
 const forceUpdateFunction = (value: number) => value + 1
 
-export function usePropControlledState<T>(
+/**
+ * @deprecated Please use usePropControlledStateV2 instead.
+ */
+export function usePropControlledState_DEPRECATED<T>(
   propValue: T,
 ): [T, React.Dispatch<T>, React.DispatchWithoutAction] {
   const [localState, setLocalState] = React.useState<T>(propValue)
@@ -91,7 +96,7 @@ export type TransformedStateAndPropsEqualityTest<T> = (newStateValue: T, newProp
 
 export type OnSubmitValueAndUpdateLocalState<T> = (
   setStateAction: React.SetStateAction<T>,
-  transient: boolean,
+  dragState: 'dragStart' | 'drag' | 'dragEnd' | 'notDragging',
 ) => void
 
 /**
@@ -112,39 +117,50 @@ export function useModelControlledTransformableState<T>(
   onTransientSubmitValue?: OnSubmitValue<T>,
 ): [T, OnSubmitValueAndUpdateLocalState<T>] {
   const [localState, setLocalState] = React.useState<T>(propValue)
-
-  const [dirty, setDirty] = React.useState(false)
+  const [isDragging, setIsDragging] = React.useState(false)
 
   const onSubmitValueAndUpdateLocalState: OnSubmitValueAndUpdateLocalState<T> = React.useCallback(
-    (setStateAction, transient) => {
+    (setStateAction, dragState) => {
       const newValue =
         typeof setStateAction === 'function'
           ? (setStateAction as (prevState: T) => T)(localState)
           : setStateAction
-      if (transient && onTransientSubmitValue != null) {
+      if ((dragState === 'drag' || dragState === 'notDragging') && onTransientSubmitValue != null) {
         onTransientSubmitValue(newValue)
       } else {
         onSubmitValue(newValue)
       }
       setLocalState(newValue)
-      setDirty(true)
+
+      switch (dragState) {
+        case 'dragStart':
+        case 'drag':
+          setIsDragging(true)
+          break
+        case 'dragEnd':
+        case 'notDragging':
+        default:
+          setIsDragging(false)
+      }
     },
     [localState, onSubmitValue, onTransientSubmitValue],
   )
 
   React.useEffect(() => {
     const propsAndTransformedStateMatch = equalityTest(localState, propValue)
-    if (propsAndTransformedStateMatch) {
-      setDirty(false)
-    } else if (!propsAndTransformedStateMatch && !dirty) {
+    if (!propsAndTransformedStateMatch && !isDragging) {
       setLocalState(propValue)
     }
-  }, [localState, propValue, equalityTest, dirty])
+  }, [localState, propValue, equalityTest, isDragging])
   return [localState, onSubmitValueAndUpdateLocalState]
 }
 
-export const stopPropagation = (e: React.MouseEvent) => {
+export const stopPropagation = (e: { stopPropagation: () => void }) => {
   e.stopPropagation()
+}
+
+export const preventDefault = (e: { preventDefault: () => void }) => {
+  e.preventDefault()
 }
 
 export const useHandleCloseOnESCOrEnter = (closePopup: (key: 'Escape' | 'Enter') => void): void => {
@@ -168,19 +184,6 @@ export const useHandleCloseOnESCOrEnter = (closePopup: (key: 'Escape' | 'Enter')
   }, [handleCloseOnESCOrEnter])
 }
 
-export const checkerboardBackground: Pick<
-  React.CSSProperties,
-  'backgroundImage' | 'backgroundSize' | 'backgroundPosition'
-> = {
-  backgroundImage: `
-    linear-gradient(to bottom left,   #e7e7e7 25%,  transparent 25%),
-    linear-gradient(to bottom left,   transparent 75%,  #e7e7e7 75%),
-    linear-gradient(to bottom right,  #e7e7e7 25%,  transparent 25%),
-    linear-gradient(to bottom right,  transparent 75%,  #e7e7e7 75%)`,
-  backgroundSize: '12px 12px, 12px 12px, 12px 12px, 12px 12px',
-  backgroundPosition: '-9px 0px, -3px -6px, 3px 6px, -3px 0',
-}
-
 export function clampString(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.substring(0, maxLength)}…` : value
 }
@@ -194,4 +197,64 @@ export function getElementsToTarget(paths: Array<ElementPath>): Array<ElementPat
     }
   })
   return result
+}
+
+export type CycleDirection = 'forward' | 'backward'
+
+function deltaFromDirection(direction: CycleDirection): number {
+  switch (direction) {
+    case 'backward':
+      return -1
+    case 'forward':
+      return 1
+    default:
+      assertNever(direction)
+  }
+}
+
+export function useControlModeWithCycle(
+  initialValue: ControlMode,
+  modes: Array<ControlMode>,
+): [
+  ControlMode | null,
+  (mode: ControlMode | null, dir: CycleDirection) => void,
+  React.DispatchWithoutAction,
+] {
+  const [controlMode, setControlMode] = usePropControlledStateV2<ControlMode | null>(initialValue)
+
+  const cycleToNextMode = React.useCallback(
+    (mode: ControlMode | null, direction: CycleDirection) => {
+      const modeToUse = controlMode ?? mode ?? initialValue
+      const delta = deltaFromDirection(direction)
+      const index = modes.indexOf(modeToUse) + delta
+      setControlMode(modes[wrapValue(index, 0, modes.length - 1)])
+    },
+    [initialValue, modes, controlMode, setControlMode],
+  )
+
+  const resetMode = React.useCallback(() => setControlMode(null), [setControlMode])
+
+  return [controlMode, cycleToNextMode, resetMode]
+}
+
+export interface RemovePropertyButtonProps {
+  onUnsetValues: () => void
+  propertySet: boolean
+  testId: string
+}
+
+export function RemovePropertyButton({
+  testId,
+  onUnsetValues,
+  propertySet,
+}: RemovePropertyButtonProps) {
+  if (!propertySet) {
+    return null
+  }
+
+  return (
+    <SquareButton highlight onMouseDown={onUnsetValues} data-testid={testId}>
+      <Icn category='semantic' type='cross' width={12} height={12} />
+    </SquareButton>
+  )
 }

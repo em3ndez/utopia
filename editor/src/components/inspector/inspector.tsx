@@ -1,84 +1,94 @@
-import * as ObjectPath from 'object-path'
 import React from 'react'
-import { createLayoutPropertyPath } from '../../core/layout/layout-helpers-new'
-import {
-  findElementAtPath,
-  getSimpleAttributeAtPath,
-  MetadataUtils,
-} from '../../core/model/element-metadata-utils'
-import { forEachRight, isRight, right } from '../../core/shared/either'
-import {
-  isJSXElement,
-  JSXAttribute,
+import { getSimpleAttributeAtPath, MetadataUtils } from '../../core/model/element-metadata-utils'
+import { isRight, right } from '../../core/shared/either'
+import type {
+  JSExpression,
   JSXAttributes,
-  jsxAttributeValue,
   JSXElement,
   ComputedStyle,
   StyleAttributeMetadata,
-  emptyComments,
 } from '../../core/shared/element-template'
-import { getJSXAttributeAtPath } from '../../core/shared/jsx-attributes'
+import { isJSXElement, jsExpressionValue, emptyComments } from '../../core/shared/element-template'
+import { getJSXAttributesAtPath } from '../../core/shared/jsx-attribute-utils'
 import * as PP from '../../core/shared/property-path'
 import * as EP from '../../core/shared/element-path'
 import Utils from '../../utils/utils'
-import { isAspectRatioLockedNew } from '../aspect-ratio'
 import { setFocus } from '../common/actions'
-import { Alignment, Distribution, EditorAction } from '../editor/action-types'
+import type { EditorAction } from '../editor/action-types'
 import * as EditorActions from '../editor/actions/action-creators'
-import {
-  alignSelectedViews,
-  distributeSelectedViews,
-  setAspectRatioLock,
-  setProp_UNSAFE,
-  transientActions,
-  unsetProperty,
-} from '../editor/actions/action-creators'
+import { setProp_UNSAFE, transientActions, unsetProperty } from '../editor/actions/action-creators'
 
+import type { ElementsToRerender } from '../editor/store/editor-state'
 import {
-  EditorStore,
   getJSXComponentsAndImportsForPathFromState,
-  getOpenUtopiaJSXComponentsFromStateMultifile,
   isOpenFileUiJs,
+  getElementFromProjectContents,
 } from '../editor/store/editor-state'
-import { useEditorState } from '../editor/store/store-hook'
-import { InspectorCallbackContext, InspectorPropsContext } from './common/property-path-hooks'
+import { Substores, useEditorState, useRefEditorState } from '../editor/store/store-hook'
+import {
+  InspectorCallbackContext,
+  InspectorPropsContext,
+  stylePropPathMappingFn,
+} from './common/property-path-hooks'
 import { ComponentSection } from './sections/component-section/component-section'
 import { EventHandlersSection } from './sections/event-handlers-section/event-handlers-section'
-import {
-  CSSTarget,
-  cssTarget,
-  TargetSelectorLength,
-} from './sections/header-section/target-selector'
+import type { CSSTarget, TargetSelectorLength } from './sections/header-section/target-selector'
+import { cssTarget } from './sections/header-section/target-selector'
 import { ImgSection } from './sections/image-section/image-section'
-import { LayoutSection } from './sections/layout-section/layout-section'
 import { WarningSubsection } from './sections/layout-section/warning-subsection/warning-subsection'
-import { SettingsPanel } from './sections/settings-panel/inspector-settingspanel'
 import { ClassNameSubsection } from './sections/style-section/className-subsection/className-subsection'
 import { StyleSection } from './sections/style-section/style-section'
-import {
-  TargetSelectorSection,
-  TargetSelectorSectionProps,
-} from './sections/target-selector-section'
+import type { TargetSelectorSectionProps } from './sections/target-selector-section'
+import { TargetSelectorSection } from './sections/target-selector-section'
 import { usePropControlledRef_DANGEROUS } from './common/inspector-utils'
-import { arrayEquals } from '../../core/shared/utils'
 import {
-  betterReactMemo,
   useKeepReferenceEqualityIfPossible,
   useKeepShallowReferenceEquality,
 } from '../../utils/react-performance'
-import {
-  Icn,
-  useColorTheme,
-  InspectorSectionHeader,
-  UtopiaTheme,
-  FlexRow,
-  Button,
-} from '../../uuiui'
 import { getElementsToTarget } from './common/inspector-utils'
-import { ElementPath, PropertyPath } from '../../core/shared/project-file-types'
-import { when } from '../../utils/react-conditionals'
-import { createSelector } from 'reselect'
-import { isTwindEnabled } from '../../core/tailwind/tailwind'
+import type { ElementPath, PropertyPath } from '../../core/shared/project-file-types'
+import { unless, when } from '../../utils/react-conditionals'
+import {
+  isKeyboardAbsoluteStrategy,
+  isKeyboardReorderStrategy,
+  isStrategyActive,
+} from '../canvas/canvas-strategies/canvas-strategies'
+import type { StrategyState } from '../canvas/canvas-strategies/interaction-state'
+import { LowPriorityStoreProvider } from '../editor/store/store-context-providers'
+import { FlexSection } from './flex-section'
+import { useDispatch } from '../editor/store/dispatch-context'
+import { styleStringInArray } from '../../utils/common-constants'
+import { ConditionalSection } from './sections/layout-section/conditional-section'
+import { allSelectedElementsContractSelector } from './editor-contract-section'
+import { FragmentSection } from './sections/layout-section/fragment-section'
+import { RootElementIndicator } from './controls/root-element-indicator'
+import { CodeElementSection } from './sections/code-element-section'
+import {
+  maybeInvalidGroupState,
+  groupErrorToastAction,
+} from '../canvas/canvas-strategies/strategies/group-helpers'
+import { FlexCol } from 'utopia-api'
+import { SettingsPanel } from './sections/settings-panel/inspector-settingspanel'
+import { strictEvery } from '../../core/shared/array-utils'
+import { SimplifiedLayoutSubsection } from './sections/layout-section/self-layout-subsection/simplified-layout-subsection'
+import { ConstraintsSection } from './constraints-section'
+import { usePermissions } from '../editor/store/permissions'
+import { DisableControlsInSubtree } from '../../uuiui/utilities/disable-subtree'
+import {
+  getComponentDescriptorForTarget,
+  getInspectorPreferencesForTargets,
+} from '../../core/property-controls/property-controls-utils'
+import { ListSection } from './sections/layout-section/list-section'
+import { isIntrinsicElementMetadata } from '../../core/model/project-file-utils'
+import { assertNever } from '../../core/shared/utils'
+import { DataReferenceSection } from './sections/data-reference-section'
+import {
+  elementSupportsChildrenFromPropertyControls,
+  replaceFirstChildAndDeleteSiblings,
+} from '../editor/element-children'
+import { InspectorSectionHeader } from './section-header'
+import { ContainerSubsection } from './sections/style-section/container-subsection/container-subsection'
+import { isTailwindEnabled } from '../../core/tailwind/tailwind-compilation'
 
 export interface ElementPathElement {
   name?: string
@@ -90,243 +100,315 @@ export interface InspectorPartProps<T> {
   onSubmitValue: (output: T, paths: Array<PropertyPath>) => void
 }
 export interface InspectorProps extends TargetSelectorSectionProps {
+  setSelectedTarget: React.Dispatch<React.SetStateAction<string[]>>
   selectedViews: Array<ElementPath>
-  elementPath: Array<ElementPathElement>
 }
 
-interface AlignDistributeButtonProps {
-  onMouseUp: () => void
-  toolTip: string
-  iconType: string
-  disabled: boolean
+function buildNonDefaultPositionPaths(propertyTarget: Array<string>): Array<PropertyPath> {
+  return [
+    stylePropPathMappingFn('right', propertyTarget),
+    stylePropPathMappingFn('bottom', propertyTarget),
+  ]
 }
 
-const AlignDistributeButton = betterReactMemo<AlignDistributeButtonProps>(
-  'AlignDistributeButton',
-  (props: AlignDistributeButtonProps) => {
-    return (
-      <Button disabled={props.disabled} onMouseUp={props.onMouseUp}>
-        <Icn
-          tooltipText={props.toolTip}
-          category='layout/commands'
-          type={props.iconType}
-          width={16}
-          height={16}
-        />
-      </Button>
-    )
-  },
-)
-AlignDistributeButton.displayName = 'AlignDistributeButton'
+export function shouldUpdateLowPriorityUI(
+  strategyState: StrategyState,
+  elementsToRerender: ElementsToRerender,
+): boolean {
+  return (
+    (!isStrategyActive(strategyState) && elementsToRerender === 'rerender-all-elements') ||
+    isKeyboardAbsoluteStrategy(strategyState.currentStrategy) ||
+    isKeyboardReorderStrategy(strategyState.currentStrategy)
+  )
+}
 
-const AlignmentButtons = betterReactMemo(
-  'AlignmentButtons',
-  (props: { numberOfTargets: number }) => {
-    const dispatch = useEditorState((store) => store.dispatch, 'AlignmentButtons dispatch')
-    const alignSelected = React.useCallback(
-      (alignment: Alignment) => {
-        dispatch([alignSelectedViews(alignment)], 'everyone')
-      },
-      [dispatch],
-    )
+export const InspectorSectionsContainerTestID = 'inspector-sections-container'
 
-    const distributeSelected = React.useCallback(
-      (distribution: Distribution) => {
-        dispatch([distributeSelectedViews(distribution)], 'everyone')
-      },
-      [dispatch],
-    )
-    const disableAlign = props.numberOfTargets === 0
-    const disableDistribute = props.numberOfTargets < 3
-    const multipleTargets = props.numberOfTargets > 1
+export const Inspector = React.memo<InspectorProps>((props: InspectorProps) => {
+  const { selectedViews, setSelectedTarget, targets } = props
 
-    const alignLeft = React.useCallback(() => alignSelected('left'), [alignSelected])
-    const alignHCenter = React.useCallback(() => alignSelected('hcenter'), [alignSelected])
-    const alignRight = React.useCallback(() => alignSelected('right'), [alignSelected])
-    const alignTop = React.useCallback(() => alignSelected('top'), [alignSelected])
-    const alignVCenter = React.useCallback(() => alignSelected('vcenter'), [alignSelected])
-    const alignBottom = React.useCallback(() => alignSelected('bottom'), [alignSelected])
-    const distributeHorizontal = React.useCallback(() => distributeSelected('horizontal'), [
-      distributeSelected,
-    ])
-    const distributeVertical = React.useCallback(() => distributeSelected('vertical'), [
-      distributeSelected,
-    ])
-    const colorTheme = useColorTheme()
-    return (
-      <FlexRow
-        style={{
-          justifyContent: 'space-around',
-          height: UtopiaTheme.layout.rowHeight.normal,
-          position: 'sticky',
-          top: 0,
-          zIndex: 1,
-          background: colorTheme.inspectorBackground.value,
-        }}
-      >
-        <AlignDistributeButton
-          onMouseUp={alignLeft}
-          toolTip={`Align to left of ${multipleTargets ? 'selection' : 'parent'}`}
-          iconType='alignLeft'
-          disabled={disableAlign}
-        />
-        <AlignDistributeButton
-          onMouseUp={alignHCenter}
-          toolTip={`Align to horizontal center of ${multipleTargets ? 'selection' : 'parent'}`}
-          iconType='alignHorizontalCenter'
-          disabled={disableAlign}
-        />
-        <AlignDistributeButton
-          onMouseUp={alignRight}
-          toolTip={`Align to right of ${multipleTargets ? 'selection' : 'parent'}`}
-          iconType='alignRight'
-          disabled={disableAlign}
-        />
-        <AlignDistributeButton
-          onMouseUp={alignTop}
-          toolTip={`Align to top of ${multipleTargets ? 'selection' : 'parent'}`}
-          iconType='alignTop'
-          disabled={disableAlign}
-        />
-        <AlignDistributeButton
-          onMouseUp={alignVCenter}
-          toolTip={`Align to vertical center of ${multipleTargets ? 'selection' : 'parent'}`}
-          iconType='alignVerticalCenter'
-          disabled={disableAlign}
-        />
-        <AlignDistributeButton
-          onMouseUp={alignBottom}
-          toolTip={`Align to bottom of ${multipleTargets ? 'selection' : 'parent'}`}
-          iconType='alignBottom'
-          disabled={disableAlign}
-        />
-        <AlignDistributeButton
-          onMouseUp={distributeHorizontal}
-          toolTip={`Distribute horizontally ↔`}
-          iconType='distributeHorizontal'
-          disabled={disableDistribute}
-        />
-        <AlignDistributeButton
-          onMouseUp={distributeVertical}
-          toolTip={`Distribute vertically ↕️`}
-          iconType='distributeVertical'
-          disabled={disableDistribute}
-        />
-      </FlexRow>
-    )
-  },
-)
-AlignmentButtons.displayName = 'AlignmentButtons'
+  const isCodeElement = useEditorState(
+    Substores.metadata,
+    (store) =>
+      store.editor.selectedViews.length > 0 &&
+      store.editor.selectedViews.every(
+        (path) =>
+          MetadataUtils.isConditional(path, store.editor.jsxMetadata) ||
+          MetadataUtils.isExpressionOtherJavascript(path, store.editor.jsxMetadata) ||
+          MetadataUtils.isJSXMapExpression(path, store.editor.jsxMetadata),
+      ),
+    'Inspector isCodeElement',
+  )
 
-const nonDefaultPositionPaths: Array<PropertyPath> = [
-  createLayoutPropertyPath('PinnedRight'),
-  createLayoutPropertyPath('PinnedBottom'),
-]
+  const isDataReference = useEditorState(
+    Substores.projectContentsAndMetadata,
+    (store) =>
+      store.editor.selectedViews.length > 0 &&
+      store.editor.selectedViews.every((path) =>
+        MetadataUtils.isElementDataReference(
+          getElementFromProjectContents(path, store.editor.projectContents),
+        ),
+      ),
+    'Inspector isDataReference',
+  )
 
-export const Inspector = betterReactMemo<InspectorProps>('Inspector', (props: InspectorProps) => {
-  const colorTheme = useColorTheme()
-  const { selectedViews } = props
-  const {
-    dispatch,
-    focusedPanel,
-    anyComponents,
-    anyUnknownElements,
-    hasNonDefaultPositionAttributes,
-    aspectRatioLocked,
-  } = useEditorState((store) => {
-    const rootMetadata = store.editor.jsxMetadata
-    let anyComponentsInner: boolean = false
-    let anyUnknownElementsInner: boolean = false
-    let hasNonDefaultPositionAttributesInner: boolean = false
-    let aspectRatioLockedInner: boolean = false
-    Utils.fastForEach(selectedViews, (view) => {
-      const { components: rootComponents } = getJSXComponentsAndImportsForPathFromState(
-        view,
-        store.editor,
-        store.derived,
-      )
-      anyComponentsInner =
-        anyComponentsInner || MetadataUtils.isComponentInstance(view, rootComponents)
-      const possibleElement = MetadataUtils.findElementByElementPath(rootMetadata, view)
-      if (possibleElement != null) {
-        // Slightly coarse in definition, but element metadata is in a weird little world of
-        // its own compared to the props.
-        aspectRatioLockedInner = aspectRatioLockedInner || isAspectRatioLockedNew(possibleElement)
+  const multiselectedContract = useEditorState(
+    Substores.metadata,
+    allSelectedElementsContractSelector,
+    'Inspector multiselectedContract',
+  )
 
-        const elementOriginType = MetadataUtils.getElementOriginType(rootComponents, view)
-        if (elementOriginType === 'unknown-element') {
-          anyUnknownElementsInner = true
-        }
-        if (isRight(possibleElement.element)) {
-          const elem = possibleElement.element.value
-          if (isJSXElement(elem)) {
-            if (!hasNonDefaultPositionAttributesInner) {
-              for (const nonDefaultPositionPath of nonDefaultPositionPaths) {
-                const attributeAtPath = getJSXAttributeAtPath(elem.props, nonDefaultPositionPath)
-                if (attributeAtPath.attribute.type !== 'ATTRIBUTE_NOT_FOUND') {
-                  hasNonDefaultPositionAttributesInner = true
+  React.useEffect(() => {
+    setSelectedTarget(targets[0].path)
+  }, [selectedViews, targets, setSelectedTarget])
+
+  const dispatch = useDispatch()
+  const { focusedPanel, anyComponents } = useEditorState(
+    Substores.fullStore,
+    (store) => {
+      const rootMetadata = store.editor.jsxMetadata
+      let anyComponentsInner: boolean = false
+      let hasNonDefaultPositionAttributesInner: boolean = false
+
+      Utils.fastForEach(selectedViews, (view) => {
+        const { components: rootComponents } = getJSXComponentsAndImportsForPathFromState(
+          view,
+          store.editor,
+        )
+        anyComponentsInner =
+          anyComponentsInner || MetadataUtils.isComponentInstance(view, rootComponents)
+        const possibleElement = MetadataUtils.findElementByElementPath(rootMetadata, view)
+        const elementProps = store.editor.allElementProps[EP.toString(view)]
+        if (possibleElement != null && elementProps != null) {
+          // Slightly coarse in definition, but element metadata is in a weird little world of
+          // its own compared to the props.
+          if (isRight(possibleElement.element)) {
+            const elem = possibleElement.element.value
+            if (isJSXElement(elem)) {
+              if (!hasNonDefaultPositionAttributesInner) {
+                for (const nonDefaultPositionPath of buildNonDefaultPositionPaths(
+                  styleStringInArray,
+                )) {
+                  const attributeAtPath = getJSXAttributesAtPath(elem.props, nonDefaultPositionPath)
+                  if (attributeAtPath.attribute.type !== 'ATTRIBUTE_NOT_FOUND') {
+                    hasNonDefaultPositionAttributesInner = true
+                  }
                 }
               }
             }
           }
         }
+      })
+      return {
+        focusedPanel: store.editor.focusedPanel,
+        anyComponents: anyComponentsInner,
+        hasNonDefaultPositionAttributes: hasNonDefaultPositionAttributesInner,
       }
-    })
-    return {
-      dispatch: store.dispatch,
-      focusedPanel: store.editor.focusedPanel,
-      anyComponents: anyComponentsInner,
-      anyUnknownElements: anyUnknownElementsInner,
-      hasNonDefaultPositionAttributes: hasNonDefaultPositionAttributesInner,
-      aspectRatioLocked: aspectRatioLockedInner,
-    }
-  }, 'Inspector')
+    },
+    'Inspector',
+  )
 
   const onFocus = React.useCallback(
     (event: React.FocusEvent<HTMLElement>) => {
       if (focusedPanel !== 'inspector') {
-        dispatch([setFocus('inspector')], 'inspector')
+        queueMicrotask(() => {
+          dispatch([setFocus('inspector')], 'inspector')
+        })
       }
     },
     [dispatch, focusedPanel],
   )
 
-  const toggleAspectRatioLock = React.useCallback(() => {
-    const actions = selectedViews.map((path) => {
-      return setAspectRatioLock(path, !aspectRatioLocked)
-    })
-    dispatch(actions, 'everyone')
-  }, [dispatch, selectedViews, aspectRatioLocked])
+  const rootElementIsSelected = useEditorState(
+    Substores.selectedViews,
+    (store) => store.editor.selectedViews.some(EP.isRootElementOfInstance),
+    'RootElementIndicator aRootElementIsSelected',
+  )
+
+  const anyKnownElements = useEditorState(
+    Substores.projectContentsAndMetadata,
+    (store) => {
+      return strictEvery(store.editor.selectedViews, (view) => {
+        return (
+          MetadataUtils.findElementByElementPath(store.editor.jsxMetadata, view) != null ||
+          MetadataUtils.isElementDataReference(
+            getElementFromProjectContents(view, store.editor.projectContents),
+          )
+        )
+      })
+    },
+    'Inspector anyKnownElements',
+  )
+
+  const canEdit = usePermissions().edit
+
+  const inspectorPreferences = useEditorState(
+    Substores.propertyControlsInfo,
+    (store) =>
+      getInspectorPreferencesForTargets(
+        store.editor.selectedViews,
+        store.editor.propertyControlsInfo,
+        store.editor.projectContents,
+      ),
+    'Inspector inspectorPreferences',
+  )
+
+  const supportsChildren = useEditorState(
+    Substores.metadataAndPropertyControlsInfo,
+    (store) => {
+      return store.editor.selectedViews.every((view) =>
+        elementSupportsChildrenFromPropertyControls(
+          store.editor.jsxMetadata,
+          store.editor.propertyControlsInfo,
+          view,
+        ),
+      )
+    },
+    'Inspector supportChildren',
+  )
+
+  const {
+    value: styleSectionOpen,
+    toggle: toggleStyleSection,
+    set: setStyleSectionOpen,
+  } = useBoolean(true)
+  const { value: advancedSectionOpen, toggle: toggleAdvancedSection } = useBoolean(false)
+
+  const shouldExpandStyleSection = useShouldExpandStyleSection()
+
+  React.useEffect(() => {
+    setStyleSectionOpen(shouldExpandStyleSection)
+  }, [setStyleSectionOpen, shouldExpandStyleSection])
+
+  const shouldHideInspectorSections = useShouldHideInspectorSections()
+
+  const shouldShowStyleSectionContents = styleSectionOpen && !shouldHideInspectorSections
+  const shouldShowAdvancedSectionContents = advancedSectionOpen && !shouldHideInspectorSections
+
+  const shouldShowClassNameSubsection =
+    isTailwindEnabled() && inspectorPreferences.includes('visual')
+  const shouldShowTargetSelectorSection = canEdit && inspectorPreferences.includes('visual')
+  const shouldShowFlexSection =
+    multiselectedContract === 'frame' &&
+    inspectorPreferences.includes('layout-system') &&
+    supportsChildren
+
+  const shouldShowSimplifiedLayoutSection = inspectorPreferences.includes('layout')
+
+  const shouldShowContainerSection =
+    selectedViews.length > 0 && inspectorPreferences.includes('layout')
 
   function renderInspectorContents() {
-    if (props.elementPath.length == 0 || anyUnknownElements) {
-      return <SettingsPanel />
-    } else {
-      return (
-        <React.Fragment>
-          <AlignmentButtons numberOfTargets={selectedViews.length} />
-          {when(isTwindEnabled(), <ClassNameSubsection />)}
-          {anyComponents ? <ComponentSection isScene={false} /> : null}
-          <LayoutSection
-            hasNonDefaultPositionAttributes={hasNonDefaultPositionAttributes}
-            aspectRatioLocked={aspectRatioLocked}
-            toggleAspectRatioLock={toggleAspectRatioLock}
-          />
-          <StyleSection />
-          <WarningSubsection />
-          <ImgSection />
-          <TargetSelectorSection
-            targets={props.targets}
-            selectedTargetPath={props.selectedTargetPath}
-            onSelectTarget={props.onSelectTarget}
-            onStyleSelectorRename={props.onStyleSelectorRename}
-            onStyleSelectorDelete={props.onStyleSelectorDelete}
-            onStyleSelectorInsert={props.onStyleSelectorInsert}
-          />
-          <EventHandlersSection />
-        </React.Fragment>
-      )
-    }
+    return (
+      <React.Fragment>
+        <div
+          style={{
+            display: anyKnownElements ? 'none' : undefined,
+          }}
+        >
+          <SettingsPanel />
+        </div>
+        <div
+          style={{
+            display: anyKnownElements ? undefined : 'none',
+            height: '100%',
+          }}
+          data-testid={InspectorSectionsContainerTestID}
+        >
+          <DisableControlsInSubtree disable={!canEdit}>
+            {when(isDataReference, <DataReferenceSection paths={selectedViews} />)}
+            {when(
+              isCodeElement,
+              <>
+                <CodeElementSection paths={selectedViews} />
+                <ConditionalSection paths={selectedViews} />
+                <ListSection paths={selectedViews} />
+              </>,
+            )}
+            {unless(
+              isCodeElement || isDataReference,
+              <FlexCol
+                data-testid='inspector-column'
+                css={{
+                  overflowY: 'scroll',
+                  width: '100%',
+                  height: '100%',
+                  position: 'relative',
+                  paddingBottom: 50,
+                }}
+              >
+                {when(rootElementIsSelected, <RootElementIndicator />)}
+                {anyComponents || multiselectedContract === 'fragment' ? (
+                  <ComponentSection isScene={false} />
+                ) : null}
+
+                {unless(
+                  shouldHideInspectorSections,
+                  <InspectorSectionHeader
+                    title='Styles'
+                    toggle={toggleStyleSection}
+                    open={styleSectionOpen}
+                    uppercase={true}
+                  />,
+                )}
+                {when(
+                  shouldShowStyleSectionContents,
+                  <>
+                    {when(multiselectedContract === 'fragment', <FragmentSection />)}
+                    {when(
+                      multiselectedContract !== 'fragment' && shouldShowSimplifiedLayoutSection,
+                      // Position and Sizing sections are shown if Frame or Group is selected
+                      <>
+                        <SimplifiedLayoutSubsection />
+                        {when(shouldShowContainerSection, <ContainerSubsection />)}
+                        <ConstraintsSection />
+                      </>,
+                    )}
+                    {when(shouldShowFlexSection, <FlexSection />)}
+                    {when(
+                      multiselectedContract === 'frame' || multiselectedContract === 'wrapper-div',
+                      // All the regular inspector sections are only visible if frames are selected
+                      <>
+                        <StyleSection />
+                        <WarningSubsection />
+                        <ImgSection />
+                        <EventHandlersSection />
+                      </>,
+                    )}
+                  </>,
+                )}
+                {unless(
+                  shouldHideInspectorSections,
+                  <InspectorSectionHeader
+                    title='Advanced'
+                    toggle={toggleAdvancedSection}
+                    open={advancedSectionOpen}
+                    uppercase={true}
+                  />,
+                )}
+                {when(
+                  shouldShowAdvancedSectionContents,
+                  <>
+                    {when(shouldShowClassNameSubsection, <ClassNameSubsection />)}
+                    {when(
+                      shouldShowTargetSelectorSection,
+                      <TargetSelectorSection
+                        targets={props.targets}
+                        selectedTargetPath={props.selectedTargetPath}
+                        onSelectTarget={props.onSelectTarget}
+                        onStyleSelectorRename={props.onStyleSelectorRename}
+                        onStyleSelectorDelete={props.onStyleSelectorDelete}
+                        onStyleSelectorInsert={props.onStyleSelectorInsert}
+                      />,
+                    )}
+                  </>,
+                )}
+              </FlexCol>,
+            )}
+          </DisableControlsInSubtree>
+        </div>
+      </React.Fragment>
+    )
   }
 
   return (
@@ -335,7 +417,7 @@ export const Inspector = betterReactMemo<InspectorProps>('Inspector', (props: In
       style={{
         width: '100%',
         position: 'relative',
-        color: colorTheme.neutralForeground.value,
+        height: '100%',
       }}
       onFocus={onFocus}
     >
@@ -345,12 +427,24 @@ export const Inspector = betterReactMemo<InspectorProps>('Inspector', (props: In
 })
 Inspector.displayName = 'Inspector'
 
-const DefaultStyleTargets: Array<CSSTarget> = [cssTarget(['style'], 0), cssTarget(['css'], 0)]
+const DefaultStyleTargets: Array<CSSTarget> = [
+  cssTarget(styleStringInArray, 0),
+  cssTarget(['css'], 0),
+]
 
-export const InspectorEntryPoint: React.FunctionComponent = betterReactMemo(
-  'InspectorEntryPoint',
+export const InspectorEntryPoint: React.FunctionComponent<React.PropsWithChildren<unknown>> =
+  React.memo(() => {
+    return (
+      <LowPriorityStoreProvider>
+        <MultiselectInspector />
+      </LowPriorityStoreProvider>
+    )
+  })
+
+const MultiselectInspector: React.FunctionComponent<React.PropsWithChildren<unknown>> = React.memo(
   () => {
     const selectedViews = useEditorState(
+      Substores.selectedViews,
       (store) => store.editor.selectedViews,
       'InspectorEntryPoint selectedViews',
     )
@@ -364,17 +458,56 @@ export const InspectorEntryPoint: React.FunctionComponent = betterReactMemo(
   },
 )
 
-export const SingleInspectorEntryPoint: React.FunctionComponent<{
-  selectedViews: Array<ElementPath>
-}> = betterReactMemo('SingleInspectorEntryPoint', (props) => {
-  const { selectedViews } = props
-  const { dispatch, jsxMetadata, isUIJSFile } = useEditorState((store) => {
-    return {
-      dispatch: store.dispatch,
-      jsxMetadata: store.editor.jsxMetadata,
-      isUIJSFile: isOpenFileUiJs(store.editor),
+function updateTargets(localJSXElement: JSXElement): Array<CSSTarget> {
+  let localTargets: Array<CSSTarget> = []
+  function recursivelyDiscoverStyleTargets(styleObject: any, localPath: Array<string>): void {
+    if (typeof styleObject === 'object' && styleObject != null) {
+      let selectorLength: TargetSelectorLength = 0
+      const keys = Object.keys(styleObject)
+      keys.forEach((key) => {
+        if (typeof styleObject[key] === 'object') {
+          recursivelyDiscoverStyleTargets((styleObject as any)[key], [...localPath, key])
+        } else if (typeof selectorLength === 'number') {
+          selectorLength = selectorLength + 1
+        }
+      })
+      localTargets.push(cssTarget(localPath, selectorLength))
     }
-  }, 'SingleInspectorEntryPoint')
+  }
+  let defaults = [...DefaultStyleTargets]
+  defaults.reverse().forEach((defaultTarget) => {
+    const styleObject = getSimpleAttributeAtPath(
+      right(localJSXElement.props),
+      PP.createFromArray(defaultTarget.path),
+    )
+    if (isRight(styleObject) && styleObject.value instanceof Object) {
+      recursivelyDiscoverStyleTargets(styleObject.value, defaultTarget.path)
+    } else {
+      // todo count keys
+      localTargets.push(defaultTarget)
+    }
+  })
+  localTargets.reverse()
+  return localTargets
+}
+
+export const SingleInspectorEntryPoint: React.FunctionComponent<
+  React.PropsWithChildren<{
+    selectedViews: Array<ElementPath>
+  }>
+> = React.memo((props) => {
+  const { selectedViews } = props
+  const dispatch = useDispatch()
+  const { jsxMetadata, isUIJSFile } = useEditorState(
+    Substores.fullStore,
+    (store) => {
+      return {
+        jsxMetadata: store.editor.jsxMetadata,
+        isUIJSFile: isOpenFileUiJs(store.editor),
+      }
+    },
+    'SingleInspectorEntryPoint',
+  )
 
   let targets: Array<CSSTarget> = [...DefaultStyleTargets]
 
@@ -383,41 +516,6 @@ export const SingleInspectorEntryPoint: React.FunctionComponent<{
     if (elementMetadata != null) {
       if (isRight(elementMetadata.element) && isJSXElement(elementMetadata.element.value)) {
         const jsxElement = elementMetadata.element.value
-        function updateTargets(localJSXElement: JSXElement): Array<CSSTarget> {
-          let localTargets: Array<CSSTarget> = []
-          function recursivelyDiscoverStyleTargets(
-            styleObject: any,
-            localPath: Array<string>,
-          ): void {
-            if (typeof styleObject === 'object' && styleObject != null) {
-              let selectorLength: TargetSelectorLength = 0
-              const keys = Object.keys(styleObject)
-              keys.forEach((key) => {
-                if (typeof styleObject[key] === 'object') {
-                  recursivelyDiscoverStyleTargets((styleObject as any)[key], [...localPath, key])
-                } else if (typeof selectorLength === 'number') {
-                  selectorLength = selectorLength + 1
-                }
-              })
-              localTargets.push(cssTarget(localPath, selectorLength))
-            }
-          }
-          let defaults = [...DefaultStyleTargets]
-          defaults.reverse().map((defaultTarget) => {
-            const styleObject = getSimpleAttributeAtPath(
-              right(localJSXElement.props),
-              PP.create(defaultTarget.path),
-            )
-            if (isRight(styleObject) && styleObject.value instanceof Object) {
-              recursivelyDiscoverStyleTargets(styleObject.value, defaultTarget.path)
-            } else {
-              // todo count keys
-              localTargets.push(defaultTarget)
-            }
-          })
-          localTargets.reverse()
-          return localTargets
-        }
         targets = updateTargets(jsxElement)
       }
     }
@@ -430,26 +528,6 @@ export const SingleInspectorEntryPoint: React.FunctionComponent<{
 
   const refElementsToTargetForUpdates = usePropControlledRef_DANGEROUS(
     getElementsToTarget(selectedViews),
-  )
-
-  const elementPath = useKeepReferenceEqualityIfPossible(
-    React.useMemo(() => {
-      if (selectedViews.length === 0) {
-        return []
-      }
-
-      let elements: Array<ElementPathElement> = []
-      Utils.fastForEach(EP.allPathsForLastPart(selectedViews[0]), (path) => {
-        const component = MetadataUtils.findElementByElementPath(jsxMetadata, path)
-        if (component != null) {
-          elements.push({
-            name: MetadataUtils.getElementLabel(path, jsxMetadata),
-            path: path,
-          })
-        }
-      })
-      return elements
-    }, [selectedViews, jsxMetadata]),
   )
 
   // Memoized Callbacks
@@ -481,7 +559,7 @@ export const SingleInspectorEntryPoint: React.FunctionComponent<{
 
   const onStyleSelectorDelete = React.useCallback(
     (deleteTarget: CSSTarget) => {
-      const path = PP.create(deleteTarget.path)
+      const path = PP.createFromArray(deleteTarget.path)
       const actions = Utils.flatMapArray(
         (elem) => [EditorActions.unsetProperty(elem, path)],
         refElementsToTargetForUpdates.current,
@@ -492,11 +570,11 @@ export const SingleInspectorEntryPoint: React.FunctionComponent<{
   )
 
   const onStyleSelectorInsert = React.useCallback(
-    (parent: CSSTarget, label: string) => {
-      const newPath = [...parent.path, label]
-      const newPropertyPath = PP.create(newPath)
+    (parent: CSSTarget | undefined, label: string) => {
+      const newPath = [...(parent?.path ?? []), label]
+      const newPropertyPath = PP.createFromArray(newPath)
       const actions: Array<EditorAction> = refElementsToTargetForUpdates.current.map((elem) =>
-        EditorActions.setProp_UNSAFE(elem, newPropertyPath, jsxAttributeValue({}, emptyComments)),
+        EditorActions.setProp_UNSAFE(elem, newPropertyPath, jsExpressionValue({}, emptyComments)),
       )
       dispatch(actions, 'everyone')
       setSelectedTarget(newPath)
@@ -510,7 +588,7 @@ export const SingleInspectorEntryPoint: React.FunctionComponent<{
         selectedViews={selectedViews}
         targets={targetsReferentiallyStable}
         selectedTargetPath={selectedTarget}
-        elementPath={elementPath}
+        setSelectedTarget={setSelectedTarget}
         onSelectTarget={onSelectTarget}
         onStyleSelectorRename={onStyleSelectorRename}
         onStyleSelectorDelete={onStyleSelectorDelete}
@@ -522,31 +600,25 @@ export const SingleInspectorEntryPoint: React.FunctionComponent<{
   return inspector
 })
 
-const rootComponentsSelector = createSelector(
-  (store: EditorStore) => store.editor.projectContents,
-  (store: EditorStore) => store.editor.codeResultCache.curriedResolveFn,
-  (store: EditorStore) => store.editor.canvas.openFile?.filename ?? null,
-  (projectContents, curriedResolveFn, openFilePath) => {
-    const resolveFn = curriedResolveFn(projectContents)
-    return getOpenUtopiaJSXComponentsFromStateMultifile(projectContents, resolveFn, openFilePath)
-  },
-)
-
-export const InspectorContextProvider = betterReactMemo<{
+export const InspectorContextProvider = React.memo<{
   selectedViews: Array<ElementPath>
   targetPath: Array<string>
   children: React.ReactNode
-}>('InspectorContextProvider', (props) => {
+}>((props) => {
   const { selectedViews } = props
-  const { dispatch, jsxMetadata } = useEditorState((store) => {
-    return {
-      dispatch: store.dispatch,
-      jsxMetadata: store.editor.jsxMetadata,
-    }
-  }, 'InspectorContextProvider')
+  const dispatch = useDispatch()
+  const metadataRef = useRefEditorState((store) => store.editor.jsxMetadata)
 
-  const rootComponents = useKeepReferenceEqualityIfPossible(
-    useEditorState(rootComponentsSelector, 'InspectorContextProvider rootComponents'),
+  const { jsxMetadata, allElementProps, projectContents } = useEditorState(
+    Substores.projectContentsAndMetadata,
+    (store) => {
+      return {
+        jsxMetadata: store.editor.jsxMetadata,
+        allElementProps: store.editor.allElementProps,
+        projectContents: store.editor.projectContents,
+      }
+    },
+    'InspectorContextProvider',
   )
 
   let newEditedMultiSelectedProps: JSXAttributes[] = []
@@ -557,7 +629,7 @@ export const InspectorContextProvider = betterReactMemo<{
   Utils.fastForEach(selectedViews, (path) => {
     const elementMetadata = MetadataUtils.findElementByElementPath(jsxMetadata, path)
     if (elementMetadata != null) {
-      if (elementMetadata.computedStyle == null || elementMetadata.attributeMetadatada == null) {
+      if (elementMetadata.computedStyle == null || elementMetadata.attributeMetadata == null) {
         /**
          * This early return will cause the inspector to render with empty fields.
          * Because the computedStyle is only used in some cases for some controls,
@@ -565,7 +637,7 @@ export const InspectorContextProvider = betterReactMemo<{
          */
         return
       }
-      const jsxElement = findElementAtPath(path, rootComponents)
+      const jsxElement = getElementFromProjectContents(path, projectContents)
       if (jsxElement == null) {
         /**
          * This early return will cause the inspector to render with empty fields.
@@ -576,9 +648,9 @@ export const InspectorContextProvider = betterReactMemo<{
 
       const jsxAttributes = isJSXElement(jsxElement) ? jsxElement.props : []
       newEditedMultiSelectedProps.push(jsxAttributes)
-      newSpiedProps.push(elementMetadata.props)
+      newSpiedProps.push(allElementProps[EP.toString(path)] ?? {})
       newComputedStyles.push(elementMetadata.computedStyle)
-      newAttributeMetadatas.push(elementMetadata.attributeMetadatada)
+      newAttributeMetadatas.push(elementMetadata.attributeMetadata)
     }
   })
 
@@ -592,21 +664,99 @@ export const InspectorContextProvider = betterReactMemo<{
     getElementsToTarget(selectedViews),
   )
 
+  const jsxMetadataRef = useRefEditorState((store) => store.editor.jsxMetadata)
+
   const onSubmitValueForHooks = React.useCallback(
-    (newValue: JSXAttribute, path: PropertyPath, transient: boolean) => {
+    (newValue: JSExpression, path: PropertyPath, transient: boolean) => {
       const actionsArray = [
-        ...refElementsToTargetForUpdates.current.map((elem) => {
-          return setProp_UNSAFE(elem, path, newValue)
+        ...refElementsToTargetForUpdates.current.flatMap((elem): EditorAction[] => {
+          // if the target is the children prop, replace the elements instead
+          if (path.propertyElements[0] === 'children') {
+            const element = MetadataUtils.findElementByElementPath(jsxMetadataRef.current, elem)
+            const children =
+              element != null && isRight(element.element) && isJSXElement(element.element.value)
+                ? element.element.value.children
+                : []
+            return replaceFirstChildAndDeleteSiblings(elem, children, newValue)
+          }
+          return [setProp_UNSAFE(elem, path, newValue)]
         }),
       ]
-      const actions: EditorAction[] = transient ? [transientActions(actionsArray)] : actionsArray
+      const actions: EditorAction[] = transient
+        ? [transientActions(actionsArray, refElementsToTargetForUpdates.current)]
+        : actionsArray
       dispatch(actions, 'everyone')
     },
-    [dispatch, refElementsToTargetForUpdates],
+    [dispatch, refElementsToTargetForUpdates, jsxMetadataRef],
   )
 
   const onUnsetValue = React.useCallback(
     (property: PropertyPath | Array<PropertyPath>, transient: boolean) => {
+      let actionsArray: Array<EditorAction> = []
+
+      const propTop = PP.create('style', 'top')
+      const propBottom = PP.create('style', 'bottom')
+      const propLeft = PP.create('style', 'left')
+      const propRight = PP.create('style', 'right')
+
+      const invalidGroupState = maybeInvalidGroupState(
+        refElementsToTargetForUpdates.current,
+        metadataRef.current,
+        {
+          onGroup: () => null,
+          onGroupChild: () => {
+            return Array.isArray(property) &&
+              property.some(
+                (p) =>
+                  PP.pathsEqual(p, propTop) ||
+                  PP.pathsEqual(p, propBottom) ||
+                  PP.pathsEqual(p, propLeft) ||
+                  PP.pathsEqual(p, propRight),
+              )
+              ? 'child-has-missing-pins'
+              : null
+          },
+        },
+      )
+      if (invalidGroupState != null) {
+        dispatch([groupErrorToastAction(invalidGroupState)])
+        return
+      }
+
+      Utils.fastForEach(refElementsToTargetForUpdates.current, (elem) => {
+        if (Array.isArray(property)) {
+          Utils.fastForEach(property, (p) => {
+            actionsArray.push(unsetProperty(elem, p))
+          })
+        } else {
+          actionsArray.push(unsetProperty(elem, property))
+        }
+      })
+
+      const actions: EditorAction[] = transient
+        ? [transientActions(actionsArray, refElementsToTargetForUpdates.current)]
+        : actionsArray
+      dispatch(actions, 'everyone')
+    },
+    [dispatch, refElementsToTargetForUpdates, metadataRef],
+  )
+
+  const collectActionsToSubmitValue = React.useCallback(
+    (path: PropertyPath, transient: boolean, newValuePrinter: () => any): Array<EditorAction> => {
+      const actionsArray = [
+        ...refElementsToTargetForUpdates.current.map((elem) => {
+          return setProp_UNSAFE(elem, path, newValuePrinter())
+        }),
+      ]
+      return transient
+        ? [transientActions(actionsArray, refElementsToTargetForUpdates.current)]
+        : actionsArray
+    },
+    [refElementsToTargetForUpdates],
+  )
+
+  const collectActionsToUnsetValue = React.useCallback(
+    (property: PropertyPath | Array<PropertyPath>, transient: boolean): Array<EditorAction> => {
       let actionsArray: Array<EditorAction> = []
       Utils.fastForEach(refElementsToTargetForUpdates.current, (elem) => {
         if (Array.isArray(property)) {
@@ -618,15 +768,18 @@ export const InspectorContextProvider = betterReactMemo<{
         }
       })
 
-      const actions: EditorAction[] = transient ? [transientActions(actionsArray)] : actionsArray
-      dispatch(actions, 'everyone')
+      return transient
+        ? [transientActions(actionsArray, refElementsToTargetForUpdates.current)]
+        : actionsArray
     },
-    [dispatch, refElementsToTargetForUpdates],
+    [refElementsToTargetForUpdates],
   )
 
   const callbackContextValueMemoized = useKeepShallowReferenceEquality({
     onSubmitValue: onSubmitValueForHooks,
     onUnsetValue: onUnsetValue,
+    collectActionsToSubmitValue: collectActionsToSubmitValue,
+    collectActionsToUnsetValue: collectActionsToUnsetValue,
     selectedViewsRef: selectedViewsRef,
   })
 
@@ -647,3 +800,85 @@ export const InspectorContextProvider = betterReactMemo<{
     </InspectorCallbackContext.Provider>
   )
 })
+
+function useBoolean(starting: boolean): {
+  value: boolean
+  set: (_: boolean) => void
+  toggle: () => void
+} {
+  const [value, set] = React.useState(starting)
+  const toggle = React.useCallback(() => set((v) => !v), [])
+  return { value, set, toggle }
+}
+
+function useShouldExpandStyleSection(): boolean {
+  const shouldExpandFromElementOrComponent = useEditorState(
+    Substores.metadata,
+    (store) =>
+      store.editor.selectedViews.every((target) => {
+        const instance = MetadataUtils.findElementByElementPath(store.editor.jsxMetadata, target)
+        if (instance == null) {
+          return true
+        }
+        return (
+          MetadataUtils.isFragmentFromMetadata(instance) ||
+          MetadataUtils.isGroupAgainstImports(instance) ||
+          isIntrinsicElementMetadata(instance)
+        )
+      }),
+    'useShouldExpandStyleSection shouldExpandFromElementOrComponent',
+  )
+
+  return useEditorState(
+    Substores.propertyControlsInfo,
+    (store) => {
+      return store.editor.selectedViews.every((target) => {
+        const { propertyControlsInfo, projectContents } = store.editor
+        const descriptor = getComponentDescriptorForTarget(
+          { propertyControlsInfo, projectContents },
+          target,
+        )
+
+        if (descriptor == null || descriptor.inspector == null) {
+          return shouldExpandFromElementOrComponent
+        }
+
+        if (descriptor.inspector.type === 'hidden') {
+          return false
+        }
+
+        switch (descriptor.inspector.display) {
+          case 'collapsed':
+            return false
+          case 'expanded':
+            return true
+          default:
+            assertNever(descriptor.inspector.display)
+        }
+      })
+    },
+    'useShouldExpandStyleSection shouldExpandFromComponentDescription',
+  )
+}
+
+function useShouldHideInspectorSections(): boolean {
+  return useEditorState(
+    Substores.propertyControlsInfo,
+    (store) =>
+      store.editor.selectedViews.some((target) => {
+        const { propertyControlsInfo, projectContents } = store.editor
+        const descriptor = getComponentDescriptorForTarget(
+          { propertyControlsInfo, projectContents },
+          target,
+        )
+
+        if (descriptor?.inspector == null) {
+          return false
+        }
+
+        return descriptor.inspector.type === 'hidden'
+      }),
+
+    'Inspector inspectorPreferences',
+  )
+}

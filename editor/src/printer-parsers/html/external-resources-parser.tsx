@@ -1,43 +1,42 @@
 import * as json5 from 'json5'
 import * as NodeHTMLParser from 'node-html-parser'
-import { createSelector } from 'reselect'
-import { getContentsTreeFileFromString, ProjectContentTreeRoot } from '../../components/assets'
+import type { ProjectContentTreeRoot } from '../../components/assets'
+import { getProjectFileByFilePath } from '../../components/assets'
 import { notice } from '../../components/common/notice'
-import { EditorDispatch } from '../../components/editor/action-types'
+import type { EditorDispatch } from '../../components/editor/action-types'
 import { addToast, updateFile } from '../../components/editor/actions/action-creators'
-import {
-  defaultIndexHtmlFilePath,
-  EditorState,
-  EditorStore,
-} from '../../components/editor/store/editor-state'
-import { useEditorState } from '../../components/editor/store/store-hook'
-import {
-  useCallbackFactory,
-  UseSubmitValueFactory,
-} from '../../components/inspector/common/property-path-hooks'
-import {
+import { useDispatch } from '../../components/editor/store/dispatch-context'
+import { defaultIndexHtmlFilePath } from '../../components/editor/store/editor-state'
+import { Substores, useEditorState } from '../../components/editor/store/store-hook'
+import type { UseSubmitValueFactory } from '../../components/inspector/common/property-path-hooks'
+import { useCallbackFactory } from '../../components/inspector/common/property-path-hooks'
+import type {
   WebFontVariant,
-  webFontVariant,
   WebFontWeight,
+} from '../../components/navigator/external-resources/google-fonts-utils'
+import {
+  webFontVariant,
   isFontVariantWeight,
 } from '../../components/navigator/external-resources/google-fonts-utils'
 import {
   generatedExternalResourcesLinksClose,
   generatedExternalResourcesLinksOpen,
 } from '../../core/model/new-project-files'
-import { Either, isRight, left, mapEither, right } from '../../core/shared/either'
+import type { Either } from '../../core/shared/either'
+import { isLeft, isRight, left, mapEither, right } from '../../core/shared/either'
+import type { TextFile } from '../../core/shared/project-file-types'
 import {
-  TextFile,
   isTextFile,
-  ProjectContents,
   textFileContents,
   textFile,
   unparsed,
   RevisionsState,
 } from '../../core/shared/project-file-types'
 import { NO_OP } from '../../core/shared/utils'
-import { DescriptionParseError, descriptionParseError } from '../../utils/value-parser-utils'
-import { OnSubmitValue } from '../../uuiui-deps'
+import type { DescriptionParseError } from '../../utils/value-parser-utils'
+import { descriptionParseError } from '../../utils/value-parser-utils'
+import type { OnSubmitValue } from '../../uuiui-deps'
+import { isPageTemplate, type PageTemplate } from '../../components/canvas/remix/remix-utils'
 
 const googleFontsURIBase = 'https://fonts.googleapis.com/css2'
 
@@ -102,7 +101,7 @@ export function getGeneratedExternalLinkText(
 function getPreviewHTMLFilePath(
   projectContents: ProjectContentTreeRoot,
 ): Either<DescriptionParseError, string> {
-  const packageJson = getContentsTreeFileFromString(projectContents, '/package.json')
+  const packageJson = getProjectFileByFilePath(projectContents, '/package.json')
   if (packageJson != null && isTextFile(packageJson)) {
     try {
       const parsedJSON = json5.parse(packageJson.fileContents.code)
@@ -126,11 +125,72 @@ function getPreviewHTMLFilePath(
   }
 }
 
+type UtopiaJsonProp = {
+  featuredRoutes?: string[]
+  pageTemplates?: PageTemplate[]
+}
+
+function getUtopiaKeyFromPackageJSON(
+  projectContents: ProjectContentTreeRoot,
+  key: keyof UtopiaJsonProp,
+): Either<DescriptionParseError, unknown> {
+  const packageJson = getProjectFileByFilePath(projectContents, '/package.json')
+  if (packageJson != null && isTextFile(packageJson)) {
+    try {
+      const parsedJSON = json5.parse(packageJson.fileContents.code)
+      if (parsedJSON != null && 'utopia' in parsedJSON) {
+        const value = parsedJSON.utopia?.[key]
+        if (value != null) {
+          return right(value)
+        } else {
+          return left(descriptionParseError(`'featuredRoutes' in package.json is not specified`))
+        }
+      } else {
+        return left(
+          descriptionParseError(`'utopia' field in package.json couldn't be parsed properly`),
+        )
+      }
+    } catch (e) {
+      return left(descriptionParseError(`package.json is not formatted correctly`))
+    }
+  } else {
+    return left(descriptionParseError('No package.json is found in project'))
+  }
+}
+
+export function getFeaturedRoutesFromPackageJSON(
+  projectContents: ProjectContentTreeRoot,
+): Either<DescriptionParseError, Array<string>> {
+  const featuredRoutesArray = getUtopiaKeyFromPackageJSON(projectContents, 'featuredRoutes')
+  if (isLeft(featuredRoutesArray)) {
+    return featuredRoutesArray
+  } else if (!Array.isArray(featuredRoutesArray.value)) {
+    return left(descriptionParseError(`'featuredRoutes' in package.json is not an array`))
+  } else {
+    return right(featuredRoutesArray.value)
+  }
+}
+
+export function getPageTemplatesFromPackageJSON(
+  projectContents: ProjectContentTreeRoot,
+): Either<DescriptionParseError, Array<PageTemplate>> {
+  const pageTemplates = getUtopiaKeyFromPackageJSON(projectContents, 'pageTemplates')
+  if (isLeft(pageTemplates)) {
+    return pageTemplates
+  } else if (!Array.isArray(pageTemplates.value)) {
+    return left(descriptionParseError(`'pageTemplates' in package.json is not an array`))
+  } else if (pageTemplates.value.some((v) => !isPageTemplate(v))) {
+    return left(descriptionParseError(`'pageTemplates' in package.json contains malformed values`))
+  } else {
+    return right(pageTemplates.value)
+  }
+}
+
 function getTextFileContentsFromPath(
   filePath: string,
   projectContents: ProjectContentTreeRoot,
 ): Either<DescriptionParseError, TextFile> {
-  const fileContents = getContentsTreeFileFromString(projectContents, filePath)
+  const fileContents = getProjectFileByFilePath(projectContents, filePath)
   if (fileContents != null && isTextFile(fileContents)) {
     return right(fileContents)
   } else {
@@ -401,8 +461,7 @@ export function updateHTMLExternalResourcesLinks(
     return parsedIndices
   }
 }
-
-export function getExternalResourcesInfo(
+function getExternalResourcesInfo(
   projectContents: ProjectContentTreeRoot,
   dispatch: EditorDispatch,
 ): Either<
@@ -416,7 +475,7 @@ export function getExternalResourcesInfo(
 
   const previewHTMLFilePathContents = getTextFileContentsFromPath(htmlFilePath, projectContents)
   if (isRight(previewHTMLFilePathContents)) {
-    const fileContents = previewHTMLFilePathContents.value.fileContents
+    const { fileContents, versionNumber } = previewHTMLFilePathContents.value
     const parsedLinkTagsText = getGeneratedExternalLinkText(fileContents.code)
     if (isRight(parsedLinkTagsText)) {
       const parsedExternalResources = parseLinkTags(parsedLinkTagsText.value)
@@ -435,7 +494,7 @@ export function getExternalResourcesInfo(
             dispatch([
               updateFile(
                 htmlFilePath,
-                textFile(newFileContents, newFileContents, null, Date.now()),
+                textFile(newFileContents, newFileContents, null, versionNumber + 1),
                 false,
               ),
             ])
@@ -455,21 +514,18 @@ export function getExternalResourcesInfo(
   }
 }
 
-const getExternalResourcesInfoSelector = createSelector(
-  (store: EditorStore) => store.editor.projectContents,
-  (store: EditorStore) => store.dispatch,
-  getExternalResourcesInfo,
-)
-
 export function useExternalResources(): {
   values: Either<DescriptionParseError, ExternalResources>
   onSubmitValue: OnSubmitValue<ExternalResources>
   useSubmitValueFactory: UseSubmitValueFactory<ExternalResources>
 } {
-  const externalResourcesInfo = useEditorState(
-    getExternalResourcesInfoSelector,
-    'useExternalResources externalResourcesInfo',
+  const dispatch = useDispatch()
+  const projectContents = useEditorState(
+    Substores.projectContents,
+    (store) => store.editor.projectContents,
+    'useExternalResources projectContents',
   )
+  const externalResourcesInfo = getExternalResourcesInfo(projectContents, dispatch)
   const values: Either<DescriptionParseError, ExternalResources> = isRight(externalResourcesInfo)
     ? right(externalResourcesInfo.value.externalResources)
     : left(externalResourcesInfo.value)

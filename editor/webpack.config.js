@@ -4,7 +4,6 @@ const CleanTerminalPlugin = require('clean-terminal-webpack-plugin')
 const { CleanWebpackPlugin } = require('clean-webpack-plugin')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
 const ScriptExtHtmlWebpackPlugin = require('script-ext-html-webpack-plugin')
-const InterpolateHtmlPlugin = require('react-dev-utils/InterpolateHtmlPlugin')
 const TerserPlugin = require('terser-webpack-plugin')
 const path = require('path')
 const webpack = require('webpack')
@@ -12,17 +11,19 @@ const { RelativeCiAgentWebpackPlugin } = require('@relative-ci/agent')
 
 const Production = 'production'
 const Staging = 'staging'
+const Branches = 'branches'
 const Development = 'development'
 
 const verbose = process.env.VERBOSE === 'true'
 const performance = process.env.PERFORMANCE === 'true' // This is for performance testing, which combines the dev server with production config
 const hot = !performance && process.env.HOT === 'true' // For running the webpack-dev-server in hot mode
 const mode = process.env.WEBPACK_MODE ?? (performance ? Production : Development) // Default to 'development' unless we are running the performance test
-const actualMode = mode === Staging ? Production : mode
+const actualMode = mode === Staging || mode === Branches ? Production : mode
 const isDev = mode === Development || performance
 const isStaging = mode === Staging
-const isProd = !(isDev || isStaging)
-const isProdOrStaging = isProd || isStaging
+const isBranches = mode === Branches
+const isProd = !(isDev || isStaging || isBranches)
+const isProdOrStaging = isProd || isStaging || isBranches
 
 const runCompiler = isDev && process.env.RUN_COMPILER !== 'false' // For when you want to run the compiler in a separate tab
 
@@ -44,8 +45,21 @@ function srcPath(subdir) {
 //                    using the ExtractedTextPlugin - https://v4.webpack.js.org/plugins/extract-text-webpack-plugin/
 const hashPattern = hot ? '[contenthash]' : '[chunkhash]' // I changed [hash] to [contenthash] as per https://webpack.js.org/migrate/5/#clean-up-configuration
 
-const BaseDomain = isProd ? 'https://cdn.utopia.app' : isStaging ? 'https://cdn.utopia.pizza' : ''
+const BaseDomain = isProd
+  ? 'https://cdn.utopia.app'
+  : isStaging
+  ? 'https://cdn.utopia.pizza'
+  : isBranches
+  ? 'https://cdn.utopia.fish'
+  : 'http://cdn.localhost:8000'
 const VSCodeBaseDomain = BaseDomain === '' ? '${window.location.origin}' : BaseDomain
+
+const htmlTemplateParameters = {
+  VITE: false,
+  UTOPIA_SHA: process.env.UTOPIA_SHA ?? 'nocommit',
+  UTOPIA_DOMAIN: BaseDomain,
+  VSCODE_DOMAIN: VSCodeBaseDomain,
+}
 
 const config = {
   mode: actualMode,
@@ -54,15 +68,6 @@ const config = {
     editor: hot
       ? ['react-hot-loader/patch', './src/templates/editor-entry-point.tsx']
       : './src/templates/editor-entry-point.tsx',
-    preview: hot
-      ? ['react-hot-loader/patch', './src/templates/preview.tsx']
-      : './src/templates/preview.tsx',
-    propertyControlsInfo: hot
-      ? ['react-hot-loader/patch', './src/templates/property-controls-info.tsx']
-      : './src/templates/property-controls-info.tsx',
-    vsCodeEditorOuterIframe: hot
-      ? ['react-hot-loader/patch', './src/templates/vscode-editor-outer-iframe.tsx']
-      : './src/templates/vscode-editor-outer-iframe.tsx',
   },
 
   output: {
@@ -90,48 +95,16 @@ const config = {
       scriptLoading: 'defer',
       template: './src/templates/index.html',
       minify: false,
+      templateParameters: htmlTemplateParameters,
     }),
     new HtmlWebpackPlugin({
       chunks: [],
       inject: 'head', // Add the script tags to the end of the <head>
       scriptLoading: 'defer',
-      template: './src/templates/project-not-found.html',
-      filename: 'project-not-found.html',
+      template: './src/templates/vscode-editor-iframe/index.html',
+      filename: 'vscode-editor-iframe/index.html',
       minify: false,
-    }),
-    new HtmlWebpackPlugin({
-      // Run it again to generate the preview.html
-      chunks: ['preview'],
-      inject: 'head', // Add the script tags to the end of the <head>
-      scriptLoading: 'defer',
-      template: './src/templates/preview.html',
-      filename: 'preview.html',
-      minify: false,
-    }),
-    new HtmlWebpackPlugin({
-      // Run it again to generate the preview.html
-      chunks: ['propertyControlsInfo'],
-      inject: 'head', // Add the script tags to the end of the <head>
-      scriptLoading: 'defer',
-      template: './src/templates/property-controls-info.html',
-      filename: 'property-controls-info.html',
-      minify: false,
-    }),
-    new HtmlWebpackPlugin({
-      chunks: ['vsCodeEditorOuterIframe'],
-      inject: 'head', // Add the script tags to the end of the <head>
-      scriptLoading: 'defer',
-      template: './src/templates/vscode-editor-outer-iframe.html',
-      filename: 'vscode-editor-outer-iframe/index.html',
-      minify: false,
-    }),
-    new HtmlWebpackPlugin({
-      chunks: [],
-      inject: 'head', // Add the script tags to the end of the <head>
-      scriptLoading: 'defer',
-      template: './src/templates/vscode-editor-inner-iframe.html',
-      filename: 'vscode-editor-inner-iframe/index.html',
-      minify: false,
+      templateParameters: htmlTemplateParameters,
     }),
     new ScriptExtHtmlWebpackPlugin({
       // Support CORS so we can use the CDN endpoint from either of the domains
@@ -141,20 +114,15 @@ const config = {
         value: 'anonymous',
       },
     }),
-    new InterpolateHtmlPlugin(HtmlWebpackPlugin, {
-      // This plugin replaces variables of the form %VARIABLE% with the value provided in this object
-      UTOPIA_SHA: process.env.UTOPIA_SHA ?? 'nocommit',
-      UTOPIA_DOMAIN: BaseDomain,
-      VSCODE_DOMAIN: VSCodeBaseDomain,
-    }),
 
     // Optionally run the TS compiler in a different thread, but as part of the webpack build still
     ...(runCompiler
       ? [
-          new ForkTsCheckerAsyncOverlayWebpackPlugin({
-            checkerPlugin: new ForkTsCheckerWebpackPlugin({
+          new ForkTsCheckerWebpackPlugin({
+            async: true,
+            typescript: {
               memoryLimit: 4096,
-            }),
+            },
           }),
         ]
       : []),
@@ -177,10 +145,16 @@ const config = {
 
     new webpack.DefinePlugin({
       // with Webpack 5, process is not shimmed anymore, these are some properties that I had to replace with undefined so the various checks do not throw a runtime type error
+      process: 'undefined',
+      'process.cwd': 'undefined',
       'process.platform': 'undefined',
       'process.env.BABEL_TYPES_8_BREAKING': 'undefined',
       'process.env.JEST_WORKER_ID': 'undefined',
       'process.env.HOT_MODE': hot,
+      'process.env.HMR': false,
+      'process.env.REMIX_DEV_ORIGIN': isDev ? "'http://localhost:8000'" : 'undefined',
+      'process.env.UTOPIA_DOMAIN': `"${BaseDomain}"`,
+      'process.env.UTOPIA_SHA': `"${process.env.UTOPIA_SHA ?? 'nocommit'}"`,
     }),
 
     // setting up the various process.env.VARIABLE replacements
@@ -188,12 +162,15 @@ const config = {
       'REACT_APP_ENVIRONMENT_CONFIG',
       'REACT_APP_AUTH0_CLIENT_ID',
       'REACT_APP_AUTH0_ENDPOINT',
-      'REACT_APP_AUTH0_REDIRECT_URI',
       'REACT_APP_COMMIT_HASH',
+
+      // !! optional env vars should be added in the webpack.EnvironmentPlugin below providing a default value for them instead than here
     ]),
 
     new webpack.EnvironmentPlugin({
       GOOGLE_WEB_FONTS_KEY: '', // providing an empty default for GOOGLE_WEB_FONTS_KEY for now
+      REACT_APP_BROWSER_TEST_DEBUG: 'false',
+      USE_BFF: 'false',
     }),
 
     new webpack.ProvidePlugin({ BrowserFS: 'browserfs' }), // weirdly, the browserfs/dist/shims/fs shim assumes a global BrowserFS being available
@@ -212,7 +189,9 @@ const config = {
     extensions: ['.ts', '.tsx', '.js', '.json', '.ttf'],
     symlinks: true, // We set this to false as we have symlinked some common code from the website project
     alias: {
+      'tailwindcss/resolveConfig': 'tailwindcss/resolveConfig.js',
       uuiui: srcPath('uuiui'),
+      'worker-imports': path.resolve(__dirname, 'src/core/workers/worker-import-utils.ts'),
       'uuiui-deps': srcPath('uuiui-deps'),
       fs: require.resolve('./node_modules/browserfs/dist/shims/fs'),
       process: require.resolve('./node_modules/browserfs/dist/shims/process'),
@@ -237,7 +216,6 @@ const config = {
   },
 
   externals: {
-    domtoimage: 'domtoimage',
     'source-map-support': 'should-never-succeed', // I don't know what this is?
   },
 
@@ -253,7 +231,15 @@ const config = {
       { test: /graceful-fs/, use: 'null-loader' },
       // Match typescript
       {
-        exclude: /node_modules(?!\/utopia-api)/,
+        include: (filePath) => {
+          if (filePath.includes('node_modules')) {
+            // We need to use the ts-loader to load the utopia-api module,
+            // but nothing else from node_modules
+            return filePath.includes('/utopia-api/')
+          } else {
+            return true
+          }
+        },
         test: /\.tsx?$/,
         use: [
           {
@@ -297,9 +283,9 @@ const config = {
         ],
       },
 
-      // Fonts
+      // Files
       {
-        test: /\.ttf$/,
+        test: /\.(png|jpe?g|gif|ttf)$/,
         use: ['file-loader'],
       },
     ],
@@ -336,13 +322,16 @@ const config = {
     : {},
 
   optimization: {
-    minimize: isProd,
-    minimizer: isProd
+    minimize: isProdOrStaging,
+    minimizer: isProdOrStaging
       ? [
           new TerserPlugin({
             parallel: true,
             terserOptions: {
               ecma: 8,
+              format: {
+                ascii_only: true, // https://github.com/concrete-utopia/utopia/issues/1932
+              },
             },
           }),
         ]

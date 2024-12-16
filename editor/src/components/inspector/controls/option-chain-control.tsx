@@ -1,23 +1,32 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
-import { Interpolation, jsx } from '@emotion/react'
+import type { Interpolation } from '@emotion/react'
+import { jsx } from '@emotion/react'
 import React from 'react'
-import { IcnProps, UtopiaTheme } from '../../../uuiui'
-import { DEPRECATEDControlProps, DEPRECATEDGenericControlOptions } from './control'
+import { UtopiaTheme, colorTheme } from '../../../uuiui'
+import type { IcnProps } from '../../../uuiui'
+import type { DEPRECATEDControlProps, DEPRECATEDGenericControlOptions } from './control'
 import { OptionControl } from './option-control'
 import Utils from '../../../utils/utils'
-import { betterReactMemo } from '../../../utils/react-performance'
 
 export interface OptionChainOption<T> {
   value: T
   icon?: IcnProps
+  iconComponent?: React.ReactNode
   label?: string
   tooltip?: string
+  forceCallOnSubmitValue?: boolean // Call the onSubmitValue again even when the control is already on that value
+  disabled?: boolean
+}
+
+export function getOptionControlTestId(testIdPrefix: string, postfix: string): string {
+  return `${testIdPrefix}-${postfix}`
 }
 
 // TODO come up with a typed OptionChainControl types!
-export const OptionChainControl: React.FunctionComponent<DEPRECATEDControlProps<
-  any
->> = betterReactMemo('OptionChainControl', ({ style, ...props }) => {
+export const OptionChainControl: React.FunctionComponent<
+  React.PropsWithChildren<DEPRECATEDControlProps<any>>
+> = React.memo(({ style, ...props }) => {
   const options = props.options as Array<OptionChainOption<string | number>>
   const labelBelow = (props.DEPRECATED_controlOptions as DEPRECATEDGenericControlOptions)
     ?.labelBelow
@@ -46,7 +55,7 @@ export const OptionChainControl: React.FunctionComponent<DEPRECATEDControlProps<
       flexDirection: 'column',
       marginBottom: 0,
       width: '100%',
-      ...style,
+      ...(style as any), // TODO Emotion and React 18 types don't like each other
     }
   }, [style])
 
@@ -56,8 +65,9 @@ export const OptionChainControl: React.FunctionComponent<DEPRECATEDControlProps<
         style={{
           display: 'flex',
           flexDirection: 'row',
-          height: UtopiaTheme.layout.inputHeight.default,
-          width: '100%',
+          border: `1px solid ${colorTheme.bg4.value}`,
+          borderRadius: UtopiaTheme.inputBorderRadius,
+          padding: '1px',
         }}
         className={`option-chain-control-container ${Utils.pathOr(
           '',
@@ -71,16 +81,27 @@ export const OptionChainControl: React.FunctionComponent<DEPRECATEDControlProps<
             {...props}
             css={optionCSS}
             key={'option-' + index}
+            testId={getOptionControlTestId(
+              props.testId,
+              option.label?.toLowerCase() ?? index.toString(),
+            )}
             DEPRECATED_controlOptions={{
               tooltip: option.tooltip,
               icon: option.icon,
+              iconComponent: option.iconComponent,
               labelInner: option.label,
+              disabled: option.disabled,
             }}
             value={props.value === option.value}
             // eslint-disable-next-line react/jsx-no-bind
-            onSubmitValue={(value: boolean) => {
-              if (value) {
+            onSubmitValue={(isChecked: boolean) => {
+              if (option.disabled === true) {
+                return
+              }
+              if (isChecked || option.forceCallOnSubmitValue) {
                 props.onSubmitValue(option.value)
+              } else {
+                props.onUnsetValues?.()
               }
             }}
           />

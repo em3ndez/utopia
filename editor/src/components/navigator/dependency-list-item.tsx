@@ -1,13 +1,21 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx, keyframes } from '@emotion/react'
 import React from 'react'
 import { NpmDependencyVersionAndStatusIndicator } from './dependecy-version-status-indicator'
-import { ContextMenuItem } from '../context-menu-items'
+import type { ContextMenuItem } from '../context-menu-items'
 import { NO_OP } from '../../core/shared/utils'
-import { useColorTheme, FlexRow, UtopiaTheme, Tooltip, Icons } from '../../uuiui'
-import { MenuProvider, MomentumContextMenu } from '../../uuiui-deps'
-import { handleKeyDown } from '../editor/global-shortcuts'
+import {
+  useColorTheme,
+  FlexRow,
+  UtopiaTheme,
+  Tooltip,
+  Icons,
+  AlternateColorThemeComponent,
+} from '../../uuiui'
+import { MenuProvider, ContextMenu } from '../../uuiui-deps'
 import type { DependencyPackageDetails } from '../editor/store/editor-state'
+import { unless } from '../../utils/react-conditionals'
 
 interface DependencyListItemProps {
   packageDetails: DependencyPackageDetails
@@ -18,7 +26,9 @@ interface DependencyListItemProps {
   removeDependency: (key: string) => void
 }
 
-export const DependencyListItem: React.FunctionComponent<DependencyListItemProps> = ({
+export const DependencyListItem: React.FunctionComponent<
+  React.PropsWithChildren<DependencyListItemProps>
+> = ({
   packageDetails,
   editingLocked,
   isNewlyLoaded,
@@ -36,11 +46,11 @@ export const DependencyListItem: React.FunctionComponent<DependencyListItemProps
     () =>
       keyframes({
         from: {
-          backgroundColor: colorTheme.listNewItemFlashBackground.o(100).value,
+          backgroundColor: colorTheme.listNewItemFlashBackground.value,
           color: colorTheme.subduedForeground.value,
         },
         to: {
-          backgroundColor: colorTheme.listNewItemFlashBackground.o(0).value,
+          backgroundColor: colorTheme.listNewItemFlashBackground0.value,
           color: colorTheme.neutralForeground.value,
         },
       }),
@@ -174,8 +184,9 @@ export const DependencyListItem: React.FunctionComponent<DependencyListItemProps
             <Tooltip title='Dependency is required for Utopian projects'>
               <FlexRow
                 css={{
-                  backgroundColor: 'rgba(0, 0, 0, 0.05)',
-                  boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.05)',
+                  backgroundColor: colorTheme.fg1.value,
+                  boxShadow: `0 0 0 1px ${colorTheme.canvasControlsSizeBoxShadowColor50.value}`,
+                  color: colorTheme.bg0.value,
                   borderRadius: 2,
                   height: 14,
                   padding: '0 3px',
@@ -202,8 +213,6 @@ export const DependencyListItem: React.FunctionComponent<DependencyListItemProps
               '.dependency-item:hover &': {
                 display: 'block',
               },
-              marginLeft: 4,
-              marginTop: 4,
             }}
           >
             <Icons.ExternalLinkSmaller />
@@ -215,10 +224,26 @@ export const DependencyListItem: React.FunctionComponent<DependencyListItemProps
             flexShrink: 0,
           }}
         >
+          {unless(
+            isDefault,
+            <FlexRow
+              css={{
+                display: 'none',
+                '.dependency-item:hover &': {
+                  display: 'block',
+                },
+                cursor: 'pointer',
+              }}
+              // eslint-disable-next-line react/jsx-no-bind
+              onClick={() => removeDependency(name)}
+            >
+              <Icons.Cross tooltipText={`Remove ${name}`} />
+            </FlexRow>,
+          )}
           {versionFieldNode}
         </FlexRow>
       </FlexRow>
-      <MomentumContextMenu id={menuId} items={menuItems} getData={NO_OP} />
+      <ContextMenu id={menuId} items={menuItems} getData={NO_OP} />
     </MenuProvider>
   )
 }

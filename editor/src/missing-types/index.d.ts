@@ -14,10 +14,21 @@ declare module 'babel-plugin-syntax-jsx'
 declare module '@babel/standalone'
 declare module '@babel/plugin-transform-modules-commonjs'
 declare module '@babel/plugin-proposal-export-namespace-from'
+declare module '@babel/plugin-proposal-class-properties'
 
 declare module 'lodash.clamp' {
-  export const clamp = (number: number, lower: number, upper: number) => number
-  export const clamp = (number: number, upper: number) => number
+  export default clamp = (number: number, lower: number, upper: number) => number
+}
+
+declare module 'lodash.debounce' {
+  export default debounce =
+    (
+      func: (...args: any[]) => any,
+      wait: number,
+      options?: { leading?: boolean; maxWait?: number },
+    ) =>
+    (...args: any[]) =>
+      any
 }
 
 declare module 'resize-observer-polyfill'
@@ -42,29 +53,6 @@ declare module 'monaco-editor/esm/vs/editor/standalone/browser/standaloneService
 declare module 'eslint4b'
 declare module 'babel-eslint'
 declare module 'strip-ansi'
-
-declare module 'use-context-selector' {
-  import * as React from 'react'
-
-  const CONTEXT_LISTENERS = Symbol('C_L')
-
-  type ContextWithListeners<T> = React.Context<T> & {
-    [CONTEXT_LISTENERS]: Set<(nextValue: T) => void>
-  }
-
-  export const createContext: <T>(defaultValue: T) => ContextWithListeners<T>
-
-  export const useContextSelector: <T, S>(
-    context: ContextWithListeners<T>,
-    selector: (value: T) => S,
-    equalityCheck: (a: S, b: S) => boolean = Object.is,
-  ) => S
-
-  export const useContext: <T>(context: ContextWithListeners<T>) => T
-}
-
-declare module 'console-feed'
-declare module 'console-feed/lib/Hook/parse'
 
 declare module 'react-merge-refs'
 
@@ -96,3 +84,17 @@ declare var __webpack_public_path__: string
 interface Window {
   KarmaTestEnvironment: boolean | undefined
 }
+
+declare module 'eslint-plugin-react' {
+  export const rules: { [key: string]: any } = {}
+}
+declare module 'eslint-plugin-react-hooks' {
+  export const rules: { [key: string]: any } = {}
+}
+declare module 'eslint-plugin-jsx-a11y' {
+  export const rules: { [key: string]: any } = {}
+}
+declare module 'eslint-plugin-import/lib/rules/first'
+declare module 'eslint-plugin-import/lib/rules/no-amd'
+declare module 'eslint-plugin-import/lib/rules/no-webpack-loader-syntax'
+declare module 'keycode'

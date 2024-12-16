@@ -1,8 +1,7 @@
 import React from 'react'
-import { CanvasRectangle, CanvasPoint } from '../../../core/shared/math-utils'
+import type { CanvasRectangle, CanvasPoint } from '../../../core/shared/math-utils'
 import { useColorTheme } from '../../../uuiui'
-import { betterReactMemo } from '../../../uuiui-deps'
-import { isZeroSizedElement, ZeroControlSize } from './outline-utils'
+import { isZeroSizedElement } from './outline-utils'
 import { ZeroSizeHighlightControl } from './zero-sized-element-controls'
 
 interface HighlightControlProps {
@@ -10,17 +9,18 @@ interface HighlightControlProps {
   canvasOffset: CanvasPoint
   scale: number
   color?: string
+  displayZeroSized: 'display-zero-sized' | 'do-not-display-zero-sized'
 }
 
-export const HighlightControl = betterReactMemo(
-  'HighlightControl',
-  (props: HighlightControlProps) => {
-    const colorTheme = useColorTheme()
-    const outlineWidth = 1.5 / props.scale
-    const outlineColor =
-      props.color === null ? colorTheme.canvasSelectionPrimaryOutline.value : props.color
+export const HighlightControl = React.memo((props: HighlightControlProps) => {
+  const colorTheme = useColorTheme()
+  const outlineWidth = 1.5 / props.scale
+  const outlineColor =
+    props.color === null ? colorTheme.canvasSelectionPrimaryOutline.value : props.color
 
-    if (isZeroSizedElement(props.frame)) {
+  if (isZeroSizedElement(props.frame)) {
+    // Only display the zero size higlight if it should be displayed.
+    if (props.displayZeroSized === 'display-zero-sized') {
       return (
         <ZeroSizeHighlightControl
           frame={props.frame}
@@ -30,20 +30,23 @@ export const HighlightControl = betterReactMemo(
         />
       )
     } else {
-      return (
-        <div
-          className='role-component-highlight-outline'
-          style={{
-            position: 'absolute',
-            left: props.canvasOffset.x + props.frame.x,
-            top: props.canvasOffset.y + props.frame.y,
-            width: props.frame.width,
-            height: props.frame.height,
-            boxShadow: `0px 0px 0px ${outlineWidth}px ${outlineColor}`,
-            pointerEvents: 'none',
-          }}
-        />
-      )
+      return null
     }
-  },
-)
+  } else {
+    return (
+      <div
+        className='role-component-highlight-outline'
+        data-testid='highlight-control'
+        style={{
+          position: 'absolute',
+          left: props.canvasOffset.x + props.frame.x,
+          top: props.canvasOffset.y + props.frame.y,
+          width: props.frame.width,
+          height: props.frame.height,
+          boxShadow: `0px 0px 0px ${outlineWidth}px ${outlineColor}`,
+          pointerEvents: 'none',
+        }}
+      />
+    )
+  }
+})

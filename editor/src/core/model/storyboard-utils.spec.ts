@@ -1,20 +1,20 @@
 import {
   addFileToProjectContents,
-  getContentsTreeFileFromString,
+  getProjectFileByFilePath,
   removeFromProjectContents,
 } from '../../components/assets'
+import type { EditorState } from '../../components/editor/store/editor-state'
 import {
   editorModelFromPersistentModel,
-  EditorState,
   StoryboardFilePath,
 } from '../../components/editor/store/editor-state'
-import { defaultProject } from '../../sample-projects/sample-project-utils'
+import { complexDefaultProject } from '../../sample-projects/sample-project-utils'
 import { clearTopLevelElementUniqueIDs } from '../shared/element-template'
+import type { ParsedTextFile } from '../shared/project-file-types'
 import {
   foldParsedTextFile,
   isParseSuccess,
   isTextFile,
-  ParsedTextFile,
   RevisionsState,
   textFile,
   textFileContents,
@@ -31,11 +31,19 @@ import React from 'react'
 export var App = (props) => {
   return <div style={{ ...props.style}} data-uid={'aaa'} data-label={'Hat'} />
 }`
-  const baseModel = defaultProject()
-  const parsedFile = lintAndParse(StoryboardFilePath, appFile, null, emptySet()) as ParsedTextFile
+  const baseModel = complexDefaultProject()
+  const parsedFile = lintAndParse(
+    StoryboardFilePath,
+    [],
+    appFile,
+    null,
+    emptySet(),
+    'trim-bounds',
+    'do-not-apply-steganography',
+  ) as ParsedTextFile
 
   if (!isParseSuccess(parsedFile)) {
-    fail('The test file parse failed')
+    throw new Error('The test file parse failed')
   }
 
   const projectContentsWithoutStoryboard = removeFromProjectContents(
@@ -62,16 +70,15 @@ export var App = (props) => {
 
 describe('addStoryboardFileToProject', () => {
   it('adds storyboard file to project that does not have one', () => {
-    const actualResult = addStoryboardFileToProject(createTestProjectLackingStoryboardFile())
+    const actualResult = addStoryboardFileToProject(
+      createTestProjectLackingStoryboardFile().projectContents,
+    )
     if (actualResult == null) {
-      fail('Editor state was not updated.')
+      throw new Error('Editor state was not updated.')
     } else {
-      const storyboardFile = getContentsTreeFileFromString(
-        actualResult.projectContents,
-        StoryboardFilePath,
-      )
+      const storyboardFile = getProjectFileByFilePath(actualResult, StoryboardFilePath)
       if (storyboardFile == null) {
-        fail('No storyboard file was created.')
+        throw new Error('No storyboard file was created.')
       } else {
         if (isTextFile(storyboardFile)) {
           const topLevelElements = foldParsedTextFile(
@@ -84,7 +91,7 @@ describe('addStoryboardFileToProject', () => {
           )
           expect(topLevelElements).toMatchSnapshot()
         } else {
-          fail('Storyboard file is not a UI JS file.')
+          throw new Error('Storyboard file is not a UI JS file.')
         }
       }
     }
@@ -109,7 +116,7 @@ describe('addStoryboardFileToProject', () => {
         expectedFile,
       ),
     }
-    const actualResult = addStoryboardFileToProject(editorModel)
+    const actualResult = addStoryboardFileToProject(editorModel.projectContents)
     expect(actualResult).toBeNull()
   })
 })

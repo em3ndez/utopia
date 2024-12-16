@@ -1,15 +1,21 @@
-import { render } from '@testing-library/react'
-import { renderHook } from '@testing-library/react-hooks'
+import { render, renderHook } from '@testing-library/react'
 import React from 'react'
+
+jest.mock('../../editor/store/store-hook', () => ({
+  useRefEditorState: jest.fn(() => ({ current: jest.fn(() => {}) })),
+}))
+
 import { isRight } from '../../../core/shared/either'
+import type {
+  JSXAttributes,
+  ComputedStyle,
+  StyleAttributeMetadata,
+} from '../../../core/shared/element-template'
 import {
   isJSXElement,
   isUtopiaJSXComponent,
-  JSXAttributes,
-  jsxAttributeValue,
-  ComputedStyle,
+  jsExpressionValue,
   jsxAttributesFromMap,
-  StyleAttributeMetadata,
   emptyComments,
 } from '../../../core/shared/element-template'
 import { CanvasMetadataName } from '../../../core/workers/parser-printer/parser-printer-parsing'
@@ -24,10 +30,10 @@ import {
   cssBackgroundLayerArrayToBackgroundImagesAndColor,
   backgroundLonghandPaths,
 } from '../sections/style-section/background-subsection/background-subsection'
-import { ControlStatus } from './control-status'
+import type { ControlStatus } from './control-status'
+import type { CSSBackgroundLayers, ParsedCSSPropertiesKeys } from './css-utils'
 import {
   blackHexCSSColor,
-  CSSBackgroundLayers,
   cssNumber,
   CSSSolidColor,
   cssSolidColor,
@@ -35,13 +41,11 @@ import {
   printCSSNumber,
   cssSolidBackgroundLayer,
   ParsedPropertiesKeys,
-  ParsedCSSPropertiesKeys,
 } from './css-utils'
+import type { InspectorCallbackContextData, InspectorPropsContextData } from './property-path-hooks'
 import {
   InspectorCallbackContext,
-  InspectorCallbackContextData,
   InspectorPropsContext,
-  InspectorPropsContextData,
   stylePropPathMappingFn,
   useCallbackFactory,
   useGetOrderedPropertyKeys,
@@ -49,11 +53,13 @@ import {
   useInspectorStyleInfo,
 } from './property-path-hooks'
 import { isParseSuccess, ElementPath } from '../../../core/shared/project-file-types'
-import { betterReactMemo } from '../../../utils/react-performance'
 import {
   getPropsForStyleProp,
   makeInspectorHookContextProvider,
 } from './property-path-hooks.test-utils'
+import { DispatchContext } from '../../editor/store/dispatch-context'
+import { NO_OP } from '../../../core/shared/utils'
+import { styleStringInArray } from '../../../utils/common-constants'
 
 interface RenderTestHookProps<T> {
   value: T
@@ -167,41 +173,9 @@ describe('useCallbackFactory', () => {
     expect(submitValue1).not.toStrictEqual(submitValue1b)
     expect(submitValue2).not.toStrictEqual(submitValue2b!)
   })
-
-  it('since this is a hook that returns a hook, it will break if we rerender with different amount of factory calls', () => {
-    const oldValue = 'a value'
-    const aCallback = () => {}
-
-    const aTransform = () => 'hello'
-    const bTransform = () => 'ello'
-
-    const { result, rerender } = renderHook<
-      RenderTestHookProps<any>,
-      {
-        submitValue1: (newValue: unknown) => void
-        submitValue2: ((newValue: unknown) => void) | null
-      }
-    >((props) => useRenderTestHook(props), {
-      initialProps: {
-        value: oldValue,
-        callback: aCallback,
-        transformFunction1: aTransform,
-        transformFunction2: bTransform,
-      },
-    })
-
-    rerender({
-      value: oldValue,
-      callback: aCallback,
-      transformFunction1: aTransform,
-    })
-    expect(result.error).toMatchInlineSnapshot(
-      `[Invariant Violation: Rendered fewer hooks than expected. This may be caused by an accidental early return statement.]`,
-    )
-  })
 })
 
-const WellBehavedInspectorSubsection = betterReactMemo('WellBehavedInspectorSubsection', () => {
+const WellBehavedInspectorSubsection = React.memo(() => {
   const { value, onSubmitValue } = useInspectorStyleInfo('opacity')
   onSubmitValue(cssNumber(0.9))
   return <div onClick={() => onSubmitValue(cssNumber(0.5))}>{printCSSNumber(value, null)}</div>
@@ -213,11 +187,13 @@ const InspectorSectionProvider = (props: {
   callbackData: InspectorCallbackContextData
 }) => {
   return (
-    <InspectorCallbackContext.Provider value={props.callbackData}>
-      <InspectorPropsContext.Provider value={props.propsData}>
-        <WellBehavedInspectorSubsection />
-      </InspectorPropsContext.Provider>
-    </InspectorCallbackContext.Provider>
+    <DispatchContext.Provider value={NO_OP}>
+      <InspectorCallbackContext.Provider value={props.callbackData}>
+        <InspectorPropsContext.Provider value={props.propsData}>
+          <WellBehavedInspectorSubsection />
+        </InspectorPropsContext.Provider>
+      </InspectorCallbackContext.Provider>
+    </DispatchContext.Provider>
   )
 }
 
@@ -225,6 +201,8 @@ describe('useInspectorMetadataForPropsObject memoization', () => {
   const callbackData = {
     onSubmitValue: utils.NO_OP,
     onUnsetValue: utils.NO_OP,
+    collectActionsToSubmitValue: () => [],
+    collectActionsToUnsetValue: () => [],
     selectedViewsRef: { current: [] },
   }
 
@@ -236,7 +214,7 @@ describe('useInspectorMetadataForPropsObject memoization', () => {
     const [getUpdateCount] = setupReactWhyDidYouRender()
     const propsWithOpacity: JSXAttributes[] = [
       jsxAttributesFromMap({
-        style: jsxAttributeValue({ opacity: cssNumber(0.9) }, emptyComments),
+        style: jsExpressionValue({ opacity: cssNumber(0.9) }, emptyComments),
       }),
     ]
     const spiedProps: Array<{ [key: string]: any }> = [
@@ -280,7 +258,7 @@ describe('useInspectorMetadataForPropsObject memoization', () => {
   it('this hook wont cause rerender if the single selected JSXAttributes stays the same', () => {
     const [getUpdateCount] = setupReactWhyDidYouRender()
     const propsWithOpacity: JSXAttributes = jsxAttributesFromMap({
-      style: jsxAttributeValue({ opacity: 0.9 }, emptyComments),
+      style: jsExpressionValue({ opacity: 0.9 }, emptyComments),
     })
     const spiedProps: Array<{ [key: string]: any }> = [
       {
@@ -323,14 +301,14 @@ describe('useInspectorMetadataForPropsObject memoization', () => {
 
   it('if props change, but not the prop we care about, skip rerender', () => {
     const [getUpdateCount] = setupReactWhyDidYouRender()
-    const opacityProp = jsxAttributeValue(0.9, emptyComments)
+    const opacityProp = jsExpressionValue(0.9, emptyComments)
     const propsWithOpacity: JSXAttributes = jsxAttributesFromMap({
       // FIXME: This nests `jsxAttributeValue` inside a `jsxAttributeValue`.
-      style: jsxAttributeValue({ opacity: opacityProp, otherProp: 'dontcare' }, emptyComments),
+      style: jsExpressionValue({ opacity: opacityProp, otherProp: 'dontcare' }, emptyComments),
     })
     const propsChangedOpacitySame: JSXAttributes = jsxAttributesFromMap({
       // FIXME: This nests `jsxAttributeValue` inside a `jsxAttributeValue`.
-      style: jsxAttributeValue({ opacity: opacityProp, otherProp: 'imdifferent' }, emptyComments),
+      style: jsExpressionValue({ opacity: opacityProp, otherProp: 'imdifferent' }, emptyComments),
     })
     const spiedProps: Array<{ [key: string]: any }> = [
       {
@@ -387,10 +365,10 @@ describe('useInspectorMetadataForPropsObject memoization', () => {
     const [getUpdateCount] = setupReactWhyDidYouRender()
     const opacityProp = 0.9
     const propsWithOpacity: JSXAttributes = jsxAttributesFromMap({
-      style: jsxAttributeValue({ opacity: opacityProp, otherProp: 'dontcare' }, emptyComments),
+      style: jsExpressionValue({ opacity: opacityProp, otherProp: 'dontcare' }, emptyComments),
     })
     const propsWithOpacityChanged: JSXAttributes = jsxAttributesFromMap({
-      style: jsxAttributeValue({ opacity: 0.5, otherProp: 'imdifferent' }, emptyComments),
+      style: jsExpressionValue({ opacity: 0.5, otherProp: 'imdifferent' }, emptyComments),
     })
     const spiedProps: Array<{ [key: string]: any }> = [
       {
@@ -419,7 +397,7 @@ describe('useInspectorMetadataForPropsObject memoization', () => {
         propsData={{
           selectedViews: [],
           editedMultiSelectedProps: [propsWithOpacity],
-          targetPath: ['style'],
+          targetPath: styleStringInArray,
           spiedProps: spiedProps,
           computedStyles: computedStyles,
           selectedAttributeMetadatas: [],
@@ -434,7 +412,7 @@ describe('useInspectorMetadataForPropsObject memoization', () => {
         propsData={{
           selectedViews: [],
           editedMultiSelectedProps: [propsWithOpacityChanged],
-          targetPath: ['style'],
+          targetPath: styleStringInArray,
           spiedProps: spiedPropsChanged,
           computedStyles: computedStylesChanged,
           selectedAttributeMetadatas: [],
@@ -485,7 +463,7 @@ describe('Integration Test: backgroundColor property', () => {
   it('parses a off control status', () => {
     const hookResult = getBackgroundColorHookResult([], ['myStyleOuter', 'myStyleInner'], [])
 
-    const expectedControlStatus: ControlStatus = 'off'
+    const expectedControlStatus: ControlStatus = 'unset'
     expect(hookResult.controlStatus).toEqual(expectedControlStatus)
   })
 
@@ -765,7 +743,7 @@ describe('Integration Test: opacity property', () => {
   it('parses a off control status', () => {
     const hookResult = getOpacityHookResult([], [], [], [])
 
-    const expectedControlStatus: ControlStatus = 'off'
+    const expectedControlStatus: ControlStatus = 'unset'
     expect(hookResult.controlStatus).toEqual(expectedControlStatus)
   })
 
@@ -909,7 +887,7 @@ describe('Integration Test: opacity property', () => {
     expect(hookResult.controlStatus).toEqual(expectedControlStatus)
   })
 
-  xit('parses a multiselect-unoverwritable control status', () => {
+  xit('parses a multiselect-unoverwritable control status 2', () => {
     const hookResult = getOpacityHookResult(
       [`nodeValue1`, `nodeValue2`],
       [`nodeValue1`, `nodeValue2`],
@@ -1038,13 +1016,13 @@ describe('useGetOrderedPropertyKeys', () => {
     attributeMetadatas: Array<StyleAttributeMetadata>,
   ) {
     const props = styleObjectExpressions.map(
-      (styleExpression) => getPropsForStyleProp(styleExpression, ['style'])!,
+      (styleExpression) => getPropsForStyleProp(styleExpression, styleStringInArray)!,
     )
 
     const contextProvider = makeInspectorHookContextProvider(
       [],
       props,
-      ['style'],
+      styleStringInArray,
       spiedProps,
       computedStyles,
       attributeMetadatas,

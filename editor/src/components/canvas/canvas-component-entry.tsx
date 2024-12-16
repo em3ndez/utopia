@@ -1,119 +1,184 @@
 import React from 'react'
-import { useEditorState } from '../editor/store/store-hook'
+import { ResolvingRemoteDependencyErrorName } from '../../core/es-modules/package-manager/package-manager'
+import type { FancyError } from '../../core/shared/code-exec-utils'
+import { processErrorWithSourceMap } from '../../core/shared/code-exec-utils'
+import { useWriteOnlyRuntimeErrors } from '../../core/shared/runtime-report-logs'
+import { isHooksErrorMessage } from '../../utils/canvas-react-utils'
+import { when } from '../../utils/react-conditionals'
+import type { ProjectContentTreeRoot } from '../assets'
+import type { CurriedUtopiaRequireFn } from '../custom-code/code-file'
+import { resetCanvas } from '../editor/actions/action-creators'
+import { useDispatch } from '../editor/store/dispatch-context'
 import {
-  UiJsxCanvas,
-  pickUiJsxCanvasProps,
-  CanvasReactErrorCallback,
+  CanvasStateContext,
+  EditorStateContext,
+  Substores,
+  useEditorState,
+} from '../editor/store/store-hook'
+import { CanvasLoadingScreen } from './canvas-loading-screen'
+import { useApplyCanvasOffsetToStyle } from './controls/canvas-offset-wrapper'
+import { useDomWalkerInvalidateCallbacks } from './dom-walker'
+import type {
   CanvasReactReportErrorCallback,
-  DomWalkerInvalidateScenesCtxAtom,
-  DomWalkerInvalidatePathsCtxAtom,
   UiJsxCanvasProps,
   UiJsxCanvasPropsWithErrorCallback,
 } from './ui-jsx-canvas'
-import { saveDOMReport } from '../editor/actions/action-creators'
-import { ElementInstanceMetadata } from '../../core/shared/element-template'
-import { ConsoleLog } from '../editor/store/editor-state'
-import { CurriedUtopiaRequireFn, UtopiaRequireFn } from '../custom-code/code-file'
-import { betterReactMemo } from '../../uuiui-deps'
-import { ElementPath } from '../../core/shared/project-file-types'
-import {
-  useWriteOnlyConsoleLogs,
-  useWriteOnlyRuntimeErrors,
-} from '../../core/shared/runtime-report-logs'
-import { ProjectContentTreeRoot } from '../assets'
-import { processErrorWithSourceMap } from '../../core/shared/code-exec-utils'
-import { DomWalkerProps, useDomWalker } from './dom-walker'
-import { ResolvingRemoteDependencyErrorName } from '../../core/es-modules/package-manager/package-manager'
-import { CanvasLoadingScreen } from './canvas-loading-screen'
+import { DomWalkerInvalidatePathsCtxAtom, UiJsxCanvas, pickUiJsxCanvasProps } from './ui-jsx-canvas'
 
-interface CanvasComponentEntryProps {}
+export const CanvasContainerOuterId = 'canvas-container-outer'
 
-export const CanvasComponentEntry = betterReactMemo(
-  'CanvasComponentEntry',
-  (props: CanvasComponentEntryProps) => {
-    const dispatch = useEditorState((store) => store.dispatch, 'CanvasComponentEntry dispatch')
-    const onDomReport = React.useCallback(
-      (
-        elementMetadata: ReadonlyArray<ElementInstanceMetadata>,
-        cachedPaths: Array<ElementPath>,
-      ) => {
-        dispatch([saveDOMReport(elementMetadata, cachedPaths)])
-      },
-      [dispatch],
-    )
-    const { onRuntimeError, clearRuntimeErrors } = useWriteOnlyRuntimeErrors()
-    const { addToConsoleLogs, clearConsoleLogs } = useWriteOnlyConsoleLogs()
+interface CanvasComponentEntryProps {
+  shouldRenderCanvas: boolean
+}
 
-    const canvasProps = useEditorState((store) => {
-      return pickUiJsxCanvasProps(
-        store.editor,
-        store.derived,
-        true,
-        onDomReport,
-        clearConsoleLogs,
-        addToConsoleLogs,
-      )
-    }, 'CanvasComponentEntry canvasProps')
+export const CanvasComponentEntry = React.memo((props: CanvasComponentEntryProps) => {
+  const canvasStore = React.useContext(CanvasStateContext)
 
-    if (canvasProps == null) {
-      return <CanvasLoadingScreen />
-    } else {
-      return (
-        <div
-          id='canvas-container-outer'
-          style={{
-            position: 'absolute',
-            zoom: canvasProps.scale >= 1 ? `${canvasProps.scale * 100}%` : 1,
-            transform:
-              (canvasProps.scale < 1 ? `scale(${canvasProps.scale})` : '') +
-              ` translate3d(${canvasProps.offset.x}px, ${canvasProps.offset.y}px, 0)`,
-            transition: canvasProps.scrollAnimation ? 'transform 0.3s ease-in-out' : 'initial',
-          }}
-        >
-          <CanvasErrorBoundary
-            filePath={canvasProps.uiFilePath}
-            projectContents={canvasProps.projectContents}
-            reportError={onRuntimeError}
-            requireFn={canvasProps.curriedRequireFn}
-            key={`canvas-error-boundary-${canvasProps.mountCount}`}
-          >
-            <RemoteDependencyBoundary
-              projectContents={canvasProps.projectContents}
-              requireFn={canvasProps.curriedRequireFn}
-            >
-              <DomWalkerWrapper {...canvasProps} clearErrors={clearRuntimeErrors} />
-            </RemoteDependencyBoundary>
-          </CanvasErrorBoundary>
-        </div>
-      )
-    }
-  },
-)
+  return (
+    <EditorStateContext.Provider value={canvasStore == null ? null : canvasStore}>
+      <CanvasComponentEntryInner {...props} />
+    </EditorStateContext.Provider>
+  )
+})
+
+const CanvasComponentEntryInner = React.memo((props: CanvasComponentEntryProps) => {
+  const dispatch = useDispatch()
+
+  const canvasScrollAnimation = useEditorState(
+    Substores.canvas,
+    (store) => store.editor.canvas.scrollAnimation,
+    'CanvasComponentEntry scrollAnimation',
+  )
+  const { addToRuntimeErrors, clearRuntimeErrors } = useWriteOnlyRuntimeErrors()
+
+  const canvasProps = useEditorState(
+    Substores.fullStore,
+    (store) => {
+      return pickUiJsxCanvasProps(store.editor, store.derived)
+    },
+    'CanvasComponentEntry canvasProps',
+  )
+
+  const canvasEditOrSelect = React.useMemo(() => {
+    // Explicitly target the case where the canvas is not live, needs to handle `undefined`.
+    return canvasProps?.canvasIsLive === false
+  }, [canvasProps?.canvasIsLive])
+
+  const [lastRenderReactHookError, setLastRenderReactHookError] = React.useState(false)
+
+  const onRuntimeError = React.useCallback(
+    (editedFile: string, error: FancyError, errorInfo?: React.ErrorInfo) => {
+      addToRuntimeErrors(editedFile, error, errorInfo)
+      // Reset the canvas if we get a hooks error while the canvas is in edit/select modes.
+      if (canvasEditOrSelect && isHooksErrorMessage(error.message) && !lastRenderReactHookError) {
+        setLastRenderReactHookError(true)
+        dispatch([resetCanvas()], 'everyone')
+      }
+    },
+    [addToRuntimeErrors, canvasEditOrSelect, dispatch, lastRenderReactHookError],
+  )
+
+  const localClearRuntimeErrors = React.useCallback(() => {
+    setLastRenderReactHookError(false)
+    clearRuntimeErrors()
+  }, [clearRuntimeErrors])
+
+  const containerRef = useApplyCanvasOffsetToStyle(true)
+
+  return (
+    <>
+      {when(canvasProps == null, <CanvasLoadingScreen />)}
+      <div
+        id={CanvasContainerOuterId}
+        ref={containerRef}
+        style={{
+          position: 'absolute',
+          transition: canvasScrollAnimation ? 'transform 0.3s ease-in-out' : 'initial',
+          transform: 'translate3d(0px, 0px, 0px)',
+        }}
+      >
+        {props.shouldRenderCanvas && canvasProps != null ? (
+          <CanvasInner
+            canvasProps={canvasProps}
+            onRuntimeError={onRuntimeError}
+            localClearRuntimeErrors={localClearRuntimeErrors}
+          />
+        ) : null}
+      </div>
+    </>
+  )
+})
+CanvasComponentEntryInner.displayName = 'CanvasComponentEntryInner'
+
+function CanvasInner({
+  canvasProps,
+  onRuntimeError,
+  localClearRuntimeErrors,
+}: {
+  canvasProps: UiJsxCanvasProps
+  onRuntimeError: (editedFile: string, error: FancyError, errorInfo?: React.ErrorInfo) => void
+  localClearRuntimeErrors: () => void
+}) {
+  const invalidatedCanvasData = useInvalidatedCanvasRemount(
+    canvasProps?.mountCount ?? 0,
+    canvasProps?.domWalkerInvalidateCount ?? 0,
+  )
+  return (
+    <CanvasErrorBoundary
+      filePath={canvasProps.uiFilePath}
+      projectContents={canvasProps.projectContents}
+      reportError={onRuntimeError}
+      requireFn={canvasProps.curriedRequireFn}
+      key={`canvas-error-boundary-${canvasProps.mountCount}`}
+    >
+      <RemoteDependencyBoundary
+        projectContents={canvasProps.projectContents}
+        requireFn={canvasProps.curriedRequireFn}
+      >
+        <DomWalkerWrapper
+          {...canvasProps}
+          clearErrors={localClearRuntimeErrors}
+          invalidatedCanvasData={invalidatedCanvasData}
+        />
+      </RemoteDependencyBoundary>
+    </CanvasErrorBoundary>
+  )
+}
+
+export function useInvalidatedCanvasRemount(
+  mountCount: number,
+  domWalkerInvalidateCount: number,
+): {
+  mountCountInvalidated: boolean
+  domWalkerInvalidated: boolean
+} {
+  const previousMountCount = React.useRef<number>(mountCount)
+  const previousDomWalkerInvalidateCount = React.useRef<number>(domWalkerInvalidateCount)
+
+  const mountCountInvalidated = previousMountCount.current !== mountCount
+  const domWalkerInvalidated = previousDomWalkerInvalidateCount.current !== domWalkerInvalidateCount
+
+  previousMountCount.current = mountCount
+  previousDomWalkerInvalidateCount.current = domWalkerInvalidateCount
+
+  return {
+    mountCountInvalidated,
+    domWalkerInvalidated,
+  }
+}
 
 function DomWalkerWrapper(props: UiJsxCanvasPropsWithErrorCallback) {
-  const selectedViews = useEditorState(
-    (store) => store.editor.selectedViews,
-    'DomWalkerWrapper selectedViews',
-  )
-  let [updateInvalidatedPaths, updateInvalidatedScenes, containerRef] = useDomWalker({
-    selectedViews: selectedViews,
-    canvasInteractionHappening: props.transientFilesState != null,
-    mountCount: props.mountCount,
-    domWalkerInvalidateCount: props.domWalkerInvalidateCount,
-    scale: props.scale,
-    onDomReport: props.onDomReport,
-  })
+  let [updateInvalidatedPaths] = useDomWalkerInvalidateCallbacks()
 
   return (
     <DomWalkerInvalidatePathsCtxAtom.Provider value={updateInvalidatedPaths}>
-      <DomWalkerInvalidateScenesCtxAtom.Provider value={updateInvalidatedScenes}>
-        <UiJsxCanvas {...props} ref={containerRef} />
-      </DomWalkerInvalidateScenesCtxAtom.Provider>
+      <UiJsxCanvas {...props} />
     </DomWalkerInvalidatePathsCtxAtom.Provider>
   )
 }
 
 interface CanvasErrorBoundaryProps extends CanvasReactReportErrorCallback {
+  children?: React.ReactNode
   filePath: string
   projectContents: ProjectContentTreeRoot
   requireFn: CurriedUtopiaRequireFn | null
@@ -167,7 +232,7 @@ export class CanvasErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-    const fancyError = processErrorWithSourceMap(error, true)
+    const fancyError = processErrorWithSourceMap(null, this.props.filePath, error, true)
     this.props.reportError(this.props.filePath, asErrorObject(fancyError), errorInfo)
   }
 
@@ -181,6 +246,7 @@ export class CanvasErrorBoundary extends React.Component<
 }
 
 interface RemoteDependencyBoundaryProps {
+  children?: React.ReactNode
   projectContents: ProjectContentTreeRoot
   requireFn: CurriedUtopiaRequireFn | null
 }

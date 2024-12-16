@@ -1,29 +1,31 @@
 import React from 'react'
-import { FlexAlignment, FlexJustifyContent, FlexWrap } from 'utopia-api'
-import { ControlStatus, ControlStyles, getControlStyles } from '../../../common/control-status'
-import { FlexDirection } from 'utopia-api'
+import { FlexWrap } from 'utopia-api/core'
+import type { ControlStatus } from '../../../common/control-status'
+import type { ControlStyles } from '../../../common/control-styles'
 import { InspectorContextMenuWrapper } from '../../../../context-menu-wrapper'
-import { OptionChainControl, OptionChainOption } from '../../../controls/option-chain-control'
-import { SliderControl, DEPRECATEDSliderControlOptions } from '../../../controls/slider-control'
-import {
-  useInspectorInfoSimpleUntyped,
-  useInspectorLayoutInfo,
-  useInspectorStyleInfo,
-} from '../../../common/property-path-hooks'
-import { SelectOption } from '../../../controls/select-control'
-import { OptionsType } from 'react-select'
+import type { OptionChainOption } from '../../../controls/option-chain-control'
+import { useInspectorLayoutInfo } from '../../../common/property-path-hooks'
+import type { SelectOption } from '../../../controls/select-control'
+import type { OptionsType } from 'react-select'
 import { unsetPropertyMenuItem } from '../../../common/context-menu-items'
 import { UIGridRow } from '../../../widgets/ui-grid-row'
-import { PropertyLabel } from '../../../widgets/property-label'
-import { createLayoutPropertyPath } from '../../../../../core/layout/layout-helpers-new'
 import {
   PopupList,
   useWrappedEmptyOrUnknownOnSubmitValue,
-  SimpleNumberInput,
+  NumberInput,
+  Icons,
 } from '../../../../../uuiui'
-import { betterReactMemo } from '../../../../../uuiui-deps'
-import { OnSubmitValueOrEmpty } from '../../../controls/control'
-import { PropertyPath } from '../../../../../core/shared/project-file-types'
+import type { FlexDirection } from '../../../common/css-utils'
+import { when } from '../../../../../utils/react-conditionals'
+import { Substores, useEditorState } from '../../../../editor/store/store-hook'
+import { flexDirectionSelector } from '../../../inpector-selectors'
+import type { CanvasControlWithProps } from '../../../../../components/inspector/common/inspector-atoms'
+import type { SubduedFlexGapControlProps } from '../../../../../components/canvas/controls/select-mode/subdued-flex-gap-controls'
+import { SubduedFlexGapControl } from '../../../../../components/canvas/controls/select-mode/subdued-flex-gap-controls'
+import {
+  useSetFocusedControlsHandlers,
+  useSetHoveredControlsHandlers,
+} from '../../../../../components/canvas/controls/select-mode/select-mode-hooks'
 
 type uglyLabel =
   | 'left'
@@ -48,7 +50,7 @@ type prettyLabel =
   | 'Horizontal'
   | 'Vertical'
 
-const PrettyLabel: { [K in uglyLabel]: prettyLabel } = {
+export const PrettyLabel: { [K in uglyLabel]: prettyLabel } = {
   left: 'Left',
   center: 'Center',
   right: 'Right',
@@ -61,95 +63,13 @@ const PrettyLabel: { [K in uglyLabel]: prettyLabel } = {
   vertical: 'Vertical',
 }
 
-interface FlexFieldControlProps<T> {
+export interface FlexFieldControlProps<T> {
   value: T
   controlStatus: ControlStatus
   controlStyles: ControlStyles
   onSubmitValue: (newValue: T) => void
   onUnset: () => void
 }
-
-interface FlexDirectionControlProps extends FlexFieldControlProps<FlexDirection> {
-  flexWrap: FlexWrap
-}
-
-export const FlexDirectionControl = betterReactMemo(
-  'FlexDirectionControl',
-  (props: FlexDirectionControlProps) => {
-    return (
-      <InspectorContextMenuWrapper
-        id={`flexDirection-context-menu`}
-        items={[unsetPropertyMenuItem('Flex Direction', props.onUnset)]}
-        data={{}}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <OptionChainControl
-          id='flex.container.flexDirection'
-          key='flex.container.flexDirection'
-          testId='flex.container.flexDirection'
-          value={props.value}
-          DEPRECATED_controlOptions={{
-            labelBelow: 'Direction',
-          }}
-          controlStatus={props.controlStatus}
-          controlStyles={props.controlStyles}
-          options={flexDirectionOptions(props.flexWrap)}
-          onSubmitValue={props.onSubmitValue}
-        />
-      </InspectorContextMenuWrapper>
-    )
-  },
-)
-
-interface FlexAlignItemsControlProps extends FlexFieldControlProps<FlexAlignment> {
-  alignDirection: uglyLabel
-  alignItemsFlexStart: uglyLabel
-  alignItemsFlexEnd: uglyLabel
-}
-
-const alignItemsProp = [createLayoutPropertyPath('alignItems')]
-
-export const FlexAlignItemsControl = betterReactMemo(
-  'FlexAlignItemsControl',
-  (props: FlexAlignItemsControlProps) => {
-    return (
-      <InspectorContextMenuWrapper
-        id={`alignItems-context-menu`}
-        items={[unsetPropertyMenuItem('Align Items', props.onUnset)]}
-        data={{}}
-      >
-        <UIGridRow padded={true} variant='<---1fr--->|------172px-------|'>
-          <PropertyLabel target={alignItemsProp}>Align</PropertyLabel>
-          <div
-            style={{
-              textAlign: 'center',
-              display: 'flex',
-              flexDirection: 'row',
-            }}
-          >
-            <OptionChainControl
-              id='flex.container.alignItems'
-              key='flex.container.alignItems'
-              testId='flex.container.alignItems'
-              value={props.value}
-              controlStatus={props.controlStatus}
-              controlStyles={props.controlStyles}
-              options={alignItemsOptions(
-                props.alignDirection,
-                props.alignItemsFlexStart,
-                props.alignItemsFlexEnd,
-              )}
-              onSubmitValue={props.onSubmitValue}
-            />
-          </div>
-        </UIGridRow>
-      </InspectorContextMenuWrapper>
-    )
-  },
-)
 
 interface FlexWrapControlProps extends FlexFieldControlProps<FlexWrap> {}
 
@@ -168,13 +88,18 @@ const FlexWrapOptions: OptionsType<SelectOption> = [
   },
 ]
 
-export const FlexWrapControl = betterReactMemo('FlexWrapControl', (props: FlexWrapControlProps) => {
+export const FlexWrapControl = React.memo((props: FlexWrapControlProps) => {
   const { onSubmitValue: onSubmit } = props
   const onSubmitValue = React.useCallback(
     (newValue: SelectOption) => {
       onSubmit(newValue.value)
     },
     [onSubmit],
+  )
+  const flexDirection = useEditorState(
+    Substores.metadata,
+    flexDirectionSelector,
+    'FlexWrapControl flexDirection',
   )
 
   return (
@@ -186,272 +111,118 @@ export const FlexWrapControl = betterReactMemo('FlexWrapControl', (props: FlexWr
         display: 'flex',
         overflow: 'hidden',
         width: undefined,
-        marginLeft: -8, // this is Balazs hacking the UI so the text of the dropdown aligns with the rest of the rows
       }}
     >
-      <PopupList
-        value={FlexWrapOptions.find((option) => option.value === props.value)}
-        options={FlexWrapOptions}
-        onSubmitValue={onSubmitValue}
-        controlStyles={props.controlStyles}
-        containerMode='showBorderOnHover'
-      />
-    </InspectorContextMenuWrapper>
-  )
-})
-
-interface FlexJustifyContentControlProps extends FlexFieldControlProps<FlexJustifyContent> {
-  flexDirection: FlexDirection
-  justifyFlexStart: uglyLabel
-  justifyFlexEnd: uglyLabel
-}
-
-export const FlexJustifyContentControl = betterReactMemo(
-  'FlexJustifyContentControl',
-  (props: FlexJustifyContentControlProps) => {
-    return (
-      <InspectorContextMenuWrapper
-        id={`justifyContent-context-menu`}
-        items={[unsetPropertyMenuItem('Justify Content', props.onUnset)]}
-        data={{}}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <OptionChainControl
-          id='flex.container.justifyContent'
-          key='flex.container.justifyContent'
-          testId='flex.container.justifyContent'
-          value={props.value}
-          DEPRECATED_controlOptions={{
-            labelBelow: 'Justify',
-          }}
-          options={justifyContentOptions(
-            props.flexDirection,
-            props.justifyFlexStart,
-            props.justifyFlexEnd,
-          )}
-          onSubmitValue={props.onSubmitValue}
-          controlStatus={props.controlStatus}
+      <UIGridRow padded={false} variant='<-auto-><----------1fr--------->'>
+        {when(flexDirection.startsWith('row'), <Icons.WrapRow />)}
+        {when(flexDirection.startsWith('column'), <Icons.WrapColumn />)}
+        <PopupList
+          value={FlexWrapOptions.find((option) => option.value === props.value)}
+          options={FlexWrapOptions}
+          onSubmitValue={onSubmitValue}
           controlStyles={props.controlStyles}
+          style={{ background: 'transparent' }}
         />
-      </InspectorContextMenuWrapper>
-    )
-  },
-)
-
-interface FlexGapControlProps extends FlexFieldControlProps<number> {
-  onSubmitValue: OnSubmitValueOrEmpty<number>
-  onTransientSubmitValue: OnSubmitValueOrEmpty<number>
-}
-
-const flexGapProp = [createLayoutPropertyPath('FlexGap')]
-
-export const FlexGapControl = betterReactMemo('FlexGapControl', (props: FlexGapControlProps) => {
-  const menuItems = [unsetPropertyMenuItem('Flex Gap', props.onUnset)]
-  const wrappedOnSubmit = useWrappedEmptyOrUnknownOnSubmitValue(props.onSubmitValue, props.onUnset)
-  const wrappedOnTransientSubmit = useWrappedEmptyOrUnknownOnSubmitValue(
-    props.onTransientSubmitValue,
-    props.onUnset,
-  )
-  return (
-    <InspectorContextMenuWrapper id={`gap-context-menu`} items={menuItems} data={{}}>
-      <UIGridRow padded={true} variant='<---1fr--->|------172px-------|'>
-        <PropertyLabel target={flexGapProp}>Gap</PropertyLabel>
-        <UIGridRow padded={false} variant='<--------auto-------->|--45px--|'>
-          <SliderControl
-            id='flex.container.gap.main'
-            key='flex.container.gap.main'
-            testId='flex.container.gap.main'
-            value={props.value}
-            DEPRECATED_controlOptions={
-              {
-                minimum: 0,
-                maximum: 50,
-                stepSize: 1,
-                origin: 0,
-                filled: true,
-                tooltip: 'Gap (sets margin on children)',
-              } as DEPRECATEDSliderControlOptions
-            }
-            onSubmitValue={props.onSubmitValue}
-            onTransientSubmitValue={props.onTransientSubmitValue}
-            controlStatus={props.controlStatus}
-            controlStyles={props.controlStyles}
-          />
-          <SimpleNumberInput
-            id='flex.container.gap.main'
-            testId='flex.container.gap.main'
-            value={props.value}
-            minimum={0}
-            maximum={50}
-            stepSize={1}
-            onSubmitValue={wrappedOnSubmit}
-            onTransientSubmitValue={wrappedOnTransientSubmit}
-            onForcedSubmitValue={wrappedOnSubmit}
-            controlStatus={props.controlStatus}
-            defaultUnitToHide={'px'}
-          />
-        </UIGridRow>
       </UIGridRow>
     </InspectorContextMenuWrapper>
   )
 })
 
-interface FlexAlignContentControlProps extends FlexFieldControlProps<FlexAlignment> {
-  alignDirection: uglyLabel
-  alignContentFlexStart: uglyLabel
-  alignContentFlexEnd: uglyLabel
+const flexGapControlsForHoverAndFocused: {
+  hovered: Array<CanvasControlWithProps<SubduedFlexGapControlProps>>
+  focused: Array<CanvasControlWithProps<SubduedFlexGapControlProps>>
+} = {
+  hovered: [
+    {
+      control: SubduedFlexGapControl,
+      props: {
+        hoveredOrFocused: 'hovered',
+      },
+      key: `subdued-flex-gap-control-hovered`,
+    },
+  ],
+  focused: [
+    {
+      control: SubduedFlexGapControl,
+      props: {
+        hoveredOrFocused: 'focused',
+      },
+      key: `subdued-flex-gap-control-focused`,
+    },
+  ],
 }
 
-export const FlexAlignContentControl = betterReactMemo(
-  'FlexAlignContentControl',
-  (props: FlexAlignContentControlProps) => {
-    return (
-      <InspectorContextMenuWrapper
-        id={`alignContent-context-menu`}
-        items={[unsetPropertyMenuItem('Align Content', props.onUnset)]}
-        data={{}}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          textAlign: 'center',
-        }}
+export const FlexGapControl = React.memo(() => {
+  const { value, onSubmitValue, onUnsetValues, onTransientSubmitValue, controlStatus } =
+    useInspectorLayoutInfo('gap')
+  const menuItems = [unsetPropertyMenuItem('Flex Gap', onUnsetValues)]
+
+  const wrappedOnSubmitValue = useWrappedEmptyOrUnknownOnSubmitValue(onSubmitValue, onUnsetValues)
+  const wrappedOnTransientSubmitValue = useWrappedEmptyOrUnknownOnSubmitValue(
+    onTransientSubmitValue,
+    onUnsetValues,
+  )
+
+  const flexDirection = useEditorState(
+    Substores.metadata,
+    flexDirectionSelector,
+    'FlexGapControl flexDirection',
+  )
+
+  const { onMouseEnter, onMouseLeave } = useSetHoveredControlsHandlers<SubduedFlexGapControlProps>()
+  const onMouseEnterWithFlexGapControls = React.useCallback(
+    () => onMouseEnter(flexGapControlsForHoverAndFocused.hovered),
+    [onMouseEnter],
+  )
+
+  const { onFocus, onBlur } = useSetFocusedControlsHandlers<SubduedFlexGapControlProps>()
+  const onFocusWithFlexGapControls = React.useCallback(
+    () => onFocus(flexGapControlsForHoverAndFocused.focused),
+    [onFocus],
+  )
+
+  const inputProps = React.useMemo(
+    () => ({
+      onFocus: onFocusWithFlexGapControls,
+      onBlur: onBlur,
+    }),
+    [onFocusWithFlexGapControls, onBlur],
+  )
+
+  return (
+    <InspectorContextMenuWrapper id={`gap-context-menu`} items={menuItems} data={{}}>
+      <UIGridRow
+        padded={false}
+        variant='<-------------1fr------------->'
+        onMouseEnter={onMouseEnterWithFlexGapControls}
+        onMouseLeave={onMouseLeave}
       >
-        <OptionChainControl
-          id='flex.container.alignContent'
-          key='flex.container.alignContent'
-          testId='flex.container.alignContent'
-          value={props.value}
-          options={alignContentOptions(
-            props.alignDirection,
-            props.alignContentFlexStart,
-            props.alignContentFlexEnd,
-          )}
-          onSubmitValue={props.onSubmitValue}
-          controlStatus={props.controlStatus}
-          controlStyles={props.controlStyles}
+        <NumberInput
+          id='flex.container.gap'
+          testId='flex.container.gap'
+          key='flex.container.gap'
+          value={value}
+          minimum={0}
+          clampOnSubmitValue={true}
+          onSubmitValue={wrappedOnSubmitValue}
+          onTransientSubmitValue={wrappedOnTransientSubmitValue}
+          onForcedSubmitValue={wrappedOnSubmitValue}
+          controlStatus={controlStatus}
+          numberType='LengthPercent'
+          defaultUnitToHide={'px'}
+          innerLabel={
+            flexDirection.startsWith('row') ? (
+              <Icons.GapHorizontal color='on-highlight-secondary' />
+            ) : (
+              <Icons.GapVertical color='on-highlight-secondary' />
+            )
+          }
+          inputProps={inputProps}
         />
-      </InspectorContextMenuWrapper>
-    )
-  },
-)
-
-const alignContentOptions = (
-  alignDirection: string,
-  alignContentFlexStart: uglyLabel,
-  alignContentFlexEnd: uglyLabel,
-) =>
-  [
-    {
-      value: 'flex-start',
-      tooltip: PrettyLabel[alignContentFlexStart],
-      icon: {
-        category: `layout/flex`,
-        type: `alignContent-${alignDirection}-${alignContentFlexStart}`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-    {
-      value: 'center',
-      tooltip: 'Center',
-      icon: {
-        category: `layout/flex`,
-        type: `alignContent-${alignDirection}-center`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-    {
-      value: 'flex-end',
-      tooltip: PrettyLabel[alignContentFlexEnd],
-      icon: {
-        category: `layout/flex`,
-        type: `alignContent-${alignDirection}-${alignContentFlexEnd}`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-    {
-      value: 'stretch',
-      tooltip: 'Stretch',
-      icon: {
-        category: `layout/flex`,
-        type: `alignContent-${alignDirection}-stretch`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-  ] as Array<OptionChainOption<string | number>>
-
-const justifyContentOptions = (
-  alignDirection: FlexDirection,
-  justifyFlexStart: uglyLabel,
-  justifyFlexEnd: uglyLabel,
-) =>
-  [
-    {
-      value: 'flex-start',
-      tooltip: PrettyLabel[justifyFlexStart],
-      icon: {
-        category: `layout/flex`,
-        type: `justifyContent-${alignDirection}-${justifyFlexStart}`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-    {
-      value: 'center',
-      tooltip: 'Center',
-      icon: {
-        category: `layout/flex`,
-        type: `justifyContent-${alignDirection}-center`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-    {
-      value: 'flex-end',
-      tooltip: PrettyLabel[justifyFlexEnd],
-      icon: {
-        category: `layout/flex`,
-        type: `justifyContent-${alignDirection}-${justifyFlexEnd}`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-    {
-      value: 'space-between',
-      tooltip: 'Space Between',
-      icon: {
-        category: `layout/flex`,
-        type: `justifyContent-${alignDirection}-spaceBetween`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-    {
-      value: 'space-around',
-      tooltip: 'Space Around',
-      icon: {
-        category: `layout/flex`,
-        type: `justifyContent-${alignDirection}-spaceAround`,
-        color: 'secondary',
-        width: 16,
-        height: 16,
-      },
-    },
-  ] as Array<OptionChainOption<string | number>>
+      </UIGridRow>
+    </InspectorContextMenuWrapper>
+  )
+})
 
 export const alignItemsOptions = (
   alignDirection: string,

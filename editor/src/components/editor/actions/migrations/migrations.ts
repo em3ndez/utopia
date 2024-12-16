@@ -1,36 +1,37 @@
-import { PersistentModel, StoryboardFilePath } from '../../store/editor-state'
+import type { PersistentModel } from '../../store/editor-state'
+import { StoryboardFilePath } from '../../store/editor-state'
 import { objectMap } from '../../../../core/shared/object-utils'
-import {
+import type {
   ProjectFile,
-  isParseSuccess,
   SceneMetadata,
   TextFile,
+} from '../../../../core/shared/project-file-types'
+import {
+  isParseSuccess,
   isTextFile,
   textFile,
   textFileContents,
   unparsed,
   RevisionsState,
-  isParsedTextFile,
 } from '../../../../core/shared/project-file-types'
 import { isRight, right } from '../../../../core/shared/either'
 import {
   BakedInStoryboardVariableName,
   convertScenesToUtopiaCanvasComponent,
 } from '../../../../core/model/scene-utils'
+import type { ProjectContentFile, ProjectContentsTree } from '../../../assets'
 import {
   addFileToProjectContents,
   contentsToTree,
-  getContentsTreeFileFromString,
+  getProjectFileByFilePath,
   projectContentFile,
-  ProjectContentFile,
-  ProjectContentsTree,
   removeFromProjectContents,
   transformContentsTree,
   walkContentsTree,
 } from '../../../assets'
 import { isUtopiaJSXComponent } from '../../../../core/shared/element-template'
 
-export const CURRENT_PROJECT_VERSION = 7
+export const CURRENT_PROJECT_VERSION = 15
 
 export function applyMigrations(
   persistentModel: PersistentModel,
@@ -42,7 +43,15 @@ export function applyMigrations(
   const version5 = migrateFromVersion4(version4)
   const version6 = migrateFromVersion5(version5)
   const version7 = migrateFromVersion6(version6)
-  return version7
+  const version8 = migrateFromVersion7(version7)
+  const version9 = migrateFromVersion8(version8)
+  const version10 = migrateFromVersion9(version9)
+  const version11 = migrateFromVersion10(version10)
+  const version12 = migrateFromVersion11(version11)
+  const version13 = migrateFromVersion12(version12)
+  const version14 = migrateFromVersion13(version13)
+  const version15 = migrateFromVersion14(version14)
+  return version15
 }
 
 function migrateFromVersion0(
@@ -138,8 +147,9 @@ function migrateFromVersion2(
           ((file.fileContents as any).value.canvasMetadata.value as any).utopiaCanvasJSXComponent !=
             null
         ) {
-          const utopiaCanvasJSXComponent = ((file.fileContents as any).value.canvasMetadata
-            .value as any).utopiaCanvasJSXComponent
+          const utopiaCanvasJSXComponent = (
+            (file.fileContents as any).value.canvasMetadata.value as any
+          ).utopiaCanvasJSXComponent
           const updatedTopLevelElements = [
             ...(file.fileContents as any).value.topLevelElements,
             utopiaCanvasJSXComponent,
@@ -260,12 +270,11 @@ function migrateFromVersion5(
               return projectContentFile(tree.fullPath, newFile)
             } else if (fileType === 'UI_JS_FILE') {
               const code = (file as any).fileContents.value.code
-              const lastRevisedTime = (file as any).lastRevisedTime
               const newFile = textFile(
                 textFileContents(code, unparsed, RevisionsState.CodeAhead),
                 null,
                 null,
-                lastRevisedTime,
+                0,
               )
               return projectContentFile(tree.fullPath, newFile)
             } else {
@@ -305,7 +314,7 @@ function migrateFromVersion6(
 
     let updatedProjectContents = persistentModel.projectContents
     if (storyboardTarget != null) {
-      const file = getContentsTreeFileFromString(updatedProjectContents, storyboardTarget)
+      const file = getProjectFileByFilePath(updatedProjectContents, storyboardTarget)
       if (file == null) {
         throw new Error(`Internal error in migration: Unable to find file ${storyboardTarget}.`)
       } else {
@@ -322,6 +331,160 @@ function migrateFromVersion6(
       ...persistentModel,
       projectVersion: 7,
       projectContents: updatedProjectContents,
+    }
+  }
+}
+
+function migrateFromVersion7(
+  persistentModel: PersistentModel,
+): PersistentModel & { projectVersion: 8 } {
+  if (persistentModel.projectVersion != null && persistentModel.projectVersion !== 7) {
+    return persistentModel as any
+  } else {
+    return {
+      ...persistentModel,
+      projectVersion: 8,
+      githubSettings: {
+        targetRepository: null,
+      } as any,
+    }
+  }
+}
+
+function migrateFromVersion8(
+  persistentModel: PersistentModel,
+): PersistentModel & { projectVersion: 9 } {
+  if (persistentModel.projectVersion != null && persistentModel.projectVersion !== 8) {
+    return persistentModel as any
+  } else {
+    return {
+      ...persistentModel,
+      projectVersion: 9,
+      githubSettings: {
+        ...persistentModel.githubSettings,
+        originCommit: null,
+      },
+    }
+  }
+}
+
+function migrateFromVersion9(
+  persistentModel: PersistentModel,
+): PersistentModel & { projectVersion: 10 } {
+  if (persistentModel.projectVersion != null && persistentModel.projectVersion !== 9) {
+    return persistentModel as any
+  } else {
+    return {
+      ...persistentModel,
+      projectVersion: 10,
+      githubSettings: {
+        ...persistentModel.githubSettings,
+        originCommit: null,
+        branchName: null,
+      },
+      githubChecksums: null,
+      branchContents: null,
+    } as any
+  }
+}
+
+function migrateFromVersion10(
+  persistentModel: PersistentModel,
+): PersistentModel & { projectVersion: 11 } {
+  if (persistentModel.projectVersion != null && persistentModel.projectVersion !== 10) {
+    return persistentModel as any
+  } else {
+    return {
+      ...persistentModel,
+      projectVersion: 11,
+      githubSettings: {
+        ...persistentModel.githubSettings,
+        originCommit: null,
+        branchName: null,
+        branchLoaded: false,
+      },
+      githubChecksums: null,
+      branchContents: null,
+    } as any
+  }
+}
+
+function migrateFromVersion11(
+  persistentModel: PersistentModel,
+): PersistentModel & { projectVersion: 12 } {
+  if (persistentModel.projectVersion != null && persistentModel.projectVersion !== 11) {
+    return persistentModel as any
+  } else {
+    return {
+      ...persistentModel,
+      projectVersion: 12,
+      assetChecksums: {},
+    } as any
+  }
+}
+
+function migrateFromVersion12(
+  persistentModel: PersistentModel,
+): PersistentModel & { projectVersion: 13 } {
+  if (persistentModel.projectVersion != null && persistentModel.projectVersion !== 12) {
+    return persistentModel as any
+  } else {
+    return {
+      ...persistentModel,
+      projectVersion: 13,
+      colorSwatches: [],
+    }
+  }
+}
+
+function migrateFromVersion13(
+  persistentModel: PersistentModel,
+): PersistentModel & { projectVersion: 14 } {
+  if (persistentModel.projectVersion != null && persistentModel.projectVersion !== 13) {
+    return persistentModel as any
+  } else {
+    return {
+      ...persistentModel,
+      projectVersion: 14,
+      projectContents: transformContentsTree(
+        persistentModel.projectContents,
+        (tree: ProjectContentsTree) => {
+          if (tree.type === 'PROJECT_CONTENT_FILE') {
+            const file: ProjectContentFile['content'] = tree.content
+            if (file.type === 'TEXT_FILE') {
+              // We replaced lastRevisedTime (a timestamp) with versionNumber
+              const migratedFile = textFile(
+                file.fileContents,
+                file.lastSavedContents,
+                file.lastParseSuccess,
+                0,
+              )
+              return projectContentFile(tree.fullPath, migratedFile)
+            } else {
+              return tree
+            }
+          } else {
+            return tree
+          }
+        },
+      ),
+    }
+  }
+}
+
+function migrateFromVersion14(
+  persistentModel: PersistentModel,
+): PersistentModel & { projectVersion: 15 } {
+  if (persistentModel.projectVersion != null && persistentModel.projectVersion !== 14) {
+    return persistentModel as any
+  } else {
+    return {
+      ...persistentModel,
+      projectVersion: 15,
+      codeEditorErrors: {
+        ...persistentModel.codeEditorErrors,
+        componentDescriptorErrors: persistentModel.codeEditorErrors.componentDescriptorErrors ?? {},
+      },
     }
   }
 }

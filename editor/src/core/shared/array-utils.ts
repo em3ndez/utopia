@@ -1,5 +1,5 @@
-import { MapLike } from 'typescript'
-import { is } from './equality-utils'
+import type { MapLike } from 'typescript'
+import { is, shallowEqual } from './equality-utils'
 import { clamp } from './math-utils'
 import { fastForEach } from './utils'
 
@@ -36,7 +36,7 @@ export function flatMapArray<T, U>(
 
 export function mapDropNulls<T, U>(
   fn: (t: T, i: number) => U | null | undefined,
-  a: Array<T>,
+  a: ReadonlyArray<T>,
 ): Array<U> {
   let result: Array<U> = []
   fastForEach(a, (t, i) => {
@@ -46,6 +46,38 @@ export function mapDropNulls<T, U>(
     }
   })
   return result
+}
+
+export function dropNulls<T>(a: ReadonlyArray<T | null | undefined>): Array<T> {
+  return mapDropNulls((t) => t, a)
+}
+
+export function mapAndFilter<T, U>(
+  mapFn: (t: T, i: number) => U,
+  filter: (u: U) => boolean,
+  a: ReadonlyArray<T>,
+): Array<U> {
+  return mapDropNulls((t: T, i: number) => {
+    const mapResult = mapFn(t, i)
+    if (filter(mapResult)) {
+      return mapResult
+    } else {
+      return null
+    }
+  }, a)
+}
+
+export function mapFirstApplicable<T, U>(
+  array: Iterable<T>,
+  mapFn: (t: T, i: number) => U | null,
+): U | null {
+  for (const value of array) {
+    const mapped = mapFn(value, 0)
+    if (mapped != null) {
+      return mapped
+    }
+  }
+  return null
 }
 
 // Dumb version of:
@@ -167,6 +199,10 @@ export function last<T>(array: Array<T>): T | undefined {
   return array[array.length - 1]
 }
 
+export function lastOfNonEmptyArray<T>(array: NonEmptyArray<T>): T {
+  return array[array.length - 1]
+}
+
 export function splitAt<T>(n: number, array: Array<T>): [Array<T>, Array<T>] {
   return [take(n, array), drop(n, array)]
 }
@@ -236,11 +272,31 @@ export function addUniquely<T extends string | number | boolean | null | undefin
   }
 }
 
+export function pushUniquelyBy<T>(array: Array<T>, value: T, eq: (l: T, r: T) => boolean): void {
+  if (array.findIndex((a) => eq(a, value)) === -1) {
+    array.push(value)
+  }
+}
+
 export function addAllUniquely<T extends string | number | boolean | null | undefined>(
   array: Array<T>,
   values: Array<T>,
 ): Array<T> {
   return values.reduce(addUniquely, array)
+}
+
+export function addAllUniquelyBy<T>(
+  array: Array<T>,
+  values: Array<T>,
+  eq: (l: T, r: T) => boolean,
+): Array<T> {
+  let workingArray = [...array]
+  fastForEach(values, (value) => {
+    if (!workingArray.some((a) => eq(a, value))) {
+      workingArray.push(value)
+    }
+  })
+  return workingArray
 }
 
 export function findLastIndex<T>(predicate: (t: T) => boolean, array: ReadonlyArray<T>): number {
@@ -298,7 +354,7 @@ export function immutablyUpdateArrayIndex<T>(
   return working
 }
 
-export function safeIndex<T>(array: Array<T>, index: number): T | undefined {
+export function safeIndex<T>(array: ReadonlyArray<T>, index: number): T | undefined {
   if (index in array) {
     return array[index]
   } else {
@@ -334,13 +390,216 @@ export function intersection<T>(
   return result
 }
 
-export function insert<T>(index: number, element: T, array: Array<T>): Array<T> {
+export function difference<T>(
+  first: Array<T>,
+  second: Array<T>,
+  eqFn: (l: T, r: T) => boolean = is,
+): Array<T> {
+  let result: Array<T> = []
+  for (const valueFromFirst of first) {
+    let foundInSecondArray: boolean = false
+    for (const valueFromSecond of second) {
+      foundInSecondArray = eqFn(valueFromFirst, valueFromSecond)
+      if (foundInSecondArray) {
+        break
+      }
+    }
+    if (!foundInSecondArray) {
+      result.push(valueFromFirst)
+    }
+  }
+
+  return result
+}
+
+export function insert<T>(index: number, element: T, array: ReadonlyArray<T>): Array<T> {
   const clampedIndex = clamp(0, array.length, index)
   return [...array.slice(0, clampedIndex), element, ...array.slice(clampedIndex, array.length)]
+}
+
+export function insertMultiple<T>(index: number, element: Array<T>, array: Array<T>): Array<T> {
+  const clampedIndex = clamp(0, array.length, index)
+  return [...array.slice(0, clampedIndex), ...element, ...array.slice(clampedIndex, array.length)]
 }
 
 export function reverse<T>(array: Array<T>): Array<T> {
   let result = [...array]
   result.reverse()
   return result
+}
+
+export function aperture<T>(n: number, array: Array<T>): Array<Array<T>> {
+  if (n > 0) {
+    if (n > array.length) {
+      return [array]
+    } else {
+      let result: Array<Array<T>> = []
+      for (let arrayIndex: number = 0; arrayIndex < array.length - n + 1; arrayIndex++) {
+        result.push(array.slice(arrayIndex, arrayIndex + n))
+      }
+      return result
+    }
+  } else {
+    return []
+  }
+}
+
+export function cartesianProduct<T, U>(one: ReadonlyArray<T>, other: ReadonlyArray<U>): [T, U][] {
+  return one.flatMap((x) => other.map((y): [T, U] => [x, y]))
+}
+
+export function allElemsEqual<T>(
+  ts: T[],
+  areEqual: (a: T, b: T) => boolean = shallowEqual,
+): boolean {
+  if (ts.length === 0) {
+    return false
+  }
+
+  return ts.slice(1).every((obj) => areEqual(ts[0], obj))
+}
+
+export function strictEvery<T>(
+  ts: T[],
+  predicate: (t: T, index: number, array: T[]) => boolean,
+): boolean {
+  return ts.length > 0 && ts.every(predicate)
+}
+
+export function arrayAccumulate<T>(callback: (acc: Array<T>) => void): ReadonlyArray<T> {
+  const accumulator: Array<T> = []
+  callback(accumulator)
+  return accumulator
+}
+
+export function accumulate<T>(accumulator: T, callback: (acc: T) => void): Readonly<T> {
+  callback(accumulator)
+  return accumulator
+}
+
+export function zip<A, B, C>(one: A[], other: B[], make: (a: A, b: B) => C): C[] {
+  const doZip = (oneInner: A[], otherInner: B[]) =>
+    oneInner.map((elem, idx) => make(elem, otherInner[idx]))
+
+  return one.length < other.length ? doZip(one, other) : doZip(one.slice(0, other.length), other)
+}
+
+// https://matiashernandez.dev/blog/post/typescript-how-to-create-a-non-empty-array-type
+export type NonEmptyArray<T> = [T, ...T[]]
+export function isNonEmptyArray<T>(array: T[]): array is NonEmptyArray<T> {
+  let [first] = array
+  return first != null
+}
+
+export function isEmptyArray<T>(array: T[]): array is [] {
+  return array.length === 0
+}
+
+export function possiblyUniqueInArray(
+  array: number[],
+  existing: (number | null)[],
+  start: number,
+): number {
+  let index = start
+  while (existing.includes(index)) {
+    index++
+    if (index >= array.length) {
+      index = 0
+    }
+    if (index === start) {
+      return start
+    }
+  }
+  return index
+}
+
+export function isPrefixOf<T>(
+  possiblePrefix: Array<T>,
+  checkAgainst: Array<T>,
+  equals: (first: T, second: T) => boolean = (first, second) => first === second,
+): boolean {
+  if (possiblePrefix.length <= checkAgainst.length) {
+    return possiblePrefix.every((prefixValue, prefixIndex) => {
+      return equals(prefixValue, checkAgainst[prefixIndex])
+    })
+  } else {
+    // Prefix is too long to be a prefix.
+    return false
+  }
+}
+
+export function valueOrArrayToArray<T>(ts: T | T[]): T[] {
+  return Array.isArray(ts) ? ts : [ts]
+}
+
+export function createArrayWithLength<T>(length: number, value: (index: number) => T): T[] {
+  return Array.from({ length }, (_, index) => {
+    // see issue https://github.com/microsoft/TypeScript/issues/37750
+    return value instanceof Function ? value(index) : value
+  })
+}
+
+export function matrixGetter<T>(array: T[], width: number): (row: number, column: number) => T {
+  return (row, column) => {
+    return array[row * width + column]
+  }
+}
+
+export function range(start: number, end: number): Array<number> {
+  let result: Array<number> = []
+  for (let i = start; i < end; i++) {
+    result.push(i)
+  }
+  return result
+}
+
+export function chunkArrayEqually<T>(
+  sortedArray: T[],
+  numberOfChunks: number,
+  valueFn: (t: T) => number,
+): T[][] {
+  const chunks: T[][] = Array.from({ length: numberOfChunks }, () => [])
+  const chunkSums: number[] = Array(numberOfChunks).fill(0)
+  for (const data of sortedArray) {
+    let minIndex = 0
+    for (let i = 1; i < numberOfChunks; i++) {
+      if (chunkSums[i] < chunkSums[minIndex]) {
+        minIndex = i
+      }
+    }
+    chunks[minIndex].push(data)
+    chunkSums[minIndex] += valueFn(data)
+  }
+  return chunks.filter((chunk) => chunk.length > 0)
+}
+
+export function sortArrayByAndReturnPermutation<T>(
+  array: T[],
+  sortFn: (t: T) => number,
+  ascending: boolean = true,
+): { sortedArray: T[]; permutation: number[] } {
+  const permutation = array.map((_, index) => index)
+  permutation.sort((a, b) => {
+    const sortResult = sortFn(array[a]) - sortFn(array[b])
+    return ascending ? sortResult : -sortResult
+  })
+  const sortedArray = permutation.map((index) => array[index])
+  return { sortedArray, permutation }
+}
+
+export function revertArrayOrder<T>(array: T[], permutation: number[]): T[] {
+  return array.map((_, index) => array[permutation.indexOf(index)])
+}
+
+// From https://stackoverflow.com/a/31879739
+export function interleaveArray<T>(array: T[], elem: T): T[] {
+  const newArray = []
+  let i = 0
+  if (i < array.length) {
+    newArray.push(array[i++])
+  }
+  while (i < array.length) {
+    newArray.push(elem, array[i++])
+  }
+  return newArray
 }

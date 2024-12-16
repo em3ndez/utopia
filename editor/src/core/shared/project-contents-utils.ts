@@ -1,9 +1,11 @@
-import { getContentsTreeFileFromString, ProjectContentTreeRoot } from '../../components/assets'
+import type { ProjectContentTreeRoot } from '../../components/assets'
+import { getProjectFileByFilePath } from '../../components/assets'
 import { objectKeyParser, parseString } from '../../utils/value-parser-utils'
 import { defaultEither, eitherToMaybe, isLeft } from './either'
 import { is } from './equality-utils'
 import { memoize } from './memoize'
-import { isTextFile, ProjectContents, ProjectFile } from './project-file-types'
+import type { ProjectFile } from './project-file-types'
+import { isTextFile, ProjectContents } from './project-file-types'
 
 function parsePackageJsonInner(
   packageJson: ProjectFile | undefined | null,
@@ -34,10 +36,13 @@ function packageJsonEquals(l: ProjectFile | undefined, r: ProjectFile | undefine
   }
 }
 
-const parsePackageJson = memoize(parsePackageJsonInner, { maxSize: 1, equals: packageJsonEquals })
+const parsePackageJson = memoize(parsePackageJsonInner, {
+  maxSize: 1,
+  matchesArg: packageJsonEquals,
+})
 
 function getParsedPackageJson(projectContents: ProjectContentTreeRoot): Record<string, any> | null {
-  return parsePackageJson(getContentsTreeFileFromString(projectContents, '/package.json'))
+  return parsePackageJson(getProjectFileByFilePath(projectContents, '/package.json'))
 }
 
 function getUtopiaSpecificStringSetting(

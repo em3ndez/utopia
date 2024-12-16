@@ -1,9 +1,11 @@
+// disaling jest expect rules because this file uses Chai.expect
+/* eslint-disable jest/valid-expect */
 import * as Chai from 'chai'
 const expect = Chai.expect
 import Utils from '../utils/utils'
 
 import * as EG from './expression-graph'
-import {
+import type {
   Expression,
   Evaluator,
   EvaluatedDependency,
@@ -74,9 +76,17 @@ describe('evaluateExpressions', function () {
         context[dependencyVarName] = dependency.value
       }
       const fixedExpression = replaceAll(expression, '@', '')
-      return Utils.SafeFunction(false, context, 'return ' + fixedExpression, null, [], (e) => {
-        throw e
-      })(null)
+      return Utils.SafeFunction(
+        false,
+        context,
+        'test.js',
+        'return ' + fixedExpression,
+        null,
+        [],
+        (e) => {
+          throw e
+        },
+      )(null)
     }
     const expectedResult: EvaluateExpressionsResult<string> = {
       type: 'circularreference',
@@ -185,9 +195,17 @@ describe('evaluateExpressions', function () {
         context[dependencyVarName] = dependency.value
       }
       const fixedExpression = replaceAll(expression, '@', '')
-      return Utils.SafeFunction(false, context, 'return ' + fixedExpression, null, [], (e) => {
-        throw e
-      })(null)
+      return Utils.SafeFunction(
+        false,
+        context,
+        'test.js',
+        'return ' + fixedExpression,
+        null,
+        [],
+        (e) => {
+          throw e
+        },
+      )(null)
     }
     const expectedResult: EvaluateExpressionsResult<string> = {
       type: 'success',
@@ -276,9 +294,17 @@ describe('evaluateExpressions', function () {
         context[dependencyVarName] = dependency.value
       }
       const fixedExpression = replaceAll(expression, '@', '')
-      return Utils.SafeFunction(false, context, 'return ' + fixedExpression, null, [], (e) => {
-        throw e
-      })(null)
+      return Utils.SafeFunction(
+        false,
+        context,
+        'test.js',
+        'return ' + fixedExpression,
+        null,
+        [],
+        (e) => {
+          throw e
+        },
+      )(null)
     }
     const expectedResult: EvaluateExpressionsResult<string> = {
       type: 'success',
@@ -361,9 +387,17 @@ describe('evaluateExpressions', function () {
         context[dependencyVarName] = dependency.value
       }
       const fixedExpression = replaceAll(expression, '@', '')
-      return Utils.SafeFunction(false, context, 'return ' + fixedExpression, null, [], (e) => {
-        throw e
-      })(null)
+      return Utils.SafeFunction(
+        false,
+        context,
+        'test.js',
+        'return ' + fixedExpression,
+        null,
+        [],
+        (e) => {
+          throw e
+        },
+      )(null)
     }
     const expectedResult: EvaluateExpressionsResult<string> = {
       type: 'success',
@@ -422,9 +456,17 @@ describe('evaluateExpressions', function () {
         context[dependencyVarName] = dependency.value
       }
       const fixedExpression = replaceAll(expression, '@', '')
-      return Utils.SafeFunction(false, context, 'return ' + fixedExpression, null, [], (e) => {
-        throw e
-      })(null)
+      return Utils.SafeFunction(
+        false,
+        context,
+        'test.js',
+        'return ' + fixedExpression,
+        null,
+        [],
+        (e) => {
+          throw e
+        },
+      )(null)
     }
     const expectedResult: EvaluateExpressionsResult<string> = {
       type: 'success',

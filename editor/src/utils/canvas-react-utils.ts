@@ -1,20 +1,13 @@
 import React from 'react'
-import Utils from './utils'
-import { keepDeepReferenceEqualityIfPossible } from './react-performance'
 import { omitWithPredicate } from '../core/shared/object-utils'
-import { MapLike } from 'typescript'
+import type { MapLike } from 'typescript'
 import { firstLetterIsLowerCase } from '../core/shared/string-utils'
 import { isIntrinsicHTMLElementString } from '../core/shared/element-template'
-import {
-  UtopiaKeys,
-  UTOPIA_UIDS_KEY,
-  UTOPIA_PATHS_KEY,
-  UTOPIA_UID_PARENTS_KEY,
-} from '../core/model/utopia-constants'
+import { UtopiaKeys, UTOPIA_UID_KEY, UTOPIA_PATH_KEY } from '../core/model/utopia-constants'
 import { v4 } from 'uuid'
-import { appendToUidString } from '../core/shared/uid-utils'
 import { isFeatureEnabled } from './feature-switches'
 import { PERFORMANCE_MARKS_ALLOWED } from '../common/env-vars'
+import { memoize } from '../core/shared/memoize'
 
 const realCreateElement = React.createElement
 
@@ -32,9 +25,11 @@ export function applyUIDMonkeyPatch(): void {
   }
 }
 
-function getDisplayName(type: any): string {
+export function getDisplayName(type: any): string {
   // taken from https://github.com/facebook/react/blob/7e405d458d6481fb1c04dfca6afab0651e6f67cd/packages/react/src/ReactElement.js#L415
-  if (typeof type === 'function') {
+  if (type == null) {
+    return 'null'
+  } else if (typeof type === 'function') {
     return type.displayName ?? type.name ?? 'Unknown'
   } else if (typeof type === 'symbol') {
     return type.toString()
@@ -52,13 +47,12 @@ function getDisplayName(type: any): string {
   }
 }
 
+function isFragment(type: any): boolean {
+  return type === React.Fragment || type.$$typeof === fragmentSymbol
+}
+
 function fragmentOrProviderOrContext(type: any): boolean {
-  return (
-    type == React.Fragment ||
-    type?.$$typeof == fragmentSymbol ||
-    type?.$$typeof == providerSymbol ||
-    type?.$$typeof == contextSymbol
-  )
+  return isFragment(type) || type?.$$typeof == providerSymbol || type?.$$typeof == contextSymbol
 }
 
 function keyShouldBeExcluded(key: string): boolean {
@@ -91,31 +85,31 @@ function shouldIncludeDataUID(type: any): boolean {
 
 function attachDataUidToRoot(
   originalResponse: React.ReactElement | null | undefined,
-  dataUids: string | null,
-  paths: string | null,
+  dataUid: string | null,
+  path: string | null,
 ): React.ReactElement | null
 function attachDataUidToRoot(
   originalResponse: Array<React.ReactElement | null>,
-  dataUids: string | null,
-  paths: string | null,
+  dataUid: string | null,
+  path: string | null,
 ): Array<React.ReactElement | null>
 function attachDataUidToRoot(
   originalResponse: React.ReactElement | Array<React.ReactElement | null> | null | undefined,
-  dataUids: string | null,
-  paths: string | null,
+  dataUid: string | null,
+  path: string | null,
 ): React.ReactElement | Array<React.ReactElement | null> | null {
-  if (originalResponse == null || dataUids == null) {
+  if (originalResponse == null || dataUid == null) {
     return originalResponse as any
   } else if (Array.isArray(originalResponse)) {
     // the response was an array of elements
-    return originalResponse.map((element) => attachDataUidToRoot(element, dataUids, paths))
+    return originalResponse.map((element) => attachDataUidToRoot(element, dataUid, path))
   } else if (!React.isValidElement(originalResponse as any)) {
     return originalResponse
   } else {
     if (shouldIncludeDataUID(originalResponse.type)) {
       return React.cloneElement(originalResponse, {
-        [UTOPIA_UIDS_KEY]: appendToUidString(originalResponse.props[UTOPIA_UIDS_KEY], dataUids),
-        [UTOPIA_PATHS_KEY]: appendToUidString(originalResponse.props[UTOPIA_PATHS_KEY], paths),
+        [UTOPIA_UID_KEY]: originalResponse.props[UTOPIA_UID_KEY] ?? dataUid,
+        [UTOPIA_PATH_KEY]: originalResponse.props[UTOPIA_PATH_KEY] ?? path,
       })
     } else {
       return originalResponse
@@ -123,23 +117,25 @@ function attachDataUidToRoot(
   }
 }
 
-const mangleFunctionType = Utils.memoize(
-  (type: unknown): React.FunctionComponent => {
+const mangleFunctionType = memoize(
+  (type: unknown): React.FunctionComponent<React.PropsWithChildren<unknown>> => {
     const mangledFunctionName = `UtopiaSpiedFunctionComponent(${getDisplayName(type)})`
 
     const mangledFunction = {
       [mangledFunctionName]: (p: any, context?: any) => {
         const MeasureRenderTimes =
-          isFeatureEnabled('Debug mode – Performance Marks') && PERFORMANCE_MARKS_ALLOWED
+          isFeatureEnabled('Debug – Performance Marks (Slow)') && PERFORMANCE_MARKS_ALLOWED
         const uuid = MeasureRenderTimes ? v4() : ''
         if (MeasureRenderTimes) {
           performance.mark(`render_start_${uuid}`)
         }
-        let originalTypeResponse = (type as React.FunctionComponent)(p, context)
+        let originalTypeResponse = (
+          type as React.FunctionComponent<React.PropsWithChildren<unknown>>
+        )(p, context)
         const res = attachDataUidToRoot(
           originalTypeResponse,
-          (p as any)?.[UTOPIA_UIDS_KEY],
-          (p as any)?.[UTOPIA_PATHS_KEY],
+          (p as any)?.[UTOPIA_UID_KEY],
+          (p as any)?.[UTOPIA_PATH_KEY],
         )
         if (MeasureRenderTimes) {
           performance.mark(`render_end_${uuid}`)
@@ -151,7 +147,7 @@ const mangleFunctionType = Utils.memoize(
         }
         return res
       },
-    }[mangledFunctionName]
+    }[mangledFunctionName]!
     ;(mangledFunction as any).theOriginalType = type
     ;(mangledFunction as any).contextTypes = (type as any).contextTypes
     ;(mangledFunction as any).childContextTypes = (type as any).childContextTypes
@@ -163,13 +159,13 @@ const mangleFunctionType = Utils.memoize(
   },
 )
 
-const mangleClassType = Utils.memoize(
+const mangleClassType = memoize(
   (type: any) => {
     const originalRender = type.prototype.render
     // mutation
     type.prototype.render = function monkeyRender() {
       const MeasureRenderTimes =
-        isFeatureEnabled('Debug mode – Performance Marks') && PERFORMANCE_MARKS_ALLOWED
+        isFeatureEnabled('Debug – Performance Marks (Slow)') && PERFORMANCE_MARKS_ALLOWED
       const uuid = MeasureRenderTimes ? v4() : ''
       if (MeasureRenderTimes) {
         performance.mark(`render_start_${uuid}`)
@@ -177,8 +173,8 @@ const mangleClassType = Utils.memoize(
       let originalTypeResponse = originalRender.bind(this)()
       const res = attachDataUidToRoot(
         originalTypeResponse,
-        (this.props as any)?.[UTOPIA_UIDS_KEY],
-        (this.props as any)?.[UTOPIA_PATHS_KEY],
+        (this.props as any)?.[UTOPIA_UID_KEY],
+        (this.props as any)?.[UTOPIA_PATH_KEY],
       )
       if (MeasureRenderTimes) {
         performance.mark(`render_end_${uuid}`)
@@ -199,30 +195,45 @@ const mangleClassType = Utils.memoize(
   },
 )
 
-const mangleExoticType = Utils.memoize(
-  (type: React.ComponentType): React.FunctionComponent => {
+const mangleExoticType = memoize(
+  (
+    type: React.ComponentType<React.PropsWithChildren<unknown>>,
+  ): React.FunctionComponent<React.PropsWithChildren<unknown>> => {
     function updateChild(
       child: React.ReactElement | null,
-      dataUids: string | null,
-      paths: string | null,
+      dataUid: string | null,
+      path: string | null,
+      fragmentParentProps: any,
     ) {
       if (child == null || !shouldIncludeDataUID(child.type)) {
         return child
       }
-      const existingChildUIDs = child.props?.[UTOPIA_UIDS_KEY]
-      const existingChildPaths = child.props?.[UTOPIA_PATHS_KEY]
-      const appendedUIDString = appendToUidString(existingChildUIDs, dataUids)
-      const appendedPathsString = appendToUidString(existingChildPaths, paths)
+      const existingChildUID = child.props?.[UTOPIA_UID_KEY]
+      const existingChildPath = child.props?.[UTOPIA_PATH_KEY]
+      const childUID = existingChildUID ?? dataUid
+      const mangledChildPath = existingChildPath ?? path
       if ((!React.isValidElement(child) as boolean) || child == null) {
         return child
       } else {
         // Setup the result.
         let additionalProps: any = {}
         let shouldClone: boolean = false
+        // For any properties that are not `key` or `children`, push those onto the children of the fragment.
+        // This has been done to handle some naughty behaviour seen where a library (in this case headlessui)
+        // sees our wrapper component and doesn't think it's a fragment (even though it's a wrapper around one) and
+        // then passes properties to the fragment instead of the children which is what it intends to do.
+        if (isFragment(type)) {
+          for (const parentPropsKey in fragmentParentProps) {
+            if (parentPropsKey !== 'key' && parentPropsKey !== 'children') {
+              additionalProps[parentPropsKey] = fragmentParentProps[parentPropsKey]
+              shouldClone = true
+            }
+          }
+        }
 
-        if (appendedUIDString != null) {
-          additionalProps[UTOPIA_UIDS_KEY] = appendedUIDString
-          additionalProps[UTOPIA_PATHS_KEY] = appendedPathsString
+        if (childUID != null) {
+          additionalProps[UTOPIA_UID_KEY] = childUID
+          additionalProps[UTOPIA_PATH_KEY] = mangledChildPath
           shouldClone = true
         }
 
@@ -243,9 +254,19 @@ const mangleExoticType = Utils.memoize(
      * Instead of that we render these fragment-like components, and mangle with their children
      */
     const wrapperComponent = (p: any, context?: any) => {
-      const uids = p?.[UTOPIA_UIDS_KEY]
-      const paths = p?.[UTOPIA_PATHS_KEY]
-      if (uids == null) {
+      // Capture this early so that it's possible to prevent an early return.
+      let isFragmentWithNonFragmentProps: boolean = false
+      if (isFragment(type)) {
+        for (const parentPropsKey in p) {
+          if (parentPropsKey !== 'key' && parentPropsKey !== 'children') {
+            isFragmentWithNonFragmentProps = true
+            break
+          }
+        }
+      }
+      const uid = p?.[UTOPIA_UID_KEY]
+      const path = p?.[UTOPIA_PATH_KEY]
+      if (uid == null && !isFragmentWithNonFragmentProps) {
         // early return for the cases where there's no data-uid
         return realCreateElement(type, p)
       } else if (p?.children == null || typeof p.children === 'string') {
@@ -257,18 +278,18 @@ const mangleExoticType = Utils.memoize(
           const originalFunction = p.children
           children = function (...params: any[]) {
             const originalResponse = originalFunction(...params)
-            return attachDataUidToRoot(originalResponse, uids, paths)
+            return attachDataUidToRoot(originalResponse, uid, path)
           }
         } else {
-          const uidsToPass = uids
-          const pathsToPass = paths
+          const uidToPass = uid
+          const pathToPass = path
 
           if (Array.isArray(p?.children)) {
             children = React.Children.map(p?.children, (child) =>
-              updateChild(child, uidsToPass, pathsToPass),
+              updateChild(child, uidToPass, pathToPass, p),
             )
           } else {
-            children = updateChild(p.children, uidsToPass, pathsToPass)
+            children = updateChild(p.children, uidToPass, pathToPass, p)
           }
         }
         let mangledProps = {
@@ -276,8 +297,21 @@ const mangleExoticType = Utils.memoize(
           children: children,
         }
 
-        delete mangledProps[UTOPIA_UIDS_KEY]
-        delete mangledProps[UTOPIA_PATHS_KEY]
+        if (isFragment(type)) {
+          // Fragments cannot take any properties other than `key` or `children`,
+          // so we create a props object that only has those two properties.
+          let newMangledProps: any = {}
+          if (mangledProps.key !== undefined) {
+            newMangledProps.key = mangledProps.key
+          }
+          if (mangledProps.children !== undefined) {
+            newMangledProps.children = mangledProps.children
+          }
+          mangledProps = newMangledProps
+        } else {
+          delete mangledProps[UTOPIA_UID_KEY]
+          delete mangledProps[UTOPIA_PATH_KEY]
+        }
         return realCreateElement(type as any, mangledProps)
       }
     }
@@ -297,13 +331,14 @@ function isClassComponent(component: any) {
   return typeof component === 'function' && component?.prototype?.isReactComponent != null
 }
 
-function patchedCreateReactElement(type: any, props: any, ...children: any): any {
+export function patchedCreateReactElement(type: any, props: any, ...children: any): any {
   if (isClassComponent(type)) {
     const mangledClass = mangleClassType(type)
     return realCreateElement(mangledClass, props, ...children)
   } else if (typeof type === 'function') {
     // if the type is function and it is NOT a class component, we deduce it is a function component
-    const mangledType: React.FunctionComponent = mangleFunctionType(type)
+    const mangledType: React.FunctionComponent<React.PropsWithChildren<unknown>> =
+      mangleFunctionType(type)
     return realCreateElement(mangledType, props, ...children)
   } else if (fragmentOrProviderOrContext(type)) {
     // fragment-like components, the list is not exhaustive, we might need to extend it later
@@ -315,4 +350,13 @@ function patchedCreateReactElement(type: any, props: any, ...children: any): any
     }
     return realCreateElement(type, updatedProps, ...children)
   }
+}
+
+export function isHooksErrorMessage(message: string): boolean {
+  return (
+    message === 'Rendered more hooks than during the previous render.' ||
+    message ===
+      'Rendered fewer hooks than expected. This may be caused by an accidental early return statement.' ||
+    message === 'Should have a queue. This is likely a bug in React. Please file an issue.'
+  )
 }

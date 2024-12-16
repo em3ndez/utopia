@@ -17,14 +17,18 @@ module Utopia.Web.Executors.Production where
 import           Control.Monad.Free
 import           Control.Monad.RWS.Strict
 import           Data.IORef
+import           Data.Pool
+import           Data.Time.Clock
 import           Network.HTTP.Client            (Manager, newManager)
 import           Network.HTTP.Client.TLS
 import           Protolude                      hiding (Handler)
 import           Servant
 import           System.Environment
 import           System.Log.FastLogger
+import           URI.ByteString
 import           Utopia.Web.Assets
 import           Utopia.Web.Auth
+import           Utopia.Web.Auth.Github
 import           Utopia.Web.Auth.Session
 import           Utopia.Web.Auth.Types
 import qualified Utopia.Web.Database            as DB
@@ -34,6 +38,8 @@ import           Utopia.Web.Editor.Branches
 import           Utopia.Web.Endpoints
 import           Utopia.Web.Executors.Common
 import           Utopia.Web.Github
+import           Utopia.Web.Liveblocks
+import           Utopia.Web.Liveblocks.Types
 import           Utopia.Web.Logging
 import           Utopia.Web.Metrics
 import           Utopia.Web.Packager.Locking
@@ -50,6 +56,7 @@ data ProductionServerResources = ProductionServerResources
                                , _projectPool             :: DBPool
                                , _auth0Resources          :: Auth0Resources
                                , _awsResources            :: AWSResources
+                               , _githubResources         :: GithubAuthResources
                                , _sessionState            :: SessionState
                                , _serverPort              :: Int
                                , _storeForMetrics         :: Store
@@ -58,6 +65,7 @@ data ProductionServerResources = ProductionServerResources
                                , _registryManager         :: Manager
                                , _assetsCaches            :: AssetsCaches
                                , _nodeSemaphore           :: QSem
+                               , _githubSemaphore         :: QSem
                                , _locksRef                :: PackageVersionLocksRef
                                , _siteHost                :: Text
                                , _branchDownloads         :: Maybe BranchDownloads
@@ -65,9 +73,26 @@ data ProductionServerResources = ProductionServerResources
                                , _cdnHost                 :: Text
                                , _logger                  :: FastLogger
                                , _loggerShutdown          :: IO ()
+                               , _liveblocksResources     :: Maybe LiveblocksResources
+                               , _shouldUseFakeUser       :: Bool
                                }
 
 type ProductionProcessMonad a = ServerProcessMonad ProductionServerResources a
+
+dummyUserAlice :: UserDetails
+dummyUserAlice = UserDetails { userId  = "ab9401d8-f6f0-4642-8239-2435656bf0b2"
+                             , email   = Just "team1@utopia.app"
+                             , name    = Just "A real human being"
+                             , picture = Just "/editor/avatars/utopino3.png"
+                             }
+
+dummyUserBob :: UserDetails
+dummyUserBob = UserDetails { userId  = "231f5f05-cac7-4910-8006-d7645c44051c"
+                            , email   = Just "team1@utopia.app"
+                            , name    = Just "Also a real human being"
+                            , picture = Just "/editor/avatars/utopino2.png"
+                            }
+
 
 {-|
   Interpretor for a service call, which converts it into side effecting calls ready to be invoked.
@@ -79,6 +104,8 @@ innerServerExecutor BadRequest = do
   throwError err400
 innerServerExecutor NotAuthenticated = do
   throwError err401
+innerServerExecutor (TempRedirect uri) = do
+  throwError err302 { errHeaders = [("Location", serializeURIRef' uri)]}
 innerServerExecutor NotModified = do
   throwError err304
 innerServerExecutor (CheckAuthCode authCode action) = do
@@ -86,7 +113,11 @@ innerServerExecutor (CheckAuthCode authCode action) = do
   sessionStore <- fmap _sessionState ask
   pool <- fmap _projectPool ask
   metrics <- fmap _databaseMetrics ask
-  auth0CodeCheck metrics pool sessionStore auth0 authCode action
+  canUseFakeUser <- fmap _shouldUseFakeUser ask
+  case (canUseFakeUser, authCode) of
+    (True, "alice") -> successfulAuthCheck metrics pool sessionStore action dummyUserAlice
+    (True, "bob") -> successfulAuthCheck metrics pool sessionStore action dummyUserBob
+    _ -> auth0CodeCheck metrics pool sessionStore auth0 authCode action
 innerServerExecutor (Logout cookie pageContents action) = do
   sessionStore <- fmap _sessionState ask
   logoutOfSession sessionStore cookie pageContents action
@@ -138,13 +169,14 @@ innerServerExecutor (SetShowcaseProjects showcaseProjects next) = do
   setShowcaseProjectsWithDBPool metrics pool showcaseProjects next
 innerServerExecutor (LoadProjectAsset path possibleETag action) = do
   awsResource <- fmap _awsResources ask
-  application <- loadProjectAssetWithCall (loadProjectAssetFromS3 awsResource) path possibleETag
+  possibleAsset <- liftIO $ loadAsset (Just awsResource) path possibleETag
+  application <- loadProjectAssetWithAsset path possibleAsset
   return $ action application
 innerServerExecutor (SaveProjectAsset user projectID path action) = do
   pool <- fmap _projectPool ask
   awsResource <- fmap _awsResources ask
   metrics <- fmap _databaseMetrics ask
-  application <- saveProjectAssetWithCall metrics pool user projectID path $ saveProjectAssetToS3 awsResource
+  application <- saveProjectAssetWithCall metrics pool user projectID path $ saveAsset $ Just awsResource
   return $ action application
 innerServerExecutor (RenameProjectAsset user projectID oldPath newPath next) = do
   awsResource <- fmap _awsResources ask
@@ -229,10 +261,10 @@ innerServerExecutor (GetUserConfiguration user action) = do
   pool <- fmap _projectPool ask
   metrics <- fmap _databaseMetrics ask
   getUserConfigurationWithDBPool metrics pool user action
-innerServerExecutor (SaveUserConfiguration user possibleShortcutConfig action) = do
+innerServerExecutor (SaveUserConfiguration user possibleShortcutConfig possibleTheme action) = do
   pool <- fmap _projectPool ask
   metrics <- fmap _databaseMetrics ask
-  saveUserConfigurationWithDBPool metrics pool user possibleShortcutConfig
+  saveUserConfigurationWithDBPool metrics pool user possibleShortcutConfig possibleTheme
   return action
 innerServerExecutor (ClearBranchCache branchName action) = do
   possibleDownloads <- fmap _branchDownloads ask
@@ -242,6 +274,126 @@ innerServerExecutor (GetDownloadBranchFolders action) = do
   downloads <- fmap _branchDownloads ask
   folders <- liftIO $ maybe (pure []) getDownloadedLocalFolders downloads
   pure $ action folders
+innerServerExecutor (GetGithubAuthorizationURI action) = do
+  githubResources <- fmap _githubResources ask
+  let uri = getAuthorizationURI githubResources
+  pure $ action uri
+innerServerExecutor (GetGithubAccessToken user authCode action) = do
+  githubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- getAndHandleGithubAccessToken githubResources logger metrics pool user authCode
+  pure $ action result
+innerServerExecutor (GetGithubAuthentication user action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  result <- liftIO $ DB.lookupGithubAuthenticationDetails metrics pool user
+  pure $ action result
+innerServerExecutor (SaveToGithubRepo user projectID possibleBranchName possibleCommitMessage model action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  githubResources <- fmap _githubResources ask
+  awsResource <- fmap _awsResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- createTreeAndSaveToGithub githubSemaphore githubResources (Just awsResource) logger metrics pool user projectID possibleBranchName possibleCommitMessage model
+  pure $ action result
+innerServerExecutor (GetBranchesFromGithubRepo user owner repository action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  githubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- getGithubBranches githubSemaphore githubResources logger metrics pool user owner repository
+  pure $ action result
+innerServerExecutor (GetBranchContent user owner repository branchName possibleCommitSha possiblePreviousCommitSha action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  githubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- getGithubBranch githubSemaphore githubResources logger metrics pool user owner repository branchName possibleCommitSha possiblePreviousCommitSha
+  pure $ action result
+innerServerExecutor (GetDefaultBranchContent user owner repository possibleCommitSha possiblePreviousCommitSha action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  githubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- getDefaultGithubBranch githubSemaphore githubResources logger metrics pool user owner repository possibleCommitSha possiblePreviousCommitSha
+  pure $ action result
+innerServerExecutor (GetUsersRepositories user action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  githubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- getGithubUsersPublicRepositories githubSemaphore githubResources logger metrics pool user
+  pure $ action result
+innerServerExecutor (SaveGithubAsset user owner repository assetSha projectID assetPath action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  githubResources <- fmap _githubResources ask
+  awsResource <- fmap _awsResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- saveGithubAssetToProject githubSemaphore githubResources (Just awsResource) logger metrics pool user owner repository assetSha projectID assetPath
+  pure $ action result
+innerServerExecutor (GetPullRequestForBranch user owner repository branchName action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  githubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- getBranchPullRequest githubSemaphore githubResources logger metrics pool user owner repository branchName
+  pure $ action result
+innerServerExecutor (GetGithubUserDetails user action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  githubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  result <- getDetailsOfGithubUser githubSemaphore githubResources logger metrics pool user
+  pure $ action result
+innerServerExecutor (AuthLiveblocksUser user roomID action) = do
+  possibleLiveblocksResources <- fmap _liveblocksResources ask
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  case possibleLiveblocksResources of
+    Nothing -> throwError err501
+    Just liveblocksResources -> do
+      errorOrToken <- liftIO $ authorizeUserForLiveblocksProjectRoom liveblocksResources metrics pool user roomID
+      case errorOrToken of
+        Left errorMessage -> putStrLn errorMessage >> throwError err500
+        Right token       -> pure $ action token
+innerServerExecutor (IsLiveblocksEnabled action) = do
+  possibleLiveblocksResources <- fmap _liveblocksResources ask
+  pure $ action $ isJust possibleLiveblocksResources
+innerServerExecutor (ClaimCollaborationControl user projectID collaborationEditor action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  projectOwnershipResult <- liftIO $ DB.checkIfProjectOwner metrics pool user projectID
+  unless projectOwnershipResult $ throwError err400
+  ownershipResult <- liftIO $ DB.maybeClaimCollaborationControl metrics pool getCurrentTime user projectID collaborationEditor
+  pure $ action ownershipResult
+innerServerExecutor (SnatchCollaborationControl user projectID collaborationEditor action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  projectOwnershipResult <- liftIO $ DB.checkIfProjectOwner metrics pool user projectID
+  unless projectOwnershipResult $ throwError err400
+  liftIO $ DB.forceClaimCollaborationControl metrics pool getCurrentTime user projectID collaborationEditor
+  pure action
+innerServerExecutor (ReleaseCollaborationControl user projectID collaborationEditor action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  liftIO $ DB.releaseCollaborationControl metrics pool user projectID collaborationEditor
+  pure action
+innerServerExecutor (ClearCollaboratorOwnership user collaborationEditor action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  liftIO $ DB.deleteCollaborationControlByCollaborator metrics pool user collaborationEditor
+  pure action
 
 readEditorContentFromDisk :: Maybe BranchDownloads -> Maybe Text -> Text -> IO Text
 readEditorContentFromDisk (Just downloads) (Just branchName) fileName = do
@@ -273,14 +425,20 @@ assetPathsAndBuilders =
   [ simplePathAndBuilders "/server/editor/icons" "/server" "" "/server" ""
   ]
 
+shouldUseFakeUser :: Maybe Text -> Bool
+shouldUseFakeUser (Just "USE_FAKE_USER") = True
+shouldUseFakeUser _                      = False
+
 initialiseResources :: IO ProductionServerResources
 initialiseResources = do
   _commitHash <- toS <$> getEnv "UTOPIA_SHA"
   _projectPool <- DB.createDatabasePoolFromEnvironment
   maybeAuth0Resources <- getAuth0Environment
-  _auth0Resources <- maybe (panic "No Auth0 environment configured") return maybeAuth0Resources
+  _auth0Resources <- maybe (panic "No Auth0 environment configured.") pure maybeAuth0Resources
   maybeAws <- getAmazonResourcesFromEnvironment
-  _awsResources <- maybe (panic "No AWS environment configured") return maybeAws
+  _awsResources <- maybe (panic "No AWS environment configured.") pure maybeAws
+  maybeGithubAuthResources <- getGithubAuthResources
+  _githubResources <- maybe (panic "No Github resources configured.") pure maybeGithubAuthResources
   _sessionState <- createSessionState _projectPool
   _serverPort <- portFromEnvironment
   _storeForMetrics <- newStore
@@ -289,23 +447,29 @@ initialiseResources = do
   _registryManager <- newManager tlsManagerSettings
   _assetsCaches <- emptyAssetsCaches assetPathsAndBuilders
   _nodeSemaphore <- newQSem 1
+  _githubSemaphore <- newQSem 5
   _siteHost <- toS <$> getEnv "SITE_HOST"
   _cdnHost <- toS <$> getEnv "CDN_HOST"
   _branchDownloads <- createBranchDownloads
   _locksRef <- newIORef mempty
   _matchingVersionsCache <- newMatchingVersionsCache
   (_logger, _loggerShutdown) <- newFastLogger (LogStdout defaultBufSize)
+  _liveblocksResources <- makeLiveblocksResources
+  _shouldUseFakeUser <- shouldUseFakeUser <$> (fmap toS) <$> lookupEnv "FAKE_USER_SETTING"
   return $ ProductionServerResources{..}
 
 startup :: ProductionServerResources -> IO Stop
 startup ProductionServerResources{..} = do
   migrateDatabase True False _projectPool
+  DB.cleanupCollaborationControl _databaseMetrics _projectPool getCurrentTime
+  preloadNPMDependencies _logger _npmMetrics _nodeSemaphore _locksRef
   hashedFilenamesThread <- forkIO $ watchFilenamesWithHashes (_hashCache _assetsCaches) (_assetResultCache _assetsCaches) assetPathsAndBuilders
   return $ do
         killThread hashedFilenamesThread
+        destroyAllResources _projectPool
 
 serverPortFromResources :: ProductionServerResources -> Int
-serverPortFromResources = _serverPort
+serverPortFromResources resources = _serverPort resources
 
 productionEnvironmentRuntime :: EnvironmentRuntime ProductionServerResources
 productionEnvironmentRuntime = EnvironmentRuntime

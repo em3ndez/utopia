@@ -1,5 +1,6 @@
-import { handleMessage, IncomingWorkerMessage } from './ts-worker'
-import { LayoutSystem } from 'utopia-api'
+import type { IncomingWorkerMessage } from './ts-worker'
+import { handleMessage } from './ts-worker'
+import { LayoutSystem } from 'utopia-api/core'
 import {
   EmptyExportsDetail,
   RevisionsState,
@@ -12,11 +13,13 @@ import { convertScenesToUtopiaCanvasComponent } from '../../model/scene-utils'
 import SampleTypeDefinitions from './sample-type-definitions.json'
 import { contentsToTree } from '../../../components/assets'
 import { emptyComments, jsxAttributesFromMap } from '../../shared/element-template'
+import { styleStringInArray } from '../../../utils/common-constants'
 
 describe('Typescript worker builds the project', () => {
   it('initializing a new project', (done) => {
     handleMessage(SampleInitTSWorkerMessage, (msg) => {
       if (msg.type === 'build') {
+        // eslint-disable-next-line jest/no-conditional-expect
         expect(msg).toMatchSnapshot()
         done()
       }
@@ -43,7 +46,7 @@ describe('Typescript worker applies the loaders', () => {
         // Ensure no errors
         for (const builtFile in msg.buildResult) {
           if (msg.buildResult[builtFile].errors.length > 0) {
-            fail(`Build errors found in built file ${builtFile}`)
+            done.fail(`Build errors found in built file ${builtFile}`)
           }
         }
 
@@ -150,16 +153,19 @@ const SampleInitTSWorkerMessage: IncomingWorkerMessage = {
               isFunction: true,
               declarationSyntax: 'var',
               blockOrExpression: 'block',
-              param: {
-                type: 'PARAM',
-                dotDotDotToken: false,
-                boundParam: {
-                  type: 'REGULAR_PARAM',
-                  paramName: 'props',
-                  defaultExpression: null,
+              functionWrapping: [],
+              params: [
+                {
+                  type: 'PARAM',
+                  dotDotDotToken: false,
+                  boundParam: {
+                    type: 'REGULAR_PARAM',
+                    paramName: 'props',
+                    defaultExpression: null,
+                  },
                 },
-              },
-              propsUsed: ['style'],
+              ],
+              propsUsed: styleStringInArray,
               rootElement: {
                 type: 'JSX_ELEMENT',
                 name: {
@@ -177,7 +183,9 @@ const SampleInitTSWorkerMessage: IncomingWorkerMessage = {
                         type: 'SPREAD_ASSIGNMENT',
                         value: {
                           type: 'ATTRIBUTE_OTHER_JAVASCRIPT',
-                          javascript: 'props.style',
+                          params: [],
+                          originalJavascript: 'props.style',
+                          javascriptWithUIDs: 'props.style',
                           transpiledJavascript: 'return props.style;',
                           definedElsewhere: ['props'],
                           elementsWithin: {},
@@ -191,7 +199,8 @@ const SampleInitTSWorkerMessage: IncomingWorkerMessage = {
                               "\nimport * as React from 'react'\nimport {\n  Ellipse,\n  HelperFunctions,\n  Image,\n  NodeImplementations,\n  Rectangle,\n  Text,\n  View,\n  jsx,\n} from 'utopia-api'\nimport {\n  colorTheme,\n  Button,\n  Dialog,\n  Icn,\n  Icons,\n  LargerIcons,\n  FunctionIcons,\n  MenuIcons,\n  Isolator,\n  TabComponent,\n  Tooltip,\n  ActionSheet,\n  Avatar,\n  ControlledTextArea,\n  Title,\n  H1,\n  H2,\n  H3,\n  Subdued,\n  InspectorSectionHeader,\n  InspectorSubsectionHeader,\n  FlexColumn,\n  FlexRow,\n  ResizableFlexColumn,\n  PopupList,\n  Section,\n  TitledSection,\n  SectionTitleRow,\n  SectionBodyArea,\n  UtopiaListSelect,\n  UtopiaListItem,\n  CheckboxInput,\n  NumberInput,\n  StringInput,\n  OnClickOutsideHOC,\n} from 'uuiui'\n\nexport var canvasMetadata = {\n  scenes: [\n    {\n      component: 'App',\n      frame: { height: 812, left: 0, width: 375, top: 0 },\n      props: { layout: { top: 0, left: 0, bottom: 0, right: 0 } },\n      container: { layoutSystem: 'pinSystem' },\n    },\n  ],\n  elementMetadata: {},\n}\n\nexport var App = (props) => {\n  return (\n    <View\n      style={{ ...props.style, backgroundColor: colorTheme.white.value }}\n      layout={{ layoutSystem: 'pinSystem' }}\n      data-uid={'aaa'}\n    ></View>\n  )\n}\n\n",
                             ],
                           },
-                          uniqueID: '00df44d9-e76c-47d8-b832-60ee0fb3a5bc',
+                          comments: emptyComments,
+                          uid: '00df44d9-e76c-47d8-b832-60ee0fb3a5bc',
                         },
                         comments: emptyComments,
                       },
@@ -200,7 +209,9 @@ const SampleInitTSWorkerMessage: IncomingWorkerMessage = {
                         key: 'backgroundColor',
                         value: {
                           type: 'ATTRIBUTE_OTHER_JAVASCRIPT',
-                          javascript: 'colorTheme.white.value',
+                          params: [],
+                          originalJavascript: 'colorTheme.white.value',
+                          javascriptWithUIDs: 'colorTheme.white.value',
                           transpiledJavascript: 'return colorTheme.white.value;',
                           definedElsewhere: ['colorTheme'],
                           elementsWithin: {},
@@ -214,13 +225,15 @@ const SampleInitTSWorkerMessage: IncomingWorkerMessage = {
                               "\nimport * as React from 'react'\nimport {\n  Ellipse,\n  HelperFunctions,\n  Image,\n  NodeImplementations,\n  Rectangle,\n  Text,\n  View,\n  jsx,\n} from 'utopia-api'\nimport {\n  colorTheme,\n  Button,\n  Dialog,\n  Icn,\n  Icons,\n  LargerIcons,\n  FunctionIcons,\n  MenuIcons,\n  Isolator,\n  TabComponent,\n  Tooltip,\n  ActionSheet,\n  Avatar,\n  ControlledTextArea,\n  Title,\n  H1,\n  H2,\n  H3,\n  Subdued,\n  InspectorSectionHeader,\n  InspectorSubsectionHeader,\n  FlexColumn,\n  FlexRow,\n  ResizableFlexColumn,\n  PopupList,\n  Section,\n  TitledSection,\n  SectionTitleRow,\n  SectionBodyArea,\n  UtopiaListSelect,\n  UtopiaListItem,\n  CheckboxInput,\n  NumberInput,\n  StringInput,\n  OnClickOutsideHOC,\n} from 'uuiui'\n\nexport var canvasMetadata = {\n  scenes: [\n    {\n      component: 'App',\n      frame: { height: 812, left: 0, width: 375, top: 0 },\n      props: { layout: { top: 0, left: 0, bottom: 0, right: 0 } },\n      container: { layoutSystem: 'pinSystem' },\n    },\n  ],\n  elementMetadata: {},\n}\n\nexport var App = (props) => {\n  return (\n    <View\n      style={{ ...props.style, backgroundColor: colorTheme.white.value }}\n      layout={{ layoutSystem: 'pinSystem' }}\n      data-uid={'aaa'}\n    ></View>\n  )\n}\n\n",
                             ],
                           },
-                          uniqueID: '6173f632-5d44-42bc-86a2-dc857c77d767',
+                          comments: emptyComments,
+                          uid: '6173f632-5d44-42bc-86a2-dc857c77d767',
                         },
                         comments: emptyComments,
                         keyComments: emptyComments,
                       },
                     ],
                     comments: emptyComments,
+                    uid: '',
                   },
                   layout: {
                     type: 'ATTRIBUTE_VALUE',
@@ -228,11 +241,13 @@ const SampleInitTSWorkerMessage: IncomingWorkerMessage = {
                       layoutSystem: LayoutSystem.PinSystem,
                     },
                     comments: emptyComments,
+                    uid: '',
                   },
                   'data-uid': {
                     type: 'ATTRIBUTE_VALUE',
                     value: 'aaa',
                     comments: emptyComments,
+                    uid: '',
                   },
                 }),
                 children: [],
@@ -271,6 +286,15 @@ const SampleInitTSWorkerMessage: IncomingWorkerMessage = {
               uid: 'aaa',
             },
           },
+          fullHighlightBounds: {
+            aaa: {
+              startCol: 4,
+              startLine: 66,
+              endCol: 12,
+              endLine: 70,
+              uid: 'aaa',
+            },
+          },
           jsxFactoryFunction: 'jsx',
           combinedTopLevelArbitraryBlock: null,
         },
@@ -278,7 +302,7 @@ const SampleInitTSWorkerMessage: IncomingWorkerMessage = {
       ),
       null,
       null,
-      1585568960067,
+      0,
     ),
     '/src': {
       type: 'DIRECTORY',
@@ -380,7 +404,7 @@ const InitWorkerMessageNeedingLoaders: IncomingWorkerMessage = {
     ),
     '/app.js': textFile(
       textFileContents(
-        "\nimport * as React from 'react'\nimport { Scene, Storyboard } from 'utopia-api'\nimport icon from './icon.png'\nexport var App = (props) => {\n  return (\n    <div\n      style={{ width: '100%', height: '100%', backgroundColor: '#FFFFFF' }}\n      layout={{ layoutSystem: 'pinSystem' }}\n    >\n      <img src={icon} />\n    </div>\n  )\n}\nexport var storyboard = (\n  <Storyboard layout={{ layoutSystem: 'pinSystem' }}>\n    <Scene style={{ position: 'absolute', left: 0, top: 0, width: 375, height: 812 }}>\n      <App />\n    </Scene>\n  </Storyboard>\n)\n",
+        "\nimport * as React from 'react'\nimport Utopia, {\n  Scene,\n  Storyboard,\n} from 'utopia-api'\nimport icon from './icon.png'\nexport var App = (props) => {\n  return (\n    <div\n      style={{ width: '100%', height: '100%', backgroundColor: '#FFFFFF' }}\n      layout={{ layoutSystem: 'pinSystem' }}\n    >\n      <img src={icon} />\n    </div>\n  )\n}\nexport var storyboard = (\n  <Storyboard layout={{ layoutSystem: 'pinSystem' }}>\n    <Scene style={{ position: 'absolute', left: 0, top: 0, width: 375, height: 812 }}>\n      <App />\n    </Scene>\n  </Storyboard>\n)\n",
         unparsed,
         RevisionsState.CodeAhead,
       ),

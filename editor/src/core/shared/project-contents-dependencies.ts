@@ -1,16 +1,16 @@
-import { MapLike } from 'typescript'
+import type { MapLike } from 'typescript'
+import type { ProjectContentsTree, ProjectContentTreeRoot } from '../../components/assets'
 import {
-  getContentsTreeFileFromString,
+  getProjectFileByFilePath,
   isProjectContentFile,
-  ProjectContentsTree,
-  ProjectContentTreeRoot,
   walkContentsTree,
   zipContentsTree,
 } from '../../components/assets'
 import { resolveModule } from '../es-modules/package-manager/module-resolution'
 import { getSavedCodeFromTextFile, getUnsavedCodeFromTextFile } from '../model/project-file-utils'
 import { addToMapOfArraysUnique } from './array-utils'
-import { isParseSuccess, isTextFile, NodeModules } from './project-file-types'
+import type { NodeModules } from './project-file-types'
+import { isParseSuccess, isTextFile } from './project-file-types'
 import { emptySet } from './set-utils'
 
 export function getDirectReverseDependencies(
@@ -30,7 +30,7 @@ export function getDirectReverseDependencies(
               switch (successResult.file.type) {
                 case 'ES_CODE_FILE':
                   // Check if the file is part of the project.
-                  if (getContentsTreeFileFromString(projectContents, successResult.path) != null) {
+                  if (getProjectFileByFilePath(projectContents, successResult.path) != null) {
                     // Dependency, so record the connection.
                     result = addToMapOfArraysUnique(result, successResult.path, fullPath)
                   }
@@ -44,6 +44,9 @@ export function getDirectReverseDependencies(
               }
               break
             case 'RESOLVE_NOT_PRESENT':
+              // Do nothing for now...
+              break
+            case 'RESOLVE_SUCCESS_IGNORE_MODULE':
               // Do nothing for now...
               break
             default:

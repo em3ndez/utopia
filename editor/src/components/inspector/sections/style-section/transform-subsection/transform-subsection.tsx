@@ -1,6 +1,7 @@
 import * as OPI from 'object-path-immutable'
 import React from 'react'
-import { animated, SpringValue } from 'react-spring'
+import type { SpringValue } from 'react-spring'
+import { animated } from 'react-spring'
 import utils from '../../../../../utils/utils'
 import {
   FlexRow,
@@ -8,17 +9,17 @@ import {
   Icn,
   UtopiaTheme,
   InspectorSubsectionHeader,
-  InspectorSectionIcons,
+  Icons,
 } from '../../../../../uuiui'
-import { betterReactMemo } from '../../../../../uuiui-deps'
 import {
   NumberInput,
   useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue,
 } from '../../../../../uuiui/inputs/number-input'
 import { InspectorContextMenuWrapper } from '../../../../context-menu-wrapper'
 import { addOnUnsetValues } from '../../../common/context-menu-items'
-import { ControlStatus, ControlStyles } from '../../../common/control-status'
-import {
+import type { ControlStatus } from '../../../common/control-status'
+import { type ControlStyles } from '../../../common/control-styles'
+import type {
   CSSDefault,
   CSSNumber,
   CSSNumberType,
@@ -28,6 +29,9 @@ import {
   CSSTransforms,
   CSSTransformSingleLengthItem,
   CSSTransformSupportedType,
+  EmptyInputValue,
+} from '../../../common/css-utils'
+import {
   cssTransformSupportedValidFunctionNames,
   cssUnknownArrayItem,
   defaultTransformRotate,
@@ -45,7 +49,6 @@ import {
   defaultTransformTranslateX,
   defaultTransformTranslateY,
   defaultTransformTranslateZ,
-  EmptyInputValue,
   fallbackOnEmptyInputValueToCSSDefaultEmptyValue,
   fallbackOnEmptyInputValueToCSSEmptyValue,
   isCSSDefault,
@@ -53,20 +56,18 @@ import {
   isCSSTransformSingleItem,
 } from '../../../common/css-utils'
 import {
+  RemovePropertyButton,
   getIndexedSpliceArrayItem,
   stopPropagation,
   useGetSubsectionHeaderStyle,
 } from '../../../common/inspector-utils'
-import {
-  useInspectorStyleInfo,
-  useIsSubSectionVisible,
-  UseSubmitValueFactory,
-} from '../../../common/property-path-hooks'
+import type { UseSubmitValueFactory } from '../../../common/property-path-hooks'
+import { useInspectorStyleInfo, useIsSubSectionVisible } from '../../../common/property-path-hooks'
 import { useArraySuperControl } from '../../../controls/array-supercontrol'
 import { BooleanControl } from '../../../controls/boolean-control'
-import { OnSubmitValue } from '../../../controls/control'
+import type { OnSubmitValue } from '../../../controls/control'
 import { LightSelectControl } from '../../../controls/lightselect-control'
-import { SelectOption } from '../../../controls/select-control'
+import type { SelectOption } from '../../../controls/select-control'
 import { FakeUnknownArrayItem, UnknownArrayItem } from '../../../controls/unknown-array-item'
 import { PropertyRow } from '../../../widgets/property-row'
 
@@ -136,7 +137,7 @@ const transformItemControlMetadatas: {
     prettyName: 'Scale',
     stepSize: 0.01,
     numberType: 'Unitless',
-    labelBelow: ['x', 'y'],
+    labelBelow: ['X', 'Y'],
     emptyValue: defaultTransformScale,
     defaultUnitToHide: null,
   },
@@ -163,7 +164,7 @@ const transformItemControlMetadatas: {
   },
   skew: {
     prettyName: 'Skew',
-    labelBelow: ['x', 'y'],
+    labelBelow: ['X', 'Y'],
     numberType: 'Angle',
     emptyValue: defaultTransformSkew,
     defaultUnitToHide: 'deg',
@@ -182,7 +183,7 @@ const transformItemControlMetadatas: {
   },
   translate: {
     prettyName: 'Translate',
-    labelBelow: ['x', 'y'],
+    labelBelow: ['X', 'Y'],
     numberType: 'LengthPercent',
     emptyValue: defaultTransformTranslate,
     defaultUnitToHide: 'px',
@@ -213,12 +214,11 @@ const transformItemControlMetadatas: {
   },
 }
 
-const transformSelectOptions: Array<TransformSelectOption> = cssTransformSupportedValidFunctionNames.map(
-  (supportedTransformFunctionName) => ({
+const transformSelectOptions: Array<TransformSelectOption> =
+  cssTransformSupportedValidFunctionNames.map((supportedTransformFunctionName) => ({
     value: supportedTransformFunctionName,
     label: transformItemControlMetadatas[supportedTransformFunctionName].prettyName,
-  }),
-)
+  }))
 
 export function getIndexedOnTransformTypeSelectSubmitValue(transformIndex: number) {
   return function onTransformTypeSelectSubmitValue(
@@ -285,19 +285,17 @@ function getIndexedUpdateSingleLengthValue(
   }
 }
 
-const SingleLengthItem = betterReactMemo<SingleLengthItemProps>('SingleLengthItem', (props) => {
+const SingleLengthItem = React.memo<SingleLengthItemProps>((props) => {
   const [enabledSubmitValue] = props.useSubmitValueFactory(
     getIndexedToggleTransformItemEnabled(props.index),
   )
   const [onTransformTypeSubmitValue] = props.useSubmitValueFactory(
     getIndexedOnTransformTypeSelectSubmitValue(props.index),
   )
-  const [
-    singleLengthItemSubmitValue,
-    singleLengthItemTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateSingleLengthValue(props.index, props.emptyValue)),
-  )
+  const [singleLengthItemSubmitValue, singleLengthItemTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateSingleLengthValue(props.index, props.emptyValue)),
+    )
 
   const [deleteTransformItemSubmitValue] = props.useSubmitValueFactory(
     getIndexedSpliceArrayItem(props.index),
@@ -317,7 +315,7 @@ const SingleLengthItem = betterReactMemo<SingleLengthItemProps>('SingleLengthIte
     <PropertyRow
       key={props.index}
       style={{
-        gridTemplateColumns: '12px 1fr 46px 20px',
+        gridTemplateColumns: '12px 90px 1fr 22px',
         gridColumnGap: 8,
       }}
     >
@@ -342,6 +340,7 @@ const SingleLengthItem = betterReactMemo<SingleLengthItemProps>('SingleLengthIte
           onSubmitValue={onTransformTypeSubmitValue}
           controlStatus={props.controlStatus}
           controlStyles={props.controlStyles}
+          style={{ flex: 1 }}
         />
       </FlexRow>
       <NumberInput
@@ -362,8 +361,8 @@ const SingleLengthItem = betterReactMemo<SingleLengthItemProps>('SingleLengthIte
         controlStatus={props.controlStatus}
         defaultUnitToHide={controlMetadata.defaultUnitToHide}
       />
-      <SquareButton highlight onMouseDown={removeTransformItem} style={{ marginTop: 1 }}>
-        <Icn category='semantic' type='minus' color='secondary' width={16} height={16} />
+      <SquareButton highlight onMouseDown={removeTransformItem}>
+        <Icons.SmallMinus />
       </SquareButton>
     </PropertyRow>
   )
@@ -404,29 +403,25 @@ interface DoubleLengthItemProps extends TransformItemProps {
   emptyValue: CSSTransformDoubleLengthItem
 }
 
-const DoubleLengthItem = betterReactMemo<DoubleLengthItemProps>('DoubleLengthItem', (props) => {
+const DoubleLengthItem = React.memo<DoubleLengthItemProps>((props) => {
   const [enabledSubmitValue] = props.useSubmitValueFactory(
     getIndexedToggleTransformItemEnabled(props.index),
   )
   const [onTransformTypeSubmitValue] = props.useSubmitValueFactory(
     getIndexedOnTransformTypeSelectSubmitValue(props.index),
   )
-  const [
-    doubleLengthZeroethItemSubmitValue,
-    doubleLengthZeroethItemTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(
-      getIndexedUpdateDoubleLengthValue(props.index, 0, props.emptyValue.values[0]),
-    ),
-  )
-  const [
-    doubleLengthFirstItemSubmitValue,
-    doubleLengthFirstItemTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(
-      getIndexedUpdateDoubleLengthValue(props.index, 1, props.emptyValue.values[1]),
-    ),
-  )
+  const [doubleLengthZeroethItemSubmitValue, doubleLengthZeroethItemTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(
+        getIndexedUpdateDoubleLengthValue(props.index, 0, props.emptyValue.values[0]),
+      ),
+    )
+  const [doubleLengthFirstItemSubmitValue, doubleLengthFirstItemTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(
+        getIndexedUpdateDoubleLengthValue(props.index, 1, props.emptyValue.values[1]),
+      ),
+    )
 
   const [deleteTransformItemSubmitValue] = props.useSubmitValueFactory(
     getIndexedSpliceArrayItem(props.index),
@@ -442,11 +437,14 @@ const DoubleLengthItem = betterReactMemo<DoubleLengthItemProps>('DoubleLengthIte
 
   const controlMetadata = transformItemControlMetadatas[props.value.type]
 
+  const firstLabel = controlMetadata.labelBelow?.at(0)
+  const secondLabel = controlMetadata.labelBelow?.at(1)
+
   return (
     <PropertyRow
       key={props.index}
       style={{
-        gridTemplateColumns: '12px 1fr 46px 46px 20px',
+        gridTemplateColumns: '12px 90px 1fr 1fr 22px',
         gridColumnGap: 8,
       }}
     >
@@ -471,6 +469,7 @@ const DoubleLengthItem = betterReactMemo<DoubleLengthItemProps>('DoubleLengthIte
           onSubmitValue={onTransformTypeSubmitValue}
           controlStatus={props.controlStatus}
           controlStyles={props.controlStyles}
+          style={{ flex: 1 }}
         />
       </FlexRow>
       <NumberInput
@@ -486,9 +485,7 @@ const DoubleLengthItem = betterReactMemo<DoubleLengthItemProps>('DoubleLengthIte
         minimum={controlMetadata.minimum}
         maximum={controlMetadata.maximum}
         numberType={controlMetadata.numberType}
-        DEPRECATED_labelBelow={
-          controlMetadata.labelBelow != null ? controlMetadata.labelBelow[0] : undefined
-        }
+        innerLabel={firstLabel}
         onSubmitValue={doubleLengthZeroethItemSubmitValue}
         onTransientSubmitValue={doubleLengthZeroethItemTransientSubmitValue}
         controlStatus={props.controlStatus}
@@ -507,16 +504,14 @@ const DoubleLengthItem = betterReactMemo<DoubleLengthItemProps>('DoubleLengthIte
         minimum={controlMetadata.minimum}
         maximum={controlMetadata.maximum}
         numberType={controlMetadata.numberType}
-        DEPRECATED_labelBelow={
-          controlMetadata.labelBelow != null ? controlMetadata.labelBelow[1] : undefined
-        }
+        innerLabel={secondLabel}
         onSubmitValue={doubleLengthFirstItemSubmitValue}
         onTransientSubmitValue={doubleLengthFirstItemTransientSubmitValue}
         controlStatus={props.controlStatus}
         defaultUnitToHide={controlMetadata.defaultUnitToHide}
       />
-      <SquareButton highlight onMouseDown={removeTransformItem} style={{ marginTop: 1 }}>
-        <Icn category='semantic' type='minus' color='secondary' width={16} height={16} />
+      <SquareButton highlight onMouseDown={removeTransformItem}>
+        <Icons.SmallMinus />
       </SquareButton>
     </PropertyRow>
   )
@@ -534,7 +529,7 @@ const CSSTransformsToTransform = (transformedType: CSSTransforms) => {
 
 const rowHeight = UtopiaTheme.layout.rowHeight.normal
 
-export const TransformSubsection = betterReactMemo('TransformSubsection', () => {
+export const TransformSubsection = React.memo(() => {
   const {
     value,
     onSubmitValue,
@@ -555,7 +550,7 @@ export const TransformSubsection = betterReactMemo('TransformSubsection', () => 
     insertCSSTransform(value, onSubmitValue)
   }, [onSubmitValue, value])
 
-  const unsetCSSTransforms = React.useCallback(() => {
+  const removeAllTransformProperties = React.useCallback(() => {
     onUnsetValues()
   }, [onUnsetValues])
 
@@ -573,20 +568,19 @@ export const TransformSubsection = betterReactMemo('TransformSubsection', () => 
       >
         <InspectorSubsectionHeader style={headerStyle}>
           <FlexRow style={{ flexGrow: 1, gap: 8 }}>
-            <InspectorSectionIcons.Transforms />
             <span>Transforms</span>
           </FlexRow>
           {propertyStatus.overwritable ? (
-            <SquareButton highlight onMouseDown={insertCSSTransformMouseDown}>
-              <Icn
-                style={{ paddingTop: 1 }}
-                category='semantic'
-                type='plus'
-                color={propertyStatus.controlled ? 'primary' : 'secondary'}
-                width={16}
-                height={16}
+            <FlexRow>
+              <RemovePropertyButton
+                testId='inspector-transform-remove-all'
+                onUnsetValues={removeAllTransformProperties}
+                propertySet={propertyStatus.set}
               />
-            </SquareButton>
+              <SquareButton highlight onMouseDown={insertCSSTransformMouseDown}>
+                <Icons.SmallPlus />
+              </SquareButton>
+            </FlexRow>
           ) : null}
         </InspectorSubsectionHeader>
         {controlStyles.unknown ? (
@@ -651,6 +645,7 @@ export const TransformSubsection = betterReactMemo('TransformSubsection', () => 
                       ...springStyle,
                       width: '100%',
                       position: 'absolute',
+
                       height: rowHeight,
                     }}
                   >

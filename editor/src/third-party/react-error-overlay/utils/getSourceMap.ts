@@ -29,7 +29,11 @@ export class SourceMap {
     line: number,
     column: number,
   ): { source: string | null; line: number | null; column: number | null } {
-    const { line: l, column: c, source: s } = this.__source_map.originalPositionFor({
+    const {
+      line: l,
+      column: c,
+      source: s,
+    } = this.__source_map.originalPositionFor({
       line,
       column,
     })
@@ -104,7 +108,10 @@ async function getSourceMap(fileUri: string, fileContents: string | null): Promi
     if (!match2) {
       throw new Error('Sorry, non-base64 inline source-map encoding is not supported.')
     }
-    sm = sm.substring(match2[0].length)
+    if (match2.length < 1) {
+      throw new Error('No results returned.')
+    }
+    sm = sm.substring(match2[0]!.length)
     sm = window.atob(sm)
     sm = JSON.parse(sm)
     return new SourceMap(new (SourceMapConsumer as any)(sm))

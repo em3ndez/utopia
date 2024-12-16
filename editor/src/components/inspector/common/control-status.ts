@@ -1,38 +1,20 @@
 import deepEqual from 'fast-deep-equal'
 //TODO: pass in colorTheme to utility functions to get rid of colorTheme here:
-import { colorTheme, UtopiaTheme } from '../../../uuiui/styles/theme'
+import type { JSXAttributes, StyleAttributeMetadata } from '../../../core/shared/element-template'
 import {
-  isJSXAttributeNotFound,
-  isJSXAttributeValue,
-  isPartOfJSXAttributeValue,
+  modifiableAttributeIsAttributeNestedArray,
+  modifiableAttributeIsAttributeNestedObject,
+  modifiableAttributeIsAttributeNotFound,
+  modifiableAttributeIsAttributeValue,
+  modifiableAttributeIsPartOfAttributeValue,
 } from '../../../core/shared/element-template'
-import { GetModifiableAttributeResult } from '../../../core/shared/jsx-attributes'
-import { isLeft, isRight, Either } from '../../../core/shared/either'
-import Utils from '../../../utils/utils'
-import { ParsedPropertiesKeys } from './css-utils'
-import { MultiselectAtProps, MultiselectAtStringProps } from './property-path-hooks'
-
-export interface ControlStyles {
-  fontStyle: string
-  fontWeight: number
-  mainColor: string
-  secondaryColor: string
-  borderColor: string
-  backgroundColor: string
-  focusedBackgroundColor: string
-  strokePrimaryColor: string
-  strokeSecondaryColor: string
-  strokeTertiaryColor: string
-  segmentSelectorColor: string
-  set: boolean
-  interactive: boolean
-  mixed: boolean
-  unknown: boolean
-  trackColor: string
-  railColor: string
-  showContent: boolean
-  unsettable: boolean
-}
+import type { GetModifiableAttributeResult } from '../../../core/shared/jsx-attributes'
+import { getModifiableJSXAttributeAtPath } from '../../../core/shared/jsx-attribute-utils'
+import { isLeft, isRight, right, defaultEither } from '../../../core/shared/either'
+import type { ParsedCSSProperties, ParsedPropertiesKeys } from './css-utils'
+import type { MultiselectAtProps, MultiselectAtStringProps } from './property-path-hooks'
+import * as PP from '../../../core/shared/property-path'
+import { getSimpleAttributeAtPath } from '../../../core/model/element-metadata-utils'
 
 export type ControlStatus =
   | 'off' // nothing is selected on the canvas
@@ -45,6 +27,7 @@ export type ControlStatus =
   | 'detected-fromcss' // this single-selected element's property is detected from measurement, and we know it comes from a CSS Stylesheet (might be via Emotion)
   | 'detected' // this single-selected element's property is detected from measurement
   | 'trivial-default' // this single-selected element's property is detected from measurement and we think its not important to show it to the user
+  | 'overridden' // this single-selected element's property is overridden with a fixed value (using standard utopia comments)
   | 'multiselect-identical-simple' // all elements in this multi-selection have this property 'simple', with identical values
   | 'multiselect-simple-unknown-css' // at least one element in the multiselection is 'unknown-css', and the rest are 'simple' or 'unset'
   | 'multiselect-identical-unset' // all elements in this multi-selection have this property either 'simple' or 'unset', with identical values
@@ -55,29 +38,6 @@ export type ControlStatus =
   | 'multiselect-unoverwritable' // at least one element in the multi-selection is 'unoverwritable'
   | 'multiselect-disabled' // at least one element in the multi-selection is 'disabled'
   | 'multiselect-trivial-default' // this single-selected element's property is detected from measurement and we think its not important to show it to the user
-
-const AllControlStatuses: Array<ControlStatus> = [
-  'off',
-  'simple',
-  'simple-unknown-css',
-  'unset',
-  'disabled',
-  'unoverwritable',
-  'controlled',
-  'detected-fromcss',
-  'detected',
-  'trivial-default',
-  'multiselect-identical-simple',
-  'multiselect-simple-unknown-css',
-  'multiselect-identical-unset',
-  'multiselect-mixed-simple-or-unset',
-  'multiselect-controlled',
-  'multiselect-detected-fromcss',
-  'multiselect-detected',
-  'multiselect-unoverwritable',
-  'multiselect-disabled',
-  'multiselect-trivial-default',
-]
 
 export function isControlledStatus(controlStatus: ControlStatus): boolean {
   switch (controlStatus) {
@@ -92,6 +52,7 @@ export function isControlledStatus(controlStatus: ControlStatus): boolean {
     case 'unoverwritable':
     case 'detected':
     case 'detected-fromcss':
+    case 'overridden':
     case 'multiselect-identical-simple':
     case 'multiselect-simple-unknown-css':
     case 'multiselect-identical-unset':
@@ -107,144 +68,6 @@ export function isControlledStatus(controlStatus: ControlStatus): boolean {
       const _exhaustiveCheck: never = controlStatus
       throw new Error(`Unhandled status ${JSON.stringify(controlStatus)}`)
   }
-}
-
-const controlStylesByStatus: { [key: string]: ControlStyles } = Utils.mapArrayToDictionary(
-  AllControlStatuses,
-  (status: ControlStatus) => status,
-  (status: ControlStatus): ControlStyles => {
-    let fontStyle = 'normal'
-    let fontWeight = 400
-    let mainColor: string = colorTheme.fg1.value
-    let secondaryColor: string = colorTheme.fg7.value
-
-    let borderColor: string = 'transparent'
-    // text inputs
-    let backgroundColor: string = colorTheme.bg2.value
-    let focusedBackgroundColor: string = colorTheme.bg0.value
-    let segmentSelectorColor: string = colorTheme.bg3.value
-    let trackColor = colorTheme.fg7.value
-    let railColor = colorTheme.bg3.value
-    let strokePrimaryColor = colorTheme.fg3.value
-    let strokeSecondaryColor = colorTheme.fg7.value
-    let strokeTertiaryColor = colorTheme.fg8.value
-    let set = true
-    let interactive = true
-    let mixed = false
-    let unknown = false
-    let showContent = true
-    let unsettable = true
-
-    switch (status) {
-      case 'simple':
-      case 'multiselect-identical-simple':
-        break
-      case 'detected':
-      case 'multiselect-detected':
-      case 'unset':
-      case 'multiselect-identical-unset':
-        set = false
-        unsettable = false
-        // this makes it interactive if the component provides these values
-        mainColor = 'var(--control-styles-interactive-unset-main-color)'
-        secondaryColor = 'var(--control-styles-interactive-unset-secondary-color)'
-        trackColor = 'var(--control-styles-interactive-unset-track-color)'
-        railColor = 'var(--control-styles-interactive-unset-rail-color)'
-        break
-      case 'controlled':
-      case 'multiselect-controlled':
-      case 'multiselect-mixed-simple-or-unset':
-        interactive = true
-        mainColor = colorTheme.primary.value
-        secondaryColor = colorTheme.primary.value
-        trackColor = colorTheme.primary.value
-        strokePrimaryColor = colorTheme.primary.value
-        showContent = true
-        break
-      case 'trivial-default':
-      case 'multiselect-trivial-default':
-        interactive = true
-        showContent = false
-        mainColor = colorTheme.fg7.value
-        secondaryColor = colorTheme.fg7.value
-        trackColor = colorTheme.bg5.value
-        railColor = colorTheme.bg3.value
-        break
-      case 'detected-fromcss':
-      case 'multiselect-detected-fromcss':
-        mainColor = colorTheme.css.value
-        secondaryColor = colorTheme.css.value
-        trackColor = colorTheme.css.value
-        break
-      case 'simple-unknown-css':
-      case 'multiselect-simple-unknown-css':
-        unknown = true
-        interactive = true
-        mainColor = 'orange'
-        secondaryColor = 'orange'
-        trackColor = 'orange'
-        backgroundColor = 'transparent'
-        break
-      case 'unoverwritable':
-      case 'multiselect-unoverwritable':
-        interactive = false
-        mainColor = colorTheme.fg8.value
-        secondaryColor = colorTheme.fg8.value
-        trackColor = colorTheme.fg8.value
-        railColor = colorTheme.fg8.value
-        unsettable = false
-        break
-
-      case 'off':
-        set = false
-        interactive = false
-        mainColor = colorTheme.fg9.value
-        secondaryColor = colorTheme.fg9.value
-        trackColor = colorTheme.fg9.value
-        showContent = false
-        unsettable = false
-        break
-      case 'disabled':
-      case 'multiselect-disabled':
-        interactive = false
-        mainColor = colorTheme.fg9.value
-        secondaryColor = colorTheme.fg9.value
-        backgroundColor = 'transparent'
-        segmentSelectorColor = 'transparent'
-        trackColor = 'transparent'
-        showContent = true
-        unsettable = false
-        break
-      default:
-        break
-    }
-
-    return {
-      fontStyle,
-      fontWeight,
-      mainColor,
-      secondaryColor,
-      borderColor,
-      backgroundColor,
-      focusedBackgroundColor,
-      segmentSelectorColor,
-      strokePrimaryColor,
-      strokeSecondaryColor,
-      strokeTertiaryColor,
-      trackColor,
-      railColor,
-      set,
-      interactive,
-      mixed,
-      showContent,
-      unknown,
-      unsettable,
-    }
-  },
-)
-
-export function getControlStyles(controlStatus: ControlStatus): ControlStyles {
-  return controlStylesByStatus[controlStatus]
 }
 
 interface SinglePropertyStatus {
@@ -263,9 +86,7 @@ export interface PropertyStatus extends SinglePropertyStatus {
 
 // TODO: this needs tests!!!
 export function getControlStatusFromPropertyStatus(status: PropertyStatus): ControlStatus {
-  if (status.selectionLength === 0) {
-    return 'off'
-  } else if (status.selectionLength === 1) {
+  if (status.selectionLength <= 1) {
     if (status.set) {
       if (status.controlled) {
         if (status.overwritable) {
@@ -331,11 +152,11 @@ function isSet(
   if (isLeft(modifiableAttributeResult)) {
     return true
   } else {
-    if (isJSXAttributeNotFound(modifiableAttributeResult.value)) {
+    if (modifiableAttributeIsAttributeNotFound(modifiableAttributeResult.value)) {
       return spiedValue != null
     } else if (
-      isJSXAttributeValue(modifiableAttributeResult.value) ||
-      isPartOfJSXAttributeValue(modifiableAttributeResult.value)
+      modifiableAttributeIsAttributeValue(modifiableAttributeResult.value) ||
+      modifiableAttributeIsPartOfAttributeValue(modifiableAttributeResult.value)
     ) {
       return modifiableAttributeResult.value.value !== undefined
     } else {
@@ -351,11 +172,13 @@ function isControlled(
   if (isLeft(modifiableAttributeResult)) {
     return true
   } else {
-    if (isJSXAttributeNotFound(modifiableAttributeResult.value)) {
+    if (modifiableAttributeIsAttributeNotFound(modifiableAttributeResult.value)) {
       return spiedValue != null
     } else if (
-      isJSXAttributeValue(modifiableAttributeResult.value) ||
-      isPartOfJSXAttributeValue(modifiableAttributeResult.value)
+      modifiableAttributeIsAttributeValue(modifiableAttributeResult.value) ||
+      modifiableAttributeIsPartOfAttributeValue(modifiableAttributeResult.value) ||
+      modifiableAttributeIsAttributeNestedArray(modifiableAttributeResult.value) ||
+      modifiableAttributeIsAttributeNestedObject(modifiableAttributeResult.value)
     ) {
       return false
     } else {
@@ -439,7 +262,7 @@ export function calculatePropertyStatusForSelection(
 }
 
 export function calculateMultiPropertyStatusForSelection<
-  PropertiesToControl extends ParsedPropertiesKeys
+  PropertiesToControl extends ParsedPropertiesKeys,
 >(
   multiselectAtProps: MultiselectAtProps<PropertiesToControl>,
   realValues: {
@@ -558,4 +381,39 @@ export function isNotUnsetDefaultOrDetected(controlStatus: ControlStatus): boole
     controlStatus !== 'detected' &&
     controlStatus !== 'detected-fromcss'
   )
+}
+
+export function getFallbackControlStatusForProperty(
+  property: keyof ParsedCSSProperties,
+  jsxAttributes: JSXAttributes,
+  attributeMetadata: StyleAttributeMetadata | null,
+): ControlStatus {
+  const modifiableAttribute = getModifiableJSXAttributeAtPath(
+    jsxAttributes,
+    PP.create('style', property),
+  )
+
+  const simpleAttribute = defaultEither(
+    null,
+    getSimpleAttributeAtPath(right(jsxAttributes), PP.create('style', property)),
+  )
+
+  const fromStyleSheet =
+    attributeMetadata != null && attributeMetadata[property]?.fromStyleSheet === true
+
+  const overwritable = isOverwritable(modifiableAttribute)
+  const controlled = isControlled(modifiableAttribute, null)
+
+  const unknown = simpleAttribute != null && overwritable
+  if (controlled) {
+    return 'controlled'
+  } else if (unknown) {
+    return 'simple-unknown-css'
+  } else if (!overwritable) {
+    return 'unoverwritable'
+  } else if (fromStyleSheet) {
+    return 'detected-fromcss'
+  } else {
+    return 'detected'
+  }
 }

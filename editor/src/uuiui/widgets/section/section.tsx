@@ -1,3 +1,4 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx } from '@emotion/react'
 import React from 'react'
@@ -7,6 +8,7 @@ import { FlexColumn } from '../layout/flex-column'
 import { ExpandableIndicator } from '../../../components/navigator/navigator-item/expandable-indicator'
 import { UtopiaTheme, useColorTheme } from '../../styles/theme'
 import { SquareButton } from '../../button'
+import { unless } from '../../../utils/react-conditionals'
 
 export const Section = styled.div({
   display: 'flex',
@@ -15,9 +17,12 @@ export const Section = styled.div({
 interface SectionTitleRowProps {
   minimised: boolean
   toggleMinimised?: () => void
+  hideButton?: boolean
 }
 
-export const SectionTitleRow: React.FunctionComponent<SectionTitleRowProps> = (props) => {
+export const SectionTitleRow: React.FunctionComponent<
+  React.PropsWithChildren<SectionTitleRowProps>
+> = (props) => {
   const colorTheme = useColorTheme()
   const toggleMinimised = props.toggleMinimised
   const handleClick = React.useCallback(
@@ -37,6 +42,7 @@ export const SectionTitleRow: React.FunctionComponent<SectionTitleRowProps> = (p
         paddingLeft: 8,
         paddingRight: 8,
         minHeight: UtopiaTheme.layout.rowHeight.normal,
+        color: colorTheme.fg0.value,
         cursor: 'pointer',
       }}
       css={{
@@ -47,9 +53,12 @@ export const SectionTitleRow: React.FunctionComponent<SectionTitleRowProps> = (p
       onClick={handleClick}
     >
       {props.children}
-      <SquareButton highlight={true} onClick={handleClick}>
-        <ExpandableIndicator collapsed={props.minimised} selected={false} visible={true} />
-      </SquareButton>
+      {unless(
+        props.hideButton === true,
+        <SquareButton highlight onClick={handleClick}>
+          <ExpandableIndicator collapsed={props.minimised} selected={false} visible={true} />
+        </SquareButton>,
+      )}
     </FlexRow>
   )
 }
@@ -57,7 +66,6 @@ export const SectionTitleRow: React.FunctionComponent<SectionTitleRowProps> = (p
 export const SectionBodyArea = styled(FlexColumn)<{ minimised: boolean }>(
   (props: { minimised: boolean }) => ({
     transition: 'all .2s ease-in-out',
-    paddingBottom: props.minimised ? 0 : 16,
     overflow: 'hidden',
     opacity: props.minimised ? 0 : 1,
     height: props.minimised ? 0 : undefined,

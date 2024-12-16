@@ -1,10 +1,10 @@
 import * as GitHost from 'hosted-git-info'
+import type { ResolvedDependencyVersion } from '../../../components/editor/npm-dependency/npm-dependency'
 import {
   findMatchingVersion,
   isPackageNotFound,
-  ResolvedDependencyVersion,
 } from '../../../components/editor/npm-dependency/npm-dependency'
-import { AnyJson } from '../../../missing-types/json'
+import type { AnyJson } from '../../../missing-types/json'
 import { parseStringToJSON } from '../../../utils/package-parser-utils'
 import {
   appendToPath,
@@ -12,17 +12,16 @@ import {
   getPartsFromPath,
   makePathFromParts,
 } from '../../../utils/path-utils'
+import type { ParseError, ParseResult } from '../../../utils/value-parser-utils'
 import {
   objectKeyParser,
   optionalObjectKeyParser,
-  ParseError,
-  ParseResult,
   parseString,
 } from '../../../utils/value-parser-utils'
 import { pluck } from '../../shared/array-utils'
+import type { Either } from '../../shared/either'
 import {
   applicative3Either,
-  Either,
   flatMapEither,
   foldEither,
   isLeft,
@@ -31,23 +30,29 @@ import {
   mapEither,
   right,
 } from '../../shared/either'
-import {
+import type {
   PackagerServerFile,
   PackagerServerResponse,
   RequestedNpmDependency,
 } from '../../shared/npm-dependency-types'
 import { objectMap } from '../../shared/object-utils'
-import {
-  esCodeFile,
+import type {
   ESCodeFile,
-  esRemoteDependencyPlaceholder,
   ESRemoteDependencyPlaceholder,
   NodeModuleFile,
   NodeModules,
 } from '../../shared/project-file-types'
+import { esCodeFile, esRemoteDependencyPlaceholder } from '../../shared/project-file-types'
 import { isBuiltInDependency } from './built-in-dependencies'
+import type { BuiltInDependencies } from './built-in-dependencies-list'
 import { mangleNodeModulePaths, mergeNodeModules } from './merge-modules'
 import { getJsDelivrFileUrl, getPackagerUrl } from './packager-url'
+import {
+  notifyOperationFinished,
+  notifyOperationStarted,
+} from '../../shared/import/import-operation-service'
+import { ImportOperationResult } from '../../shared/import/import-operation-types'
+import type { EditorDispatch } from '../../../components/editor/action-types'
 
 let depPackagerCache: { [key: string]: PackagerServerResponse } = {}
 
@@ -211,7 +216,7 @@ async function fetchPackagerResponseWithRetry(
     }
   }
 
-  return await fetchPackagerResponseWithRetryInner(NR_RETRIES, RETRY_FREQ_MS)
+  return fetchPackagerResponseWithRetryInner(NR_RETRIES, RETRY_FREQ_MS)
 }
 
 async function fetchPackagerResponse(
@@ -277,60 +282,74 @@ function failError(dependency: RequestedNpmDependency): DependencyFetchError {
   }
 }
 
+export async function fetchNodeModule(
+  dep: RequestedNpmDependency,
+  shouldRetry: boolean = true,
+): Promise<Either<DependencyFetchError, NodeModules>> {
+  try {
+    const matchingVersionResponse = await findMatchingVersion(dep.name, dep.version, 'skipFetch')
+    if (isPackageNotFound(matchingVersionResponse)) {
+      return left(failNotFound(dep))
+    }
+
+    const fetchResolvedDependency = shouldRetry
+      ? fetchPackagerResponseWithRetry
+      : fetchPackagerResponse
+
+    const packagerResponse = await fetchResolvedDependency(dep, matchingVersionResponse.version)
+
+    if (packagerResponse != null) {
+      /**
+       * to avoid clashing transitive dependencies,
+       * we "move" all transitive dependencies into a subfolder at
+       * /node_modules/<main_package>/node_modules/<transitive_dep>/
+       *
+       * the module resolution won't mind this, the only downside to this approach is
+       * that if two main dependencies share the exact same version of a transitive
+       * dependency, they will not share that transitive dependency in memory,
+       * so this is wasting a bit of memory.
+       *
+       * but it avoids two of the same transitive dependencies with different versions from
+       * overwriting each other.
+       *
+       * the real nice solution would be to apply npm's module resolution logic that
+       * pulls up shared transitive dependencies to the main /node_modules/ folder.
+       */
+      return right(mangleNodeModulePaths(dep.name, packagerResponse))
+    } else {
+      return left(failError(dep))
+    }
+  } catch (e) {
+    // TODO: proper error handling, now we don't show error for a missing package. The error will be visible when you try to import
+    return left(failError(dep))
+  }
+}
+
 export async function fetchNodeModules(
+  dispatch: EditorDispatch,
   newDeps: Array<RequestedNpmDependency>,
+  builtInDependencies: BuiltInDependencies,
   shouldRetry: boolean = true,
 ): Promise<NodeFetchResult> {
-  const dependenciesToDownload = newDeps.filter((d) => !isBuiltInDependency(d.name))
+  const dependenciesToDownload = newDeps.filter(
+    (d) => !isBuiltInDependency(builtInDependencies, d.name),
+  )
   const nodeModulesArr = await Promise.all(
-    dependenciesToDownload.map(
-      async (newDep): Promise<Either<DependencyFetchError, NodeModules>> => {
-        try {
-          const matchingVersionResponse = await findMatchingVersion(
-            newDep.name,
-            newDep.version,
-            'skipFetch',
-          )
-          if (isPackageNotFound(matchingVersionResponse)) {
-            return left(failNotFound(newDep))
-          }
-
-          const fetchResolvedDependency = shouldRetry
-            ? fetchPackagerResponseWithRetry
-            : fetchPackagerResponse
-
-          const packagerResponse = await fetchResolvedDependency(
-            newDep,
-            matchingVersionResponse.version,
-          )
-
-          if (packagerResponse != null) {
-            /**
-             * to avoid clashing transitive dependencies,
-             * we "move" all transitive dependencies into a subfolder at
-             * /node_modules/<main_package>/node_modules/<transitive_dep>/
-             *
-             * the module resolution won't mind this, the only downside to this approach is
-             * that if two main dependencies share the exact same version of a transitive
-             * dependency, they will not share that transitive dependency in memory,
-             * so this is wasting a bit of memory.
-             *
-             * but it avoids two of the same transitive dependencies with different versions from
-             * overwriting each other.
-             *
-             * the real nice solution would be to apply npm's module resolution logic that
-             * pulls up shared transitive dependencies to the main /node_modules/ folder.
-             */
-            return right(mangleNodeModulePaths(newDep.name, packagerResponse))
-          } else {
-            return left(failError(newDep))
-          }
-        } catch (e) {
-          // TODO: proper error handling, now we don't show error for a missing package. The error will be visible when you try to import
-          return left(failError(newDep))
-        }
-      },
-    ),
+    dependenciesToDownload.map(async (dep) => {
+      const fetchDependencyOperation = {
+        type: 'fetchDependency',
+        id: `${dep.name}@${dep.version}`,
+        dependencyName: dep.name,
+        dependencyVersion: dep.version,
+      } as const
+      notifyOperationStarted(dispatch, fetchDependencyOperation)
+      const fetchResult = await fetchNodeModule(dep, shouldRetry)
+      const fetchStatus = isLeft(fetchResult)
+        ? ImportOperationResult.Error
+        : ImportOperationResult.Success
+      notifyOperationFinished(dispatch, fetchDependencyOperation, fetchStatus)
+      return fetchResult
+    }),
   )
   const errors = nodeModulesArr
     .filter(isLeft)

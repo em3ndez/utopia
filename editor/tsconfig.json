@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "outDir": "./lib",
-    "target": "es2019",
+    "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Node",
     "esModuleInterop": true,
@@ -20,7 +20,10 @@
     "strict": true,
     "skipLibCheck": true,
     "baseUrl": ".",
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "worker-imports": ["src/core/workers/worker-import-utils.ts"]
+    }
   },
   "exclude": ["node_modules"]
 }

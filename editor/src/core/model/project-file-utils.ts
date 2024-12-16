@@ -4,44 +4,55 @@ import * as PP from '../shared/property-path'
 import { isText } from 'istextorbinary'
 import { intrinsicHTMLElementNamesAsStrings } from '../shared/dom-utils'
 import Utils from '../../utils/utils'
-import {
+import type {
   Directory,
   HighlightBoundsForUids,
   ImageFile,
   Imports,
-  isParseFailure,
   ParsedTextFile,
   ParseSuccess,
-  ProjectContents,
   ProjectFile,
   ProjectFileType,
-  RevisionsState,
-  SceneMetadata,
   TextFile,
   AssetFile,
+  TextFileContents,
+  HighlightBoundsWithFileForUids,
+  RevisionsStateType,
+} from '../shared/project-file-types'
+import {
+  RevisionsState,
   foldParsedTextFile,
   isTextFile,
   textFile,
-  TextFileContents,
   textFileContents,
-  unparsed,
-  HighlightBoundsWithFileForUids,
   forEachParseSuccess,
   isParseSuccess,
+  isExportDefaultFunctionOrClass,
+  isExportFunction,
+  isExportDefault,
+  isImageFile,
+  isAssetFile,
 } from '../shared/project-file-types'
-import {
-  isJSXElement,
-  isUtopiaJSXComponent,
+import type {
   JSXElementChild,
   JSXElementName,
   TopLevelElement,
   UtopiaJSXComponent,
-  getJSXElementNameLastPart,
-  jsxElementNameEquals,
   ImportInfo,
+  ElementInstanceMetadata,
+} from '../shared/element-template'
+import {
+  isJSXElement,
+  isUtopiaJSXComponent,
+  getJSXElementNameLastPart,
   createImportedFrom,
   createNotImported,
-  ElementInstanceMetadata,
+  isIntrinsicElement,
+  isIntrinsicElementFromString,
+  isIntrinsicHTMLElement,
+  isIntrinsicHTMLElementString,
+  isImportedOrigin,
+  isSameFileOrigin,
 } from '../shared/element-template'
 import {
   sceneMetadata as _sceneMetadata,
@@ -49,21 +60,27 @@ import {
   EmptyUtopiaCanvasComponent,
 } from './scene-utils'
 import { mapDropNulls, pluck } from '../shared/array-utils'
-import { forEachValue, mapValues } from '../shared/object-utils'
+import { forEachValue, propOrNull } from '../shared/object-utils'
+import type { ProjectContentsTree, ProjectContentTreeRoot } from '../../components/assets'
 import {
-  getContentsTreeFileFromString,
+  getProjectFileByFilePath,
   projectContentFile,
-  ProjectContentsTree,
-  ProjectContentTreeRoot,
   transformContentsTree,
   walkContentsTree,
 } from '../../components/assets'
-import { extractAsset, extractImage, extractText, FileResult } from '../shared/file-utils'
+import type { FileResult } from '../shared/file-utils'
+import { extractAsset, extractImage, extractText } from '../shared/file-utils'
 import { emptySet } from '../shared/set-utils'
 import { fastForEach } from '../shared/utils'
-import { foldEither, isLeft, isRight, maybeEitherToMaybe } from '../shared/either'
-import { splitAt } from '../shared/string-utils'
+import { foldEither, isRight, maybeEitherToMaybe } from '../shared/either'
 import { memoize } from '../shared/memoize'
+import { filenameFromParts, getFilenameParts } from '../../components/images'
+import globToRegexp from 'glob-to-regexp'
+import { is } from '../shared/equality-utils'
+import { absolutePathFromRelativePath } from '../../utils/path-utils'
+import json5 from 'json5'
+import type { FilePathMappings, FilePathMapping } from '../workers/common/project-file-utils'
+export type { FilePathMappings, FilePathMapping }
 
 export const sceneMetadata = _sceneMetadata // This is a hotfix for a circular dependency AND a leaking of utopia-api into the workers
 
@@ -83,11 +100,11 @@ export function isUtopiaAPIComponent(elementName: JSXElementName, imports: Impor
 export function isUtopiaAPIComponentFromMetadata(
   elementInstanceMetadata: ElementInstanceMetadata,
 ): boolean {
-  const foundImportInfo = maybeEitherToMaybe(elementInstanceMetadata.importInfo)
-  if (foundImportInfo != null) {
-    return foundImportInfo.path === 'utopia-api'
-  } else {
+  const foundImportInfo = elementInstanceMetadata.importInfo
+  if (foundImportInfo == null || isSameFileOrigin(foundImportInfo)) {
     return false
+  } else {
+    return foundImportInfo.filePath === 'utopia-api'
   }
 }
 
@@ -130,9 +147,11 @@ export function isGivenUtopiaElementFromMetadata(
   elementInstanceMetadata: ElementInstanceMetadata,
   componentName: string,
 ): boolean {
-  const foundImportInfo = maybeEitherToMaybe(elementInstanceMetadata.importInfo)
-  if (foundImportInfo != null) {
-    return foundImportInfo.path === 'utopia-api' && foundImportInfo.originalName === componentName
+  const foundImportInfo = elementInstanceMetadata.importInfo
+  if (foundImportInfo != null && isImportedOrigin(foundImportInfo)) {
+    return (
+      foundImportInfo.filePath === 'utopia-api' && foundImportInfo.exportedName === componentName
+    )
   } else {
     return false
   }
@@ -146,14 +165,56 @@ export function isSceneFromMetadata(elementInstanceMetadata: ElementInstanceMeta
   return isGivenUtopiaElementFromMetadata(elementInstanceMetadata, 'Scene')
 }
 
-export function isUtopiaAPITextElement(element: JSXElementChild, imports: Imports): boolean {
-  return isJSXElement(element) && isTextAgainstImports(element.name, imports)
+export function isRemixSceneAgainstImports(element: JSXElementChild, imports: Imports): boolean {
+  return isGivenUtopiaAPIElement(element, imports, 'RemixScene')
 }
 
-export function isUtopiaAPITextElementFromMetadata(
-  elementInstanceMetadata: ElementInstanceMetadata,
+export function isRemixOutletAgainstImports(element: JSXElementChild, imports: Imports): boolean {
+  if (!isJSXElement(element)) {
+    return false
+  }
+
+  const remix = imports['@remix-run/react']
+  if (remix == null) {
+    return false
+  }
+
+  for (const fromWithin of remix.importedFromWithin) {
+    if (fromWithin.alias === element.name.baseVariable && fromWithin.name === 'Outlet') {
+      return true
+    }
+  }
+
+  return (
+    remix.importedAs === element.name.baseVariable &&
+    PP.isSameProperty(element.name.propertyPath, 'Outlet')
+  )
+}
+
+export function isRemixSceneElement(
+  element: JSXElementChild,
+  filePath: string,
+  projectContents: ProjectContentTreeRoot,
 ): boolean {
-  return isGivenUtopiaElementFromMetadata(elementInstanceMetadata, 'Text')
+  const file = getProjectFileByFilePath(projectContents, filePath)
+  if (file != null && isTextFile(file) && isParseSuccess(file.fileContents.parsed)) {
+    return isRemixSceneAgainstImports(element, file.fileContents.parsed.imports)
+  } else {
+    return false
+  }
+}
+
+export function isRemixOutletElement(
+  element: JSXElementChild,
+  filePath: string,
+  projectContents: ProjectContentTreeRoot,
+): boolean {
+  const file = getProjectFileByFilePath(projectContents, filePath)
+  if (file != null && isTextFile(file) && isParseSuccess(file.fileContents.parsed)) {
+    return isRemixOutletAgainstImports(element, file.fileContents.parsed.imports)
+  } else {
+    return false
+  }
 }
 
 export function isEllipseAgainstImports(jsxElementName: JSXElementName, imports: Imports): boolean {
@@ -179,10 +240,6 @@ export function isViewLikeFromMetadata(elementInstanceMetadata: ElementInstanceM
   )
 }
 
-export function isTextAgainstImports(jsxElementName: JSXElementName, imports: Imports): boolean {
-  return isGivenUtopiaAPIElementFromName(jsxElementName, imports, 'Text')
-}
-
 export function isImg(jsxElementName: JSXElementName): boolean {
   return (
     PP.depth(jsxElementName.propertyPath) === 0 &&
@@ -194,8 +251,8 @@ export function isAnimatedElement(
   elementInstanceMetadata: ElementInstanceMetadata | null,
 ): boolean {
   const importInfo = elementInstanceMetadata?.importInfo
-  if (importInfo != null && isRight(importInfo)) {
-    return importInfo.value.path === 'react-spring' && importInfo.value.originalName === 'animated'
+  if (importInfo != null && isImportedOrigin(importInfo)) {
+    return importInfo.filePath === 'react-spring' && importInfo.exportedName === 'animated'
   } else {
     return false
   }
@@ -220,7 +277,11 @@ function isHTMLComponentFromBaseName(baseName: string, imports: Imports): boolea
   }
 }
 
-export function importInfoFromImportDetails(name: JSXElementName, imports: Imports): ImportInfo {
+export function importInfoFromImportDetails(
+  name: JSXElementName,
+  imports: Imports,
+  filePath: string,
+): ImportInfo {
   const baseVariable = name.baseVariable
 
   const err = mapDropNulls((pathOrModuleName) => {
@@ -229,62 +290,94 @@ export function importInfoFromImportDetails(name: JSXElementName, imports: Impor
       (fromWithin) => fromWithin.alias === baseVariable,
     )
 
+    const absolutePath = absolutePathFromRelativePath(filePath, false, pathOrModuleName)
+
     if (importAlias != null) {
-      return createImportedFrom(importAlias.alias, importAlias.name, pathOrModuleName)
+      return createImportedFrom(importAlias.alias, importAlias.name, absolutePath)
     } else if (importDetail.importedAs === baseVariable) {
-      return createImportedFrom(importDetail.importedAs, null, pathOrModuleName)
+      return createImportedFrom(importDetail.importedAs, null, absolutePath)
     } else if (importDetail.importedWithName === baseVariable) {
-      return createImportedFrom(importDetail.importedWithName, null, pathOrModuleName)
+      return createImportedFrom(importDetail.importedWithName, null, absolutePath)
     } else {
       return null
     }
   }, Object.keys(imports))
 
-  const foundImportDetail = err[0] ?? createNotImported()
+  const foundImportDetail = err[0] ?? createNotImported(filePath, baseVariable)
 
   return foundImportDetail
 }
 
-export function getFilePathForImportedComponent(
-  element: ElementInstanceMetadata | null,
-): string | null {
-  const importInfo = element?.importInfo
-  if (importInfo != null && isRight(importInfo)) {
-    return importInfo.value.path
-  } else {
-    return null
-  }
-}
-
 export function isImportedComponentFromProjectFiles(
   element: ElementInstanceMetadata | null,
+  filePathMappings: FilePathMappings,
 ): boolean {
-  return !isImportedComponentNPM(element)
+  return !isImportedComponentNPM(element, filePathMappings)
 }
 
 export function isImportedComponent(
   elementInstanceMetadata: ElementInstanceMetadata | null,
+  filePathMappings: FilePathMappings,
 ): boolean {
   const importInfo = elementInstanceMetadata?.importInfo
-  if (importInfo != null && isRight(importInfo)) {
-    const importKey = importInfo.value.path
-    return !importKey.startsWith('.') && !importKey.startsWith('/')
+  if (importInfo != null && isImportedOrigin(importInfo)) {
+    const importKey = importInfo.filePath
+    const isMappedFilePath = filePathMappings.some(([re, _]) => {
+      const result = re.test(importKey)
+      re.lastIndex = 0 // Reset the regex!
+      return result
+    })
+    return !isMappedFilePath && !importKey.startsWith('.') && !importKey.startsWith('/')
   } else {
     return false
   }
 }
 
-export function isImportedComponentNPM(
-  elementInstanceMetadata: ElementInstanceMetadata | null,
+export function isIntrinsicElementMetadata(
+  elementInstanceMetadata: ElementInstanceMetadata,
 ): boolean {
-  return (
-    isImportedComponent(elementInstanceMetadata) &&
-    elementInstanceMetadata != null &&
-    !isUtopiaAPIComponentFromMetadata(elementInstanceMetadata)
+  return foldEither(
+    isIntrinsicElementFromString,
+    (child) => {
+      if (isJSXElement(child)) {
+        return isIntrinsicElement(child.name)
+      } else {
+        return false
+      }
+    },
+    elementInstanceMetadata.element,
   )
 }
 
-const defaultEmptyUtopiaComponent = EmptyUtopiaCanvasComponent
+export function isIntrinsicHTMLElementMetadata(
+  elementInstanceMetadata: ElementInstanceMetadata,
+): boolean {
+  return foldEither(
+    isIntrinsicHTMLElementString,
+    (child) => {
+      if (isJSXElement(child)) {
+        return isIntrinsicHTMLElement(child.name)
+      } else {
+        return false
+      }
+    },
+    elementInstanceMetadata.element,
+  )
+}
+
+export function isImportedComponentNPM(
+  elementInstanceMetadata: ElementInstanceMetadata | null,
+  filePathMappings: FilePathMappings,
+): boolean {
+  return (
+    (elementInstanceMetadata != null &&
+      isIntrinsicElementMetadata(elementInstanceMetadata) &&
+      !isIntrinsicHTMLElementMetadata(elementInstanceMetadata)) ||
+    (isImportedComponent(elementInstanceMetadata, filePathMappings) &&
+      elementInstanceMetadata != null &&
+      !isUtopiaAPIComponentFromMetadata(elementInstanceMetadata))
+  )
+}
 
 export function getOrDefaultScenes(parsedSuccess: ParseSuccess): UtopiaJSXComponent {
   const utopiaComponentFromTopLevelElements = fishOutUtopiaCanvasFromTopLevelElements(
@@ -294,7 +387,7 @@ export function getOrDefaultScenes(parsedSuccess: ParseSuccess): UtopiaJSXCompon
     return utopiaComponentFromTopLevelElements
   }
   // If all fails, let's return an empty default component
-  return defaultEmptyUtopiaComponent
+  return EmptyUtopiaCanvasComponent
 }
 
 export function getComponentsFromTopLevelElements(
@@ -313,9 +406,7 @@ function getUtopiaJSXComponentsFromSuccessInner(success: ParseSuccess): Array<Ut
   return getComponentsFromTopLevelElements(success.topLevelElements)
 }
 
-export const getUtopiaJSXComponentsFromSuccess = Utils.memoize(
-  getUtopiaJSXComponentsFromSuccessInner,
-)
+export const getUtopiaJSXComponentsFromSuccess = memoize(getUtopiaJSXComponentsFromSuccessInner)
 
 export function applyUtopiaJSXComponentsChanges(
   topLevelElements: Array<TopLevelElement>,
@@ -374,7 +465,7 @@ function getHighlightBoundsForProjectImpl(
       forEachParseSuccess((parsedFile) => {
         const fileHighlightBounds = parsedFile.highlightBounds
         forEachValue((bounds, uid) => {
-          allHighlightBounds[uid] = { ...bounds, filePath: fullPath }
+          allHighlightBounds[uid] = { bounds: bounds, filePath: fullPath }
         }, fileHighlightBounds)
       }, file.fileContents.parsed)
     }
@@ -385,7 +476,7 @@ function getHighlightBoundsForProjectImpl(
 
 export const getHighlightBoundsForProject = memoize(getHighlightBoundsForProjectImpl, {
   maxSize: 2,
-  equals: (a, b) => a === b,
+  matchesArg: (a, b) => a === b,
 })
 
 export function updateParsedTextFileHighlightBounds(
@@ -403,8 +494,8 @@ export function updateParsedTextFileHighlightBounds(
 }
 
 export function canUpdateRevisionsState(
-  updated: RevisionsState,
-  existing: RevisionsState,
+  updated: RevisionsStateType,
+  existing: RevisionsStateType,
 ): boolean {
   switch (existing) {
     case RevisionsState.BothMatch:
@@ -412,7 +503,12 @@ export function canUpdateRevisionsState(
     case RevisionsState.ParsedAhead:
       return updated === RevisionsState.ParsedAhead || updated === RevisionsState.BothMatch
     case RevisionsState.CodeAhead:
-      return updated === RevisionsState.CodeAhead || updated === RevisionsState.BothMatch
+    case RevisionsState.CodeAheadButPleaseTellVSCodeAboutIt:
+      return (
+        updated === RevisionsState.CodeAhead ||
+        updated === RevisionsState.BothMatch ||
+        updated === RevisionsState.CodeAheadButPleaseTellVSCodeAboutIt
+      )
     default:
       const _exhaustiveCheck: never = existing
       throw new Error(`Invalid revisions state ${existing}`)
@@ -425,30 +521,8 @@ export function isOlderThan(maybeNew: ProjectFile, existing: ProjectFile | null)
   }
 
   return (
-    isTextFile(maybeNew) &&
-    isTextFile(existing) &&
-    maybeNew.lastRevisedTime < existing.lastRevisedTime
+    isTextFile(maybeNew) && isTextFile(existing) && maybeNew.versionNumber < existing.versionNumber
   )
-}
-
-export function canUpdateFile(updated: ProjectFile, existing: ProjectFile | null): boolean {
-  if (existing == null) {
-    return true
-  }
-
-  if (isTextFile(existing)) {
-    return (
-      isTextFile(updated) &&
-      isTextFile(existing) &&
-      isOlderThan(existing, updated) &&
-      canUpdateRevisionsState(
-        updated.fileContents.revisionsState,
-        existing.fileContents.revisionsState,
-      )
-    )
-  }
-
-  return true
 }
 
 export function updateUiJsCode(file: TextFile, code: string, codeIsNowAhead: boolean): TextFile {
@@ -459,37 +533,12 @@ export function updateUiJsCode(file: TextFile, code: string, codeIsNowAhead: boo
     code: code,
   }
 
-  return textFile(fileContents, file.lastSavedContents, file.lastParseSuccess, Date.now())
-}
-
-export function imageFile(
-  imageType: string | undefined,
-  base64: string | undefined,
-  width: number | undefined,
-  height: number | undefined,
-  hash: number,
-): ImageFile {
-  return {
-    type: 'IMAGE_FILE',
-    imageType: imageType,
-    base64: base64,
-    width: width,
-    height: height,
-    hash: hash,
-  }
-}
-
-export function assetFile(base64: string | undefined): AssetFile {
-  return {
-    type: 'ASSET_FILE',
-    base64: base64,
-  }
-}
-
-export function directory(): Directory {
-  return {
-    type: 'DIRECTORY',
-  }
+  return textFile(
+    fileContents,
+    file.lastSavedContents,
+    file.lastParseSuccess,
+    file.versionNumber + 1,
+  )
 }
 
 export function sameTextFile(first: ProjectFile, second: ProjectFile): boolean {
@@ -500,15 +549,8 @@ export function sameTextFile(first: ProjectFile, second: ProjectFile): boolean {
   }
 }
 
-export function isImageFile(projectFile: ProjectFile): projectFile is ImageFile {
-  return projectFile.type === 'IMAGE_FILE'
-}
-
-export function isDirectory(projectFile: ProjectFile): projectFile is Directory {
-  return projectFile.type === 'DIRECTORY'
-}
-
 // A layer over the mime-types library which means we can shim in things we need.
+// Keep this in sync with Utopia/Web/Assets.hs.
 export function mimeTypeLookup(filename: string): string | false {
   if (filename.endsWith('.ts')) {
     return 'application/x-typescript'
@@ -533,6 +575,9 @@ export function fileTypeFromFileName(
 ): ProjectFileTypeExcludingDirectory | null {
   if (filename == null) {
     return null
+  }
+  if (filename.endsWith('.svg')) {
+    return 'ASSET_FILE'
   }
   if (isText(filename)) {
     return 'TEXT_FILE'
@@ -617,41 +662,39 @@ export function switchToFileType(from: ProjectFile, to: ProjectFileType): Projec
 }
 
 export function uniqueProjectContentID(
-  startingID: string,
+  filename: string,
   projectContents: ProjectContentTreeRoot,
 ): string {
-  const startingIDCorrected = correctProjectContentsPath(startingID)
-  if (getContentsTreeFileFromString(projectContents, startingIDCorrected) != null) {
-    const firstIndexOfFullStop = startingIDCorrected.indexOf('.')
-    if (firstIndexOfFullStop === -1) {
-      let counter = 2
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const possibleNewID = `${startingIDCorrected}_${counter}`
-        if (getContentsTreeFileFromString(projectContents, possibleNewID) != null) {
-          counter += 1
-        } else {
-          return correctProjectContentsPath(possibleNewID)
-        }
-      }
-    } else {
-      // Kinda assume it's a filename.
-      const [prefix, suffixWithFullStop] = splitAt(firstIndexOfFullStop, startingIDCorrected)
-      const suffix = suffixWithFullStop.slice(1)
-      let counter = 2
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const possibleNewID = `${prefix}_${counter}.${suffix}`
-        if (getContentsTreeFileFromString(projectContents, possibleNewID) != null) {
-          counter += 1
-        } else {
-          return correctProjectContentsPath(possibleNewID)
-        }
-      }
-    }
-  } else {
+  const startingIDCorrected = correctProjectContentsPath(filename)
+  const fileWithSameNameExistsAlready =
+    getProjectFileByFilePath(projectContents, startingIDCorrected) != null
+
+  if (!fileWithSameNameExistsAlready) {
     return startingIDCorrected
   }
+
+  const parts = getFilenameParts(startingIDCorrected)
+
+  const makeNameWithCounter =
+    parts !== null
+      ? (counter: number) => filenameFromParts({ ...parts, deduplicationSeqNumber: counter })
+      : (counter: number) => `${startingIDCorrected}_${counter}`
+
+  let counter = 2
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const possibleNewID = makeNameWithCounter(counter)
+    if (getProjectFileByFilePath(projectContents, possibleNewID) != null) {
+      counter += 1
+    } else {
+      return correctProjectContentsPath(possibleNewID)
+    }
+  }
+}
+
+export function fileExists(projectContents: ProjectContentTreeRoot, filename: string): boolean {
+  const filenameCorrected = correctProjectContentsPath(filename)
+  return getProjectFileByFilePath(projectContents, filenameCorrected) != null
 }
 
 export function saveTextFileContents(
@@ -664,14 +707,8 @@ export function saveTextFileContents(
     file.fileContents,
     manualSave,
   )
-  const contentsUpdated = contents !== file.fileContents
   const lastParseSuccess = isParseSuccess(contents.parsed) ? contents.parsed : file.lastParseSuccess
-  return textFile(
-    contents,
-    savedContent,
-    lastParseSuccess,
-    contentsUpdated ? Date.now() : file.lastRevisedTime,
-  )
+  return textFile(contents, savedContent, lastParseSuccess, file.versionNumber + 1)
 }
 
 export function updateLastSavedContents<T>(
@@ -777,7 +814,12 @@ export function updateFileContents(
         getHighlightBoundsFromParseResult(file.fileContents.parsed), // here we just update the code without updating the highlights!
       )
       const newContents = textFileContents(contents, newParsed, RevisionsState.CodeAhead)
-      return textFile(newContents, uiJsLastSavedContents, file.lastParseSuccess, Date.now())
+      return textFile(
+        newContents,
+        uiJsLastSavedContents,
+        file.lastParseSuccess,
+        file.versionNumber + 1,
+      )
     default:
       const _exhaustiveCheck: never = file
       throw new Error(`Unhandled file type ${JSON.stringify(file)}`)
@@ -790,4 +832,152 @@ export function getSavedCodeFromTextFile(file: TextFile): string {
 
 export function getUnsavedCodeFromTextFile(file: TextFile): string | null {
   return file.lastSavedContents == null ? null : file.fileContents.code
+}
+
+export function getDefaultExportedTopLevelElement(file: TextFile): JSXElementChild | null {
+  if (file.fileContents.parsed.type !== 'PARSE_SUCCESS') {
+    return null
+  }
+
+  const defaultExportName =
+    file.fileContents.parsed.exportsDetail.find(isExportDefault)?.name ?? null
+
+  if (defaultExportName == null) {
+    return null
+  }
+
+  return (
+    file.fileContents.parsed.topLevelElements.find(
+      (t): t is UtopiaJSXComponent =>
+        t.type === 'UTOPIA_JSX_COMPONENT' && t.name === defaultExportName,
+    )?.rootElement ?? null
+  )
+}
+
+export function getDefaultExportNameAndUidFromFile(
+  projectContents: ProjectContentTreeRoot,
+  filePath: string,
+): { name: string; uid: string | null } | null {
+  const file = getProjectFileByFilePath(projectContents, filePath)
+  if (
+    file == null ||
+    file.type != 'TEXT_FILE' ||
+    file.fileContents.parsed.type !== 'PARSE_SUCCESS'
+  ) {
+    return null
+  }
+
+  const defaultExportName =
+    file.fileContents.parsed.exportsDetail.find(isExportDefault)?.name ?? null
+
+  if (defaultExportName == null) {
+    return null
+  }
+
+  const elementUid =
+    file.fileContents.parsed.topLevelElements.find(
+      (t): t is UtopiaJSXComponent =>
+        t.type === 'UTOPIA_JSX_COMPONENT' && t.name === defaultExportName,
+    )?.rootElement.uid ?? null
+
+  return { name: defaultExportName, uid: elementUid }
+}
+
+export function fileExportsFunctionWithName(
+  projectContents: ProjectContentTreeRoot,
+  filePath: string,
+  componentName: string,
+): boolean {
+  const file = getProjectFileByFilePath(projectContents, filePath)
+  if (
+    file == null ||
+    file.type != 'TEXT_FILE' ||
+    file.fileContents.parsed.type !== 'PARSE_SUCCESS'
+  ) {
+    return false
+  }
+
+  return file.fileContents.parsed.exportsDetail.some(
+    (v) => isExportFunction(v) && v.functionName === componentName,
+  )
+}
+
+export function getTopLevelElementByExportsDetail(
+  file: ParseSuccess,
+  nameToLookFor: string,
+): UtopiaJSXComponent | null {
+  return (
+    file.topLevelElements.find(
+      (t): t is UtopiaJSXComponent => t.type === 'UTOPIA_JSX_COMPONENT' && t.name === nameToLookFor,
+    ) ?? null
+  )
+}
+
+export const getFilePathMappings = memoize(getFilePathMappingsImpl, { maxSize: 1, matchesArg: is })
+
+function getFilePathMappingsImpl(projectContents: ProjectContentTreeRoot): FilePathMappings {
+  const jsConfigFile = getProjectFileByFilePath(projectContents, 'jsconfig.json')
+  if (jsConfigFile != null && isTextFile(jsConfigFile)) {
+    return getFilePathMappingsFromConfigFile(jsConfigFile)
+  }
+  const tsConfigFile = getProjectFileByFilePath(projectContents, 'tsconfig.json')
+  if (tsConfigFile != null && isTextFile(tsConfigFile)) {
+    return getFilePathMappingsFromConfigFile(tsConfigFile)
+  }
+
+  return []
+}
+
+const getFilePathMappingsFromConfigFile = memoize(getFilePathMappingsFromConfigFileImpl, {
+  maxSize: 1,
+  matchesArg: is,
+})
+
+function getFilePathMappingsFromConfigFileImpl(configFile: TextFile): FilePathMappings {
+  try {
+    const parsedJSON = json5.parse(configFile.fileContents.code)
+    if (typeof parsedJSON === 'object') {
+      const compilerOptions = propOrNull('compilerOptions', parsedJSON)
+      const paths = propOrNull('paths', compilerOptions)
+      if (paths != null && typeof paths === 'object' && !Array.isArray(paths)) {
+        // The file path mappings are using glob patterns, and are a mapping from a
+        // pattern, to an array of replacements: https://code.visualstudio.com/docs/languages/jsconfig#_using-webpack-aliases
+        const pathEntries = Object.entries(paths)
+        const pathMappings = mapDropNulls(([k, v]) => {
+          if (Array.isArray(v)) {
+            const values = mapDropNulls((s) => {
+              if (typeof s === 'string') {
+                // FIXME These should be relative to the `baseUrl`
+                return `/${replaceAllStarsWithIndexedGroups(s)}`
+              } else {
+                return null
+              }
+            }, v)
+
+            const globRegex = globToRegexp(k, { flags: 'g', globstar: true })
+            const stickyRegex = new RegExp(globRegex, 'y')
+            ;(stickyRegex as any).skipDeepFreeze = true
+
+            return [stickyRegex, values] as FilePathMapping
+          } else {
+            return null
+          }
+        }, pathEntries)
+
+        return pathMappings
+      }
+    }
+  } catch (e) {
+    console.error('Error parsing file path mappings.', e)
+  }
+
+  return []
+}
+
+// This horrorshow function is for turning glob patterns into suitable replacement strings,
+// e.g. 'app/**/*.js' will become 'app/$1$2', which can then be used in a string replacement
+// used by the file mappings containing glob patterns
+function replaceAllStarsWithIndexedGroups(s: string) {
+  let index = 1
+  return s.replace(/\*+\/?/g, () => `$${index++}`)
 }

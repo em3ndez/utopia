@@ -18,15 +18,34 @@ export interface ProjectModelWithId<ModelType> {
   projectModel: ProjectModel<ModelType>
 }
 
+export interface PersistenceContext<ModelType> {
+  projectId?: string
+  project?: ProjectModel<ModelType>
+  rollbackProjectId?: string
+  rollbackProject?: ProjectModel<ModelType>
+  queuedSave?: ProjectModel<ModelType>
+  projectOwnership: ProjectOwnership
+  loggedIn: boolean
+}
+
 export interface ProjectLoadSuccess<ModelType> extends ProjectModelWithId<ModelType> {
   type: 'PROJECT_LOAD_SUCCESS'
 }
 
-export interface ProjectNotFount {
+export interface ProjectNotFound {
   type: 'PROJECT_NOT_FOUND'
+  projectId: string
 }
 
-export type ProjectLoadResult<ModelType> = ProjectLoadSuccess<ModelType> | ProjectNotFount
+export interface ProjectNotAuthorized {
+  type: 'PROJECT_NOT_AUTHORIZED'
+  projectId: string
+}
+
+export type ProjectLoadResult<ModelType> =
+  | ProjectLoadSuccess<ModelType>
+  | ProjectNotFound
+  | ProjectNotAuthorized
 
 export interface FileWithFileName<FileType> {
   fileName: string
@@ -40,6 +59,21 @@ export function fileWithFileName<FileType>(
   return {
     fileName: fileName,
     file: file,
+  }
+}
+
+export interface ProjectCreationResult<ModelType, FileType> {
+  projectId: string
+  projectWithChanges: ProjectWithFileChanges<ModelType, FileType>
+}
+
+export function projectCreationResult<ModelType, FileType>(
+  projectId: string,
+  project: ProjectWithFileChanges<ModelType, FileType>,
+): ProjectCreationResult<ModelType, FileType> {
+  return {
+    projectId: projectId,
+    projectWithChanges: project,
   }
 }
 
@@ -58,14 +92,22 @@ export function projectWithFileChanges<ModelType, FileType>(
   }
 }
 
+export type ProjectOwnership = {
+  ownerId: string | null
+  isOwner: boolean
+}
+
 export interface PersistenceBackendAPI<ModelType, FileType> {
   getNewProjectId: () => Promise<string>
-  checkProjectOwned: (projectId: string) => Promise<boolean>
+  checkProjectOwned: (loggedIn: boolean, projectId: string) => Promise<ProjectOwnership>
   loadProject: (projectId: string) => Promise<ProjectLoadResult<ModelType>>
   saveProjectToServer: (
     projectId: string,
     projectModel: ProjectModel<ModelType>,
   ) => Promise<ProjectWithFileChanges<ModelType, FileType>>
+  createNewProjectInServer: (
+    projectModel: ProjectModel<ModelType>,
+  ) => Promise<ProjectCreationResult<ModelType, FileType>>
   saveProjectLocally: (
     projectId: string,
     projectModel: ProjectModel<ModelType>,

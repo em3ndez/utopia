@@ -1,125 +1,164 @@
 import React from 'react'
-import { MapLike } from 'typescript'
-import { getUtopiaID } from '../../../core/model/element-template-utils'
+import type { MapLike } from 'typescript'
 import {
-  UTOPIA_PATHS_KEY,
+  UTOPIA_PATH_KEY,
   UTOPIA_SCENE_ID_KEY,
   UTOPIA_INSTANCE_PATH,
-  UTOPIA_UIDS_KEY,
-  UTOPIA_UID_ORIGINAL_PARENTS_KEY,
+  UTOPIA_UID_KEY,
 } from '../../../core/model/utopia-constants'
-import { flatMapEither, forEachRight } from '../../../core/shared/either'
-import {
+import { type Either, forEachRight, left } from '../../../core/shared/either'
+import type {
   JSXElementChild,
-  isJSXElement,
   JSXElement,
-  jsxAttributeValue,
   ElementsWithin,
+  JSExpression,
+  JSXElementLike,
+  JSIdentifier,
+  JSPropertyAccess,
+  JSElementAccess,
+  JSXAttributes,
+} from '../../../core/shared/element-template'
+import {
+  isJSXElement,
+  jsExpressionValue,
   isIntrinsicElement,
   isIntrinsicHTMLElement,
-  JSXArbitraryBlock,
-  getJSXAttribute,
   emptyComments,
+  jsxTextBlock,
+  isJSXFragment,
+  isJSExpression,
+  isJSXMapExpression,
+  propertiesExposedByParam,
+  propertiesExposedByParams,
+  hasElementsWithin,
 } from '../../../core/shared/element-template'
 import {
   getAccumulatedElementsWithin,
   jsxAttributesToProps,
-  setJSXValueAtPath,
+  jsxAttributeToValue,
 } from '../../../core/shared/jsx-attributes'
-import {
+import { setJSXValueAtPath } from '../../../core/shared/jsx-attribute-utils'
+import type {
   ElementPath,
   HighlightBoundsForUids,
   Imports,
 } from '../../../core/shared/project-file-types'
-import { fastForEach, NO_OP } from '../../../core/shared/utils'
+import { assertNever } from '../../../core/shared/utils'
 import { Utils } from '../../../uuiui-deps'
-import { UIFileBase64Blobs } from '../../editor/store/editor-state'
-import { DomWalkerInvalidatePathsCtxData, UiJsxCanvasContextData } from '../ui-jsx-canvas'
+import type { UIFileBase64Blobs } from '../../editor/store/editor-state'
+import type {
+  DomWalkerInvalidatePathsCtxData,
+  UiJsxCanvasContextData,
+  VariableData,
+} from '../ui-jsx-canvas'
 import { SceneComponent } from './scene-component'
 import * as PP from '../../../core/shared/property-path'
 import * as EP from '../../../core/shared/element-path'
-import { Storyboard } from 'utopia-api'
 import { resolveParamsAndRunJsCode } from '../../../core/shared/javascript-cache'
 import { objectMap } from '../../../core/shared/object-utils'
 import { cssValueOnlyContainsComments } from '../../../printer-parsers/css/css-parser-utils'
 import { filterDataProps } from '../../../utils/canvas-react-utils'
-import { buildSpyWrappedElement } from './ui-jsx-canvas-spy-wrapper'
-import { appendToUidString, createIndexedUid } from '../../../core/shared/uid-utils'
-import { isComponentRendererComponent } from './ui-jsx-canvas-component-renderer'
+import {
+  addFakeSpyEntry,
+  buildSpyWrappedElement,
+  clearOpposingConditionalSpyValues,
+} from './ui-jsx-canvas-spy-wrapper'
+import { getUtopiaID } from '../../../core/shared/uid-utils'
+import { isComponentRendererComponent } from './component-renderer-component'
 import { optionalMap } from '../../../core/shared/optional-utils'
 import { canvasMissingJSXElementError } from './canvas-render-errors'
 import { importedFromWhere } from '../../editor/import-utils'
 import { JSX_CANVAS_LOOKUP_FUNCTION_NAME } from '../../../core/shared/dom-utils'
+import type { TextEditorProps } from '../../text-editor/text-editor'
+import { TextEditorWrapper, unescapeHTML } from '../../text-editor/text-editor'
+import {
+  findUtopiaCommentFlag,
+  isUtopiaPropOrCommentFlagConditional,
+  isUtopiaPropOrCommentFlagMapCount,
+} from '../../../core/shared/utopia-flags'
+import { RemixSceneComponent } from './remix-scene-component'
+import { STEGANOGRAPHY_ENABLED, isFeatureEnabled } from '../../../utils/feature-switches'
+import { jsxElementChildToText } from './jsx-element-child-to-text'
+import type { FilePathMappings } from '../../../core/model/project-file-utils'
+
+export interface RenderContext {
+  rootScope: MapLike<any>
+  parentComponentInputProps: MapLike<any>
+  requireResult: MapLike<any>
+  hiddenInstances: Array<ElementPath>
+  displayNoneInstances: Array<ElementPath>
+  fileBlobs: UIFileBase64Blobs
+  validPaths: Set<string>
+  reactChildren: React.ReactNode | undefined
+  metadataContext: UiJsxCanvasContextData
+  updateInvalidatedPaths: DomWalkerInvalidatePathsCtxData
+  jsxFactoryFunctionName: string | null
+  shouldIncludeCanvasRootInTheSpy: boolean
+  filePath: string
+  imports: Imports
+  code: string
+  highlightBounds: HighlightBoundsForUids | null
+  editedText: ElementPath | null
+  variablesInScope: VariableData
+  filePathMappings: FilePathMappings
+}
 
 export function createLookupRender(
   elementPath: ElementPath | null,
-  rootScope: MapLike<any>,
-  parentComponentInputProps: MapLike<any>,
-  requireResult: MapLike<any>,
-  hiddenInstances: Array<ElementPath>,
-  fileBlobs: UIFileBase64Blobs,
-  validPaths: Array<ElementPath>,
-  reactChildren: React.ReactNode | undefined,
-  metadataContext: UiJsxCanvasContextData,
-  updateInvalidatedPaths: DomWalkerInvalidatePathsCtxData,
-  jsxFactoryFunctionName: string | null,
-  shouldIncludeCanvasRootInTheSpy: boolean,
-  filePath: string,
-  imports: Imports,
-  code: string,
-  highlightBounds: HighlightBoundsForUids | null,
-): (element: JSXElement, scope: MapLike<any>) => React.ReactChild {
+  context: RenderContext,
+  renderLimit: number | null,
+  valuesInScopeFromParameters: Array<string>,
+  assignedToProp: string | null,
+): (element: JSXElementLike, scope: MapLike<any>) => React.ReactChild | null {
   let index = 0
 
-  return (element: JSXElement, scope: MapLike<any>): React.ReactChild => {
+  return (element: JSXElementLike, scope: MapLike<any>): React.ReactChild | null => {
     index++
+    if (renderLimit != null && index > renderLimit) {
+      return null
+    }
     const innerUID = getUtopiaID(element)
-    const generatedUID = createIndexedUid(innerUID, index)
-    const withGeneratedUID = setJSXValueAtPath(
-      element.props,
-      PP.create(['data-uid']),
-      jsxAttributeValue(generatedUID, emptyComments),
-    )
+    const generatedUID = EP.createIndexedUid(innerUID, index)
+    const withGeneratedUID: Either<string, JSXAttributes> = isJSXElement(element)
+      ? setJSXValueAtPath(
+          element.props,
+          PP.create('data-uid'),
+          jsExpressionValue(generatedUID, emptyComments),
+        )
+      : left('fragment')
 
-    // TODO BALAZS should this be here? or should the arbitrary block never have a template path with that last generated element?
-    const elementPathWithoutTheLastElementBecauseThatsAWeirdGeneratedUID = optionalMap(
-      EP.parentPath,
-      elementPath,
-    )
-
-    const innerPath = optionalMap(
-      (path) => EP.appendToPath(path, generatedUID),
-      elementPathWithoutTheLastElementBecauseThatsAWeirdGeneratedUID,
-    )
+    const innerPath = optionalMap((path) => EP.appendToPath(path, generatedUID), elementPath)
 
     let augmentedInnerElement = element
     forEachRight(withGeneratedUID, (attrs) => {
-      augmentedInnerElement = {
-        ...augmentedInnerElement,
-        props: attrs,
-      }
+      augmentedInnerElement = isJSXElement(augmentedInnerElement)
+        ? {
+            ...augmentedInnerElement,
+            props: attrs,
+          }
+        : augmentedInnerElement
     })
+
+    let innerVariablesInScope: VariableData = {
+      ...context.variablesInScope,
+    }
+    if (innerPath != null) {
+      for (const valueInScope of valuesInScopeFromParameters) {
+        innerVariablesInScope[valueInScope] = {
+          spiedValue: scope[valueInScope],
+          insertionCeiling: innerPath,
+        }
+      }
+    }
+
     return renderCoreElement(
       augmentedInnerElement,
       innerPath,
-      rootScope,
       scope,
-      parentComponentInputProps,
-      requireResult,
-      hiddenInstances,
-      fileBlobs,
-      validPaths,
+      { ...context, variablesInScope: innerVariablesInScope },
       generatedUID,
-      reactChildren,
-      metadataContext,
-      updateInvalidatedPaths,
-      jsxFactoryFunctionName,
       null,
-      shouldIncludeCanvasRootInTheSpy,
-      filePath,
-      imports,
-      code,
-      highlightBounds,
+      assignedToProp,
     )
   }
 }
@@ -129,44 +168,46 @@ function monkeyUidProp(uid: string | undefined, propsToUpdate: MapLike<any>): Ma
     ...propsToUpdate,
   }
 
-  const uidsFromProps = monkeyedProps[UTOPIA_UIDS_KEY]
-  const uidsToPass = appendToUidString(uidsFromProps, uid)
-  monkeyedProps[UTOPIA_UIDS_KEY] = uidsToPass
+  const uidFromProps = monkeyedProps[UTOPIA_UID_KEY]
+  const uidToPass = uidFromProps ?? uid
+  monkeyedProps[UTOPIA_UID_KEY] = uidToPass
 
   return monkeyedProps
 }
 
-function NoOpLookupRender(element: JSXElement, scope: MapLike<any>): React.ReactChild {
+function NoOpLookupRender(element: JSXElementLike, scope: MapLike<any>): React.ReactChild {
   throw new Error(
-    `Utopia Error: createLookupRender was not used properly for element: ${element.name.baseVariable}`,
+    `Utopia Error: createLookupRender was not used properly for  ${
+      isJSXElement(element) ? `element: ${element.name.baseVariable}` : 'fragment'
+    }`,
   )
 }
 
 export function renderCoreElement(
   element: JSXElementChild,
   elementPath: ElementPath | null,
-  rootScope: MapLike<any>,
   inScope: MapLike<any>,
-  parentComponentInputProps: MapLike<any>,
-  requireResult: MapLike<any>,
-  hiddenInstances: Array<ElementPath>,
-  fileBlobs: UIFileBase64Blobs,
-  validPaths: Array<ElementPath>,
+  renderContext: RenderContext,
   uid: string | undefined,
-  reactChildren: React.ReactNode | undefined,
-  metadataContext: UiJsxCanvasContextData,
-  updateInvalidatedPaths: DomWalkerInvalidatePathsCtxData,
-  jsxFactoryFunctionName: string | null,
   codeError: Error | null,
-  shouldIncludeCanvasRootInTheSpy: boolean,
-  filePath: string,
-  imports: Imports,
-  code: string,
-  highlightBounds: HighlightBoundsForUids | null,
+  assignedToProp: string | null,
 ): React.ReactChild {
+  const {
+    requireResult,
+    validPaths,
+    metadataContext,
+    updateInvalidatedPaths,
+    jsxFactoryFunctionName,
+    shouldIncludeCanvasRootInTheSpy,
+    filePath,
+    imports,
+    editedText,
+    variablesInScope,
+  } = renderContext
   if (codeError != null) {
     throw codeError
   }
+
   switch (element.type) {
     case 'JSX_ELEMENT': {
       const elementsWithinProps = getAccumulatedElementsWithin(element.props)
@@ -174,24 +215,7 @@ export function renderCoreElement(
       const anyElementsWithin = Object.keys(elementsWithinProps).length > 0
 
       const innerRender = anyElementsWithin
-        ? createLookupRender(
-            elementPath,
-            rootScope,
-            parentComponentInputProps,
-            requireResult,
-            hiddenInstances,
-            fileBlobs,
-            validPaths,
-            reactChildren,
-            metadataContext,
-            updateInvalidatedPaths,
-            jsxFactoryFunctionName,
-            shouldIncludeCanvasRootInTheSpy,
-            filePath,
-            imports,
-            code,
-            highlightBounds,
-          )
+        ? createLookupRender(elementPath, renderContext, null, [], assignedToProp)
         : NoOpLookupRender
 
       const blockScope = anyElementsWithin
@@ -205,53 +229,226 @@ export function renderCoreElement(
           }
         : inScope
 
-      const assembledProps = jsxAttributesToProps(blockScope, element.props, requireResult)
+      const assembledProps = jsxAttributesToProps(
+        blockScope,
+        element.props,
+        elementPath,
+        renderContext,
+        uid,
+        codeError,
+      )
 
       const passthroughProps = monkeyUidProp(uid, assembledProps)
 
-      const key = optionalMap(EP.toString, elementPath) ?? passthroughProps[UTOPIA_UIDS_KEY]
+      const key = optionalMap(EP.toString, elementPath) ?? passthroughProps[UTOPIA_UID_KEY]
 
       return renderJSXElement(
         key,
         element,
         elementPath,
-        parentComponentInputProps,
-        requireResult,
-        rootScope,
         inScope,
-        hiddenInstances,
-        fileBlobs,
-        validPaths,
         passthroughProps,
-        metadataContext,
-        updateInvalidatedPaths,
-        jsxFactoryFunctionName,
-        null,
-        shouldIncludeCanvasRootInTheSpy,
-        filePath,
-        imports,
-        code,
-        highlightBounds,
+        renderContext,
+        null, // this null passed as the codeError param is matching the old version of the codebase, but codeError should probably not be passed around anyways as we try to throw it as high as possible
+        assignedToProp,
       )
     }
-    case 'JSX_ARBITRARY_BLOCK': {
+    case 'JSX_MAP_EXPRESSION': {
+      const commentFlag = findUtopiaCommentFlag(element.comments, 'map-count')
+      const mapCountOverride = isUtopiaPropOrCommentFlagMapCount(commentFlag)
+        ? commentFlag.value
+        : null
+
+      const elementIsTextEdited = elementPath != null && EP.pathsEqual(elementPath, editedText)
+
+      if (elementPath != null) {
+        addFakeSpyEntry(
+          validPaths,
+          metadataContext,
+          elementPath,
+          element,
+          filePath,
+          imports,
+          'not-a-conditional',
+          null,
+          null,
+        )
+      }
+
+      const valuesInScopeFromParameters = element.valuesInScopeFromParameters
+      const elementsWithin: ElementsWithin = {
+        ...(hasElementsWithin(element.valueToMap) ? element.valueToMap.elementsWithin : {}),
+        ...(hasElementsWithin(element.mapFunction) ? element.mapFunction.elementsWithin : {}),
+      }
+      if (elementIsTextEdited) {
+        const runJSExpressionLazy = () => {
+          const innerRender = createLookupRender(
+            elementPath,
+            renderContext,
+            mapCountOverride,
+            valuesInScopeFromParameters,
+            null,
+          )
+
+          const blockScope = {
+            ...inScope,
+            [JSX_CANVAS_LOOKUP_FUNCTION_NAME]: utopiaCanvasJSXLookup(
+              elementsWithin,
+              inScope,
+              innerRender,
+            ),
+          }
+          return runJSExpression(
+            element,
+            elementPath,
+            blockScope,
+            renderContext,
+            uid,
+            codeError,
+            null,
+          )
+        }
+
+        const originalTextContent = STEGANOGRAPHY_ENABLED ? runJSExpressionLazy() : null
+
+        const textContent = trimJoinUnescapeTextFromJSXElements([element])
+        const textEditorProps: TextEditorProps = {
+          elementPath: elementPath,
+          filePath: filePath,
+          text: textContent,
+          originalText: originalTextContent,
+          component: React.Fragment,
+          passthroughProps: {},
+          textProp: 'itself',
+        }
+
+        return buildSpyWrappedElement(
+          element,
+          textEditorProps,
+          elementPath,
+          metadataContext,
+          updateInvalidatedPaths,
+          [],
+          TextEditorWrapper,
+          inScope,
+          jsxFactoryFunctionName,
+          shouldIncludeCanvasRootInTheSpy,
+          imports,
+          filePath,
+          variablesInScope,
+          'real-element',
+          null,
+        )
+      }
       const innerRender = createLookupRender(
         elementPath,
-        rootScope,
-        parentComponentInputProps,
-        requireResult,
-        hiddenInstances,
-        fileBlobs,
-        validPaths,
-        reactChildren,
-        metadataContext,
-        updateInvalidatedPaths,
-        jsxFactoryFunctionName,
-        shouldIncludeCanvasRootInTheSpy,
-        filePath,
-        imports,
-        code,
-        highlightBounds,
+        renderContext,
+        mapCountOverride,
+        valuesInScopeFromParameters,
+        null,
+      )
+
+      const blockScope = {
+        ...inScope,
+        [JSX_CANVAS_LOOKUP_FUNCTION_NAME]: utopiaCanvasJSXLookup(
+          elementsWithin,
+          inScope,
+          innerRender,
+        ),
+      }
+      return runJSExpression(element, elementPath, blockScope, renderContext, uid, codeError, null)
+    }
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT': {
+      const commentFlag = findUtopiaCommentFlag(element.comments, 'map-count')
+      const mapCountOverride =
+        isJSXMapExpression(element) && isUtopiaPropOrCommentFlagMapCount(commentFlag)
+          ? commentFlag.value
+          : null
+
+      const elementIsTextEdited = elementPath != null && EP.pathsEqual(elementPath, editedText)
+
+      if (elementPath != null) {
+        addFakeSpyEntry(
+          validPaths,
+          metadataContext,
+          elementPath,
+          element,
+          filePath,
+          imports,
+          'not-a-conditional',
+          null,
+          assignedToProp,
+        )
+      }
+
+      const valuesInScopeFromParameters = propertiesExposedByParams(element.params)
+
+      if (elementIsTextEdited) {
+        const runJSExpressionLazy = () => {
+          const innerRender = createLookupRender(
+            elementPath,
+            renderContext,
+            mapCountOverride,
+            valuesInScopeFromParameters,
+            assignedToProp,
+          )
+
+          const blockScope = {
+            ...inScope,
+            [JSX_CANVAS_LOOKUP_FUNCTION_NAME]: utopiaCanvasJSXLookup(
+              element.elementsWithin,
+              inScope,
+              innerRender,
+            ),
+          }
+          return runJSExpression(
+            element,
+            elementPath,
+            blockScope,
+            renderContext,
+            uid,
+            codeError,
+            assignedToProp,
+          )
+        }
+
+        const originalTextContent = STEGANOGRAPHY_ENABLED ? runJSExpressionLazy() : null
+
+        const textContent = trimJoinUnescapeTextFromJSXElements([element])
+        const textEditorProps: TextEditorProps = {
+          elementPath: elementPath,
+          filePath: filePath,
+          text: textContent,
+          originalText: originalTextContent,
+          component: React.Fragment,
+          passthroughProps: {},
+          textProp: 'itself',
+        }
+
+        return buildSpyWrappedElement(
+          element,
+          textEditorProps,
+          elementPath,
+          metadataContext,
+          updateInvalidatedPaths,
+          [],
+          TextEditorWrapper,
+          inScope,
+          jsxFactoryFunctionName,
+          shouldIncludeCanvasRootInTheSpy,
+          imports,
+          filePath,
+          variablesInScope,
+          'real-element',
+          assignedToProp,
+        )
+      }
+      const innerRender = createLookupRender(
+        elementPath,
+        renderContext,
+        mapCountOverride,
+        valuesInScopeFromParameters,
+        assignedToProp,
       )
 
       const blockScope = {
@@ -262,181 +459,473 @@ export function renderCoreElement(
           innerRender,
         ),
       }
-      return runJSXArbitraryBlock(requireResult, element, blockScope)
+      return runJSExpression(
+        element,
+        elementPath,
+        blockScope,
+        renderContext,
+        uid,
+        codeError,
+        assignedToProp,
+      )
     }
     case 'JSX_FRAGMENT': {
-      let renderedChildren: Array<React.ReactChild> = []
-      fastForEach(element.children, (child) => {
-        const childPath = optionalMap(
-          (path) => EP.appendToPath(EP.parentPath(path), getUtopiaID(child)),
-          elementPath,
-        )
-        const renderResult = renderCoreElement(
-          child,
-          childPath,
-          rootScope,
-          inScope,
-          parentComponentInputProps,
-          requireResult,
-          hiddenInstances,
-          fileBlobs,
-          validPaths,
-          uid,
-          reactChildren,
-          metadataContext,
-          updateInvalidatedPaths,
-          jsxFactoryFunctionName,
-          codeError,
-          shouldIncludeCanvasRootInTheSpy,
-          filePath,
-          imports,
-          code,
-          highlightBounds,
-        )
-        renderedChildren.push(renderResult)
-      })
-      return <>{renderedChildren}</>
+      const key = optionalMap(EP.toString, elementPath) ?? element.uid
+
+      return renderJSXElement(
+        key,
+        element,
+        elementPath,
+        inScope,
+        [],
+        renderContext,
+        codeError,
+        assignedToProp,
+      )
     }
     case 'JSX_TEXT_BLOCK': {
-      return element.text
+      const parentPath = Utils.optionalMap(EP.parentPath, elementPath)
+      // when the text is just edited its parent renders it in a text editor, so no need to render anything here
+      if (parentPath != null && EP.pathsEqual(parentPath, editedText)) {
+        return <></>
+      }
+
+      const lines = element.text.split('<br />').map((line) => unescapeHTML(line))
+      return (
+        <>
+          {lines.map((l, index) => (
+            <React.Fragment key={index}>
+              {l}
+              {index < lines.length - 1 ? <br /> : null}
+            </React.Fragment>
+          ))}
+        </>
+      )
     }
+    case 'JSX_CONDITIONAL_EXPRESSION': {
+      const commentFlag = findUtopiaCommentFlag(element.comments, 'conditional')
+      const override = isUtopiaPropOrCommentFlagConditional(commentFlag) ? commentFlag.value : null
+      const defaultConditionValueAsAny = jsxAttributeToValue(
+        inScope,
+        element.condition,
+        elementPath,
+        renderContext,
+        uid,
+        codeError,
+        assignedToProp,
+      )
+      // Coerce `defaultConditionValueAsAny` to a value that is definitely a boolean, not something that is truthy.
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+      const defaultConditionValue: boolean = !!defaultConditionValueAsAny
+      const activeConditionValue = override ?? defaultConditionValue
+      const actualElement = activeConditionValue ? element.whenTrue : element.whenFalse
+
+      if (elementPath != null) {
+        clearOpposingConditionalSpyValues(
+          metadataContext,
+          element,
+          activeConditionValue,
+          elementPath,
+        )
+
+        addFakeSpyEntry(
+          validPaths,
+          metadataContext,
+          elementPath,
+          element,
+          filePath,
+          imports,
+          {
+            active: activeConditionValue,
+            default: defaultConditionValue,
+          },
+          null,
+          assignedToProp,
+        )
+      }
+
+      const childPath = optionalMap(
+        (path) => EP.appendToPath(path, getUtopiaID(actualElement)),
+        elementPath,
+      )
+
+      const elementIsTextEdited = elementPath != null && EP.pathsEqual(elementPath, editedText)
+
+      if (elementIsTextEdited) {
+        // when the inactive branch is an expression we can edit the full conditional as text
+        const inactiveBranch = activeConditionValue ? element.whenFalse : element.whenTrue
+        const fullTextEdit = isJSExpression(inactiveBranch)
+        const textContent = fullTextEdit
+          ? trimJoinUnescapeTextFromJSXElements([element])
+          : trimJoinUnescapeTextFromJSXElements([actualElement])
+
+        const textProp = (() => {
+          if (fullTextEdit) {
+            return 'fullConditional'
+          }
+          if (activeConditionValue) {
+            return 'whenTrue'
+          }
+          return 'whenFalse'
+        })()
+
+        const textEditorProps: TextEditorProps = {
+          elementPath: elementPath,
+          filePath: filePath,
+          text: textContent,
+          originalText: null,
+          component: React.Fragment,
+          passthroughProps: {},
+          textProp: textProp,
+        }
+
+        return buildSpyWrappedElement(
+          actualElement,
+          textEditorProps,
+          childPath!,
+          metadataContext,
+          updateInvalidatedPaths,
+          [],
+          TextEditorWrapper,
+          inScope,
+          jsxFactoryFunctionName,
+          shouldIncludeCanvasRootInTheSpy,
+          imports,
+          filePath,
+          variablesInScope,
+          'real-element',
+          assignedToProp,
+        )
+      }
+
+      return renderCoreElement(
+        actualElement,
+        childPath,
+        inScope,
+        renderContext,
+        uid,
+        codeError,
+        assignedToProp,
+      )
+    }
+    case 'ATTRIBUTE_VALUE':
+    case 'ATTRIBUTE_NESTED_ARRAY':
+    case 'ATTRIBUTE_NESTED_OBJECT':
+    case 'ATTRIBUTE_FUNCTION_CALL':
+    case 'JS_PROPERTY_ACCESS':
+    case 'JS_ELEMENT_ACCESS':
+    case 'JS_IDENTIFIER':
+      if (elementPath != null) {
+        addFakeSpyEntry(
+          validPaths,
+          metadataContext,
+          elementPath,
+          element,
+          filePath,
+          imports,
+          'not-a-conditional',
+          null,
+          assignedToProp,
+        )
+      }
+
+      const elementIsTextEdited = elementPath != null && EP.pathsEqual(elementPath, editedText)
+      if (elementIsTextEdited) {
+        const textContent = trimJoinUnescapeTextFromJSXElements([element])
+        const textEditorProps: TextEditorProps = {
+          elementPath: elementPath,
+          filePath: filePath,
+          text: textContent,
+          originalText: null,
+          component: React.Fragment,
+          passthroughProps: {},
+          textProp: 'itself',
+        }
+
+        return buildSpyWrappedElement(
+          element,
+          textEditorProps,
+          elementPath,
+          metadataContext,
+          updateInvalidatedPaths,
+          [],
+          TextEditorWrapper,
+          inScope,
+          jsxFactoryFunctionName,
+          shouldIncludeCanvasRootInTheSpy,
+          imports,
+          filePath,
+          variablesInScope,
+          'real-element',
+          assignedToProp,
+        )
+      }
+
+      return jsxAttributeToValue(
+        inScope,
+        element,
+        elementPath,
+        renderContext,
+        uid,
+        codeError,
+        assignedToProp,
+      )
     default:
       const _exhaustiveCheck: never = element
       throw new Error(`Unhandled type ${JSON.stringify(element)}`)
   }
 }
 
-function renderJSXElement(
-  key: string,
-  jsx: JSXElement,
-  elementPath: ElementPath | null,
-  parentComponentInputProps: MapLike<any>,
-  requireResult: MapLike<any>,
-  rootScope: MapLike<any>,
-  inScope: MapLike<any>,
-  hiddenInstances: Array<ElementPath>,
-  fileBlobs: UIFileBase64Blobs,
-  validPaths: Array<ElementPath>,
-  passthroughProps: MapLike<any>,
-  metadataContext: UiJsxCanvasContextData,
-  updateInvalidatedPaths: DomWalkerInvalidatePathsCtxData,
-  jsxFactoryFunctionName: string | null,
-  codeError: Error | null,
-  shouldIncludeCanvasRootInTheSpy: boolean,
-  filePath: string,
-  imports: Imports,
-  code: string,
-  highlightBounds: HighlightBoundsForUids | null,
-): React.ReactElement {
-  let elementProps = { key: key, ...passthroughProps }
-  if (isHidden(hiddenInstances, elementPath)) {
-    elementProps = hideElement(elementProps)
-  }
-  elementProps = streamlineInFileBlobs(elementProps, fileBlobs)
-
-  const createChildrenElement = (child: JSXElementChild): React.ReactChild => {
-    const childPath = optionalMap((path) => EP.appendToPath(path, getUtopiaID(child)), elementPath)
-    return renderCoreElement(
-      child,
-      childPath,
-      rootScope,
-      inScope,
-      parentComponentInputProps,
-      requireResult,
-      hiddenInstances,
-      fileBlobs,
-      validPaths,
-      undefined,
-      undefined,
-      metadataContext,
-      updateInvalidatedPaths,
-      jsxFactoryFunctionName,
-      codeError,
-      shouldIncludeCanvasRootInTheSpy,
-      filePath,
-      imports,
-      code,
-      highlightBounds,
+function trimJoinUnescapeTextFromJSXElements(elements: Array<JSXElementChild>): string {
+  let combinedText = ''
+  for (let i = 0; i < elements.length; i++) {
+    combinedText += jsxElementChildToText(
+      elements[i],
+      elements[i - 1] ?? null,
+      elements[i + 1] ?? null,
+      'jsx',
+      'outermost',
     )
   }
 
-  const childrenElements = jsx.children.map(createChildrenElement)
-  const elementIsIntrinsic = isIntrinsicElement(jsx.name)
+  return unescapeHTML(combinedText)
+}
+
+function renderJSXElement(
+  key: string,
+  jsx: JSXElementLike,
+  elementPath: ElementPath | null,
+  inScope: MapLike<any>,
+  passthroughProps: MapLike<any>,
+  renderContext: RenderContext,
+  codeError: Error | null,
+  assignedToProp: string | null,
+): React.ReactElement {
+  const {
+    requireResult,
+    hiddenInstances,
+    displayNoneInstances,
+    fileBlobs,
+    validPaths,
+    metadataContext,
+    updateInvalidatedPaths,
+    jsxFactoryFunctionName,
+    shouldIncludeCanvasRootInTheSpy,
+    filePath,
+    imports,
+    code,
+    highlightBounds,
+    editedText,
+    variablesInScope,
+    filePathMappings,
+  } = renderContext
+  const createChildrenElement = (child: JSXElementChild): React.ReactChild => {
+    const childPath = optionalMap((path) => EP.appendToPath(path, getUtopiaID(child)), elementPath)
+    return renderCoreElement(child, childPath, inScope, renderContext, undefined, codeError, null)
+  }
+
+  const elementIsIntrinsic = isJSXElement(jsx) && isIntrinsicElement(jsx.name)
+  const elementIsFragment = isJSXFragment(jsx)
   const elementIsBaseHTML = elementIsIntrinsic && isIntrinsicHTMLElement(jsx.name)
   const elementInScope = elementIsIntrinsic ? null : getElementFromScope(jsx, inScope)
   const elementFromImport = elementIsIntrinsic ? null : getElementFromScope(jsx, requireResult)
   const elementFromScopeOrImport = Utils.defaultIfNull(elementFromImport, elementInScope)
+  const elementIsTextEdited = elementPath != null && EP.pathsEqual(elementPath, editedText)
+  const elementIsTextEditedAndNoTextBlockChild =
+    elementIsTextEdited && jsx.children.every((c) => c.type !== 'JSX_TEXT_BLOCK')
+
+  const childrenWithNewTextBlock = elementIsTextEditedAndNoTextBlockChild
+    ? [...jsx.children, jsxTextBlock('')]
+    : jsx.children
+  const childrenElements = childrenWithNewTextBlock.map(createChildrenElement)
 
   // Not necessary to check the top level elements, as we'll use a comparison of the
   // elements from scope and import to confirm it's not a top level element.
-  const importedFrom = importedFromWhere(filePath, jsx.name.baseVariable, [], imports)
-  const elementIsScene =
+  const importedFrom = elementIsFragment
+    ? null
+    : importedFromWhere(filePathMappings, filePath, jsx.name.baseVariable, [], imports)
+
+  const isElementImportedFromModule = (moduleName: string, name: string) =>
     !elementIsIntrinsic &&
     importedFrom != null &&
     importedFrom.type === 'IMPORTED_ORIGIN' && // Imported and not from the same file.
-    importedFrom.filePath === 'utopia-api' && // Originating from `utopia-api`
-    importedFrom.exportedName === 'Scene' && // `Scene` component.
+    importedFrom.filePath === moduleName && // Originating from {moduleName}
+    importedFrom.exportedName === name && // {name} component.
     elementFromImport === elementInScope // Ensures this is not a user defined component with the same name.
-  const elementOrScene = elementIsScene ? SceneComponent : elementFromScopeOrImport
 
-  const FinalElement = elementIsIntrinsic ? jsx.name.baseVariable : elementOrScene
+  const elementIsScene = isElementImportedFromModule('utopia-api', 'Scene')
+  const elementIsRemixScene = isElementImportedFromModule('utopia-api', 'RemixScene')
+
+  const element = (() => {
+    if (elementIsScene) {
+      return SceneComponent
+    }
+    if (elementIsRemixScene) {
+      return RemixSceneComponent
+    }
+    return elementFromScopeOrImport
+  })()
+
+  const FinalElement = elementIsIntrinsic ? jsx.name.baseVariable : element
+  const FinalElementOrFragment = elementIsFragment ? React.Fragment : FinalElement
+
+  let elementProps: MapLike<any> = { key: key, ...passthroughProps }
+  if (!elementIsFragment) {
+    if (isHidden(hiddenInstances, elementPath)) {
+      elementProps = hideElement(elementProps)
+    }
+    if (elementIsDisplayNone(displayNoneInstances, elementPath)) {
+      elementProps = displayNoneElement(elementProps)
+    }
+    elementProps = streamlineInFileBlobs(elementProps, fileBlobs)
+    for (const prop of jsx.props) {
+      if (prop.type === 'JSX_ATTRIBUTES_ENTRY' && prop.value.type === 'JSX_ELEMENT') {
+        const pathForElementInRenderProp = optionalMap(
+          (p) => EP.appendToPath(p, prop.value.uid),
+          elementPath,
+        )
+        const renderedElement = renderCoreElement(
+          prop.value,
+          pathForElementInRenderProp,
+          inScope,
+          renderContext,
+          prop.value.uid,
+          codeError,
+          `${prop.key}`,
+        )
+        elementProps[prop.key] = renderedElement
+      }
+    }
+  }
+
   const elementPropsWithScenePath = isComponentRendererComponent(FinalElement)
     ? { ...elementProps, [UTOPIA_INSTANCE_PATH]: elementPath }
     : elementProps
 
   const elementPropsWithSceneID =
-    elementIsScene && elementPath != null
+    (elementIsScene || elementIsRemixScene) && elementPath != null
       ? { ...elementPropsWithScenePath, [UTOPIA_SCENE_ID_KEY]: EP.toString(elementPath) }
       : elementPropsWithScenePath
 
-  const finalProps =
-    elementIsIntrinsic && !elementIsBaseHTML
-      ? filterDataProps(elementPropsWithSceneID)
-      : elementPropsWithSceneID
-
-  const finalPropsIcludingElementPath = {
-    ...finalProps,
-    [UTOPIA_PATHS_KEY]: optionalMap(EP.toString, elementPath),
+  const propsIncludingElementPath = {
+    ...elementPropsWithSceneID,
+    [UTOPIA_PATH_KEY]: optionalMap(EP.toString, elementPath),
   }
 
-  const staticElementPathForGeneratedElement = optionalMap(EP.makeLastPartOfPathStatic, elementPath)
+  const looksLikeReactIntrinsicButNotHTML = elementIsIntrinsic && !elementIsBaseHTML
 
-  const staticValidPaths = validPaths.map(EP.makeLastPartOfPathStatic)
+  const finalProps =
+    looksLikeReactIntrinsicButNotHTML || elementIsFragment
+      ? filterDataProps(propsIncludingElementPath)
+      : propsIncludingElementPath
 
-  if (FinalElement == null) {
+  if (!elementIsFragment && FinalElement == null) {
     throw canvasMissingJSXElementError(jsxFactoryFunctionName, code, jsx, filePath, highlightBounds)
   }
 
   if (
     elementPath != null &&
-    EP.containsPath(staticElementPathForGeneratedElement, staticValidPaths)
+    validPaths.has(EP.toString(EP.makeLastPartOfPathStatic(elementPath)))
   ) {
+    if (elementIsTextEdited) {
+      const runJSExpressionLazy = () => {
+        const innerRender = createLookupRender(elementPath, renderContext, null, [], assignedToProp)
+
+        const blockScope: Record<any, any> = {
+          ...inScope,
+          [JSX_CANVAS_LOOKUP_FUNCTION_NAME]: utopiaCanvasJSXLookup({}, inScope, innerRender),
+        }
+
+        const expressionToEvaluate =
+          childrenWithNewTextBlock.length > 0 && isJSExpression(childrenWithNewTextBlock[0])
+            ? childrenWithNewTextBlock[0]
+            : jsExpressionValue(null, emptyComments) // placeholder
+
+        const result = runJSExpression(
+          expressionToEvaluate,
+          elementPath,
+          blockScope,
+          renderContext,
+          jsx.uid,
+          codeError,
+          assignedToProp,
+        )
+        return result
+      }
+
+      const originalTextContent = STEGANOGRAPHY_ENABLED ? runJSExpressionLazy() : null
+
+      const textContent = trimJoinUnescapeTextFromJSXElements(childrenWithNewTextBlock)
+      const textEditorProps: TextEditorProps = {
+        elementPath: elementPath,
+        filePath: filePath,
+        text: textContent,
+        originalText: originalTextContent,
+        component: FinalElement,
+        passthroughProps: finalProps,
+        textProp: 'child',
+      }
+
+      return buildSpyWrappedElement(
+        jsx,
+        textEditorProps,
+        elementPath,
+        metadataContext,
+        updateInvalidatedPaths,
+        childrenElements,
+        TextEditorWrapper,
+        inScope,
+        jsxFactoryFunctionName,
+        shouldIncludeCanvasRootInTheSpy,
+        imports,
+        filePath,
+        variablesInScope,
+        'text-editor',
+        assignedToProp,
+      )
+    }
     return buildSpyWrappedElement(
       jsx,
-      finalPropsIcludingElementPath,
+      finalProps,
       elementPath,
       metadataContext,
       updateInvalidatedPaths,
       childrenElements,
-      FinalElement,
+      FinalElementOrFragment,
       inScope,
       jsxFactoryFunctionName,
       shouldIncludeCanvasRootInTheSpy,
       imports,
+      filePath,
+      variablesInScope,
+      'real-element',
+      assignedToProp,
     )
   } else {
     return renderComponentUsingJsxFactoryFunction(
       inScope,
       jsxFactoryFunctionName,
-      FinalElement,
-      finalPropsIcludingElementPath,
+      FinalElementOrFragment,
+      finalProps,
       ...childrenElements,
     )
   }
 }
 
 function isHidden(hiddenInstances: ElementPath[], elementPath: ElementPath | null): boolean {
-  return elementPath != null && hiddenInstances.some((path) => EP.pathsEqual(path, elementPath))
+  return (
+    elementPath != null &&
+    hiddenInstances.some((path) => EP.isDescendantOfOrEqualTo(elementPath, path))
+  )
+}
+function elementIsDisplayNone(
+  displayNoneInstances: ElementPath[],
+  elementPath: ElementPath | null,
+): boolean {
+  return (
+    elementPath != null &&
+    displayNoneInstances.some((path) => EP.isDescendantOfOrEqualTo(elementPath, path))
+  )
 }
 
 function hideElement(props: any): any {
@@ -450,10 +939,21 @@ function hideElement(props: any): any {
   } as any
 }
 
+function displayNoneElement(props: any): any {
+  const styleProps = Utils.propOr({}, 'style', props as any)
+  return {
+    ...props,
+    style: {
+      ...styleProps,
+      display: 'none',
+    },
+  } as any
+}
+
 export function utopiaCanvasJSXLookup(
   elementsWithin: ElementsWithin,
   executionScope: MapLike<any>,
-  render: (element: JSXElement, inScope: MapLike<any>) => React.ReactChild,
+  render: (element: JSXElementLike, inScope: MapLike<any>) => React.ReactChild | null,
 ): (uid: string, inScope: MapLike<any>) => React.ReactChild | null {
   return (uid, inScope) => {
     const element = elementsWithin[uid]
@@ -466,16 +966,69 @@ export function utopiaCanvasJSXLookup(
   }
 }
 
-function runJSXArbitraryBlock(
-  requireResult: MapLike<any>,
-  block: JSXArbitraryBlock,
+export function runJSExpression(
+  block: JSExpression,
+  elementPath: ElementPath | null,
   currentScope: MapLike<any>,
+  renderContext: RenderContext,
+  uid: string | undefined,
+  codeError: Error | null, // this can be probably deleted, it is passed down through multiple layers but we just throw the error in the end
+  assignedToProp: string | null,
 ): any {
-  return resolveParamsAndRunJsCode(block, requireResult, currentScope)
+  switch (block.type) {
+    case 'ATTRIBUTE_VALUE':
+    case 'ATTRIBUTE_NESTED_ARRAY':
+    case 'ATTRIBUTE_NESTED_OBJECT':
+    case 'ATTRIBUTE_FUNCTION_CALL':
+    case 'JS_PROPERTY_ACCESS':
+    case 'JS_ELEMENT_ACCESS':
+    case 'JS_IDENTIFIER':
+    case 'JSX_ELEMENT':
+      return jsxAttributeToValue(
+        currentScope,
+        block,
+        elementPath,
+        renderContext,
+        uid,
+        codeError,
+        assignedToProp,
+      )
+
+    case 'JSX_MAP_EXPRESSION':
+      const valueToMap = runJSExpression(
+        block.valueToMap,
+        elementPath,
+        currentScope,
+        renderContext,
+        uid,
+        codeError,
+        null,
+      )
+      const mapFunction = runJSExpression(
+        block.mapFunction,
+        elementPath,
+        currentScope,
+        renderContext,
+        uid,
+        codeError,
+        null,
+      )
+      const result = valueToMap.map(mapFunction)
+      return result
+    case 'ATTRIBUTE_OTHER_JAVASCRIPT':
+      return resolveParamsAndRunJsCode(
+        renderContext.filePath,
+        block,
+        renderContext.requireResult,
+        currentScope,
+      )
+    default:
+      assertNever(block)
+  }
 }
 
-function getElementFromScope(jsxElementToLookup: JSXElement, scope: MapLike<any> | null): any {
-  if (scope == null) {
+function getElementFromScope(jsxElementToLookup: JSXElementLike, scope: MapLike<any> | null): any {
+  if (scope == null || isJSXFragment(jsxElementToLookup)) {
     return undefined
   } else {
     if (jsxElementToLookup.name.baseVariable in scope) {

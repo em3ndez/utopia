@@ -127,7 +127,7 @@ module.exports = {
       from: {},
       to: {
         couldNotResolve: true,
-        pathNot: 'domtoimage|monaco-editor',
+        pathNot: 'monaco-editor|utopia-api/core',
       },
     },
     {
@@ -153,8 +153,7 @@ module.exports = {
       severity: 'error',
       from: {},
       to: {
-        path:
-          '\\.(spec|test|spec.browser|spec.browser2)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$',
+        path: '\\.(spec|test|spec.browser|spec.browser2|spec.hydrogen.browser2)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$',
       },
     },
     {
@@ -166,7 +165,7 @@ module.exports = {
       severity: 'error',
       from: {
         pathNot:
-          '\\.(spec|test|spec.browser|spec.browser2|test-utils)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$|(src/scripts/.*$)',
+          '\\.(benchmark|spec|test|spec.browser|spec.browser2|spec.hydrogen.browser2|test-utils)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$|(src/scripts/.*$)',
       },
       to: {
         path: '\\.(test-utils)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$',
@@ -187,29 +186,15 @@ module.exports = {
     },
     {
       name: 'not-from-ts-to-tsx',
-      comment: 'Prevent a .ts file from pointing to a .tsx file.',
+      comment: 'Prevent a .worker.ts file from pointing to a .tsx file.',
       severity: 'error',
       from: {
-        path: '\\.ts$',
+        path: '\\worker.ts$',
         pathNot: ['built-in-dependencies-list.ts$'],
       },
       to: {
+        reachable: true,
         path: '\\.tsx$',
-      },
-    },
-    {
-      name: 'not-from-editor-to-parser-printer-worker',
-      comment: 'Stop the mainline editor code from reaching into the parser-printer worker.',
-      severity: 'error',
-      from: {
-        path: '^src',
-        pathNot: [
-          '^src/core/workers/',
-          '\\.(spec|test|spec.browser|spec.browser2|test-utils)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$|(src/scripts/.*$)',
-        ],
-      },
-      to: {
-        path: '^src/core/workers/parser-printer',
       },
     },
     {
@@ -220,7 +205,7 @@ module.exports = {
         path: '^src',
         pathNot: [
           '^src/core/workers/',
-          '\\.(spec|test|spec.browser|spec.browser2|test-utils)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$|(src/scripts/.*$)',
+          '\\.(spec|test|spec.browser|spec.browser2|spec.hydrogen.browser2|test-utils)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$|(src/scripts/.*$)',
         ],
       },
       to: {
@@ -237,6 +222,24 @@ module.exports = {
       },
       to: {
         path: ['typescript'],
+        pathNot: ['typescript-for-the-editor'],
+        reachable: true,
+      },
+    },
+    {
+      name: 'not-from-workers-to-specific-files',
+      comment: 'Stop the workers from reaching down to certain files.',
+      severity: 'error',
+      from: {
+        path: '\\.(worker)\\.(ts|tsx)$',
+      },
+      to: {
+        path: [
+          '^src/components/editor/store/store-deep-equality-instances.ts',
+          '^src/sample-projects/sample-project-utils.ts',
+          '^src/utils/deep-equality-instances.ts',
+          '^src/utils/deep-equality.ts',
+        ],
         reachable: true,
       },
     },
@@ -252,7 +255,7 @@ module.exports = {
       from: {
         path: '^(src)',
         pathNot:
-          '\\.(spec|test|spec.browser|spec.browser2|test-utils)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$|(src/scripts/.*$)',
+          '\\.(spec|test|spec.browser|spec.browser2|spec.hydrogen.browser2|test-utils|benchmark)\\.(js|mjs|cjs|ts|tsx|ls|coffee|litcoffee|coffee\\.md)$|(src/scripts/.*$)',
       },
       to: {
         dependencyTypes: ['npm-dev'],

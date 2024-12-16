@@ -1,3 +1,4 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx } from '@emotion/react'
 import React from 'react'
@@ -5,13 +6,11 @@ import styled from '@emotion/styled'
 import { FlexRow, SimpleFlexRow } from './widgets/layout/flex-row'
 import { Button } from './button'
 import { Icons } from './icons'
-import * as R from 'ramda'
 
 import { useColorTheme, UtopiaTheme } from './styles/theme'
 import { CSSObject } from '@emotion/serialize'
 import { defaultIfNull } from '../core/shared/optional-utils'
 import { NO_OP } from '../core/shared/utils'
-import { betterReactMemo } from '../uuiui-deps'
 
 interface TabComponentProps {
   modified?: boolean
@@ -28,9 +27,8 @@ interface TabComponentProps {
   className?: string
 }
 
-export const TabComponent: React.FunctionComponent<TabComponentProps> = betterReactMemo(
-  'TabComponent',
-  (props) => {
+export const TabComponent: React.FunctionComponent<React.PropsWithChildren<TabComponentProps>> =
+  React.memo((props) => {
     const colorTheme = useColorTheme()
     const [tabIsHovered, setTabIsHovered] = React.useState(false)
     const [indicatorIsHovered, setIndicatorIsHovered] = React.useState(false)
@@ -55,7 +53,6 @@ export const TabComponent: React.FunctionComponent<TabComponentProps> = betterRe
     }
 
     const selectionHandlingStyle = {
-      boxShadow: selected ? `inset 0px 2px 0px 0px ${colorTheme.primary.value}` : undefined,
       color: hasErrorMessages
         ? colorTheme.errorForeground.value
         : colorTheme.tabSelectedForeground.value,
@@ -73,14 +70,16 @@ export const TabComponent: React.FunctionComponent<TabComponentProps> = betterRe
     const setTabHoveredTrue = React.useCallback(() => setTabIsHovered(true), [setTabIsHovered])
     const setTabHoveredFalse = React.useCallback(() => setTabIsHovered(false), [setTabIsHovered])
 
-    const setIndicatorHoveredTrue = React.useCallback(() => setIndicatorIsHovered(true), [
-      setIndicatorIsHovered,
-    ])
-    const setIndicatorHoveredFalse = React.useCallback(() => setIndicatorIsHovered(false), [
-      setIndicatorIsHovered,
-    ])
+    const setIndicatorHoveredTrue = React.useCallback(
+      () => setIndicatorIsHovered(true),
+      [setIndicatorIsHovered],
+    )
+    const setIndicatorHoveredFalse = React.useCallback(
+      () => setIndicatorIsHovered(false),
+      [setIndicatorIsHovered],
+    )
 
-    const close = React.useCallback(
+    const close: React.MouseEventHandler<HTMLDivElement> = React.useCallback(
       (e) => {
         onClose()
         e.stopPropagation()
@@ -122,5 +121,4 @@ export const TabComponent: React.FunctionComponent<TabComponentProps> = betterRe
         </Button>
       </SimpleFlexRow>
     )
-  },
-)
+  })

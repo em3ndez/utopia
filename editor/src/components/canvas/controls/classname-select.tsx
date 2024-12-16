@@ -1,10 +1,10 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 
 import { jsx } from '@emotion/react'
 import React from 'react'
 import type { StylesConfig } from 'react-select'
-import WindowedSelect, {
-  components,
+import type {
   FormatOptionLabelMeta,
   IndicatorProps,
   InputActionMeta,
@@ -12,55 +12,57 @@ import WindowedSelect, {
   MenuProps,
   ValueContainerProps,
 } from 'react-windowed-select'
+import WindowedSelect, { components } from 'react-windowed-select'
 import {
+  AlwaysTrue,
   atomWithPubSub,
   usePubSubAtomReadOnly,
   usePubSubAtomWriteOnly,
 } from '../../../core/shared/atom-with-pub-sub'
-import { emptyComments, jsxAttributeValue } from '../../../core/shared/element-template'
+import { emptyComments, jsExpressionValue } from '../../../core/shared/element-template'
 import * as PP from '../../../core/shared/property-path'
+import type { TailWindOption } from '../../../core/tailwind/tailwind-options'
 import {
   getTailwindOptionForClassName,
   LabelWithStripes,
   MatchHighlighter,
-  TailWindOption,
   useFilteredOptions,
   useGetSelectedClasses,
 } from '../../../core/tailwind/tailwind-options'
-import { colorTheme, FlexColumn, FlexRow, useColorTheme, UtopiaTheme } from '../../../uuiui'
-import { betterReactMemo } from '../../../uuiui-deps'
+import {
+  AlternateColorThemeComponent,
+  colorTheme,
+  FlexColumn,
+  FlexRow,
+  UtopiaTheme,
+} from '../../../uuiui'
 import * as EditorActions from '../../editor/actions/action-creators'
-import { useEditorState } from '../../editor/store/store-hook'
+import { useDispatch } from '../../editor/store/dispatch-context'
+import { Substores, useEditorState } from '../../editor/store/store-hook'
 
-const DropdownIndicator = betterReactMemo(
-  'DropdownIndicator',
-  (props: IndicatorProps<TailWindOption, true>) => (
-    <components.DropdownIndicator {...props}>
-      <span style={{ lineHeight: '20px', opacity: props.isDisabled ? 0 : 1 }}> ↓ </span>
-    </components.DropdownIndicator>
-  ),
-)
+const DropdownIndicator = React.memo((props: IndicatorProps<TailWindOption, true>) => (
+  <components.DropdownIndicator {...props}>
+    <span style={{ lineHeight: '20px', opacity: props.isDisabled ? 0 : 1 }}> ↓ </span>
+  </components.DropdownIndicator>
+))
 
 const ClearIndicator = () => null
 const IndicatorSeparator = () => null
 
-const NoOptionsMessage = betterReactMemo('NoOptionsMessage', (props: any) => (
-  <span {...props}>No results found</span>
-))
+const NoOptionsMessage = React.memo((props: any) => <span {...props}>No results found</span>)
 
 const getOptionColors = (
-  theme: typeof colorTheme,
   isFocused: boolean,
   isSelected: boolean,
   isDisabled: boolean,
   data: any,
 ) => {
-  let color: string | undefined = theme.inverted.textColor.value
-  let selectedColor = theme.inverted.primary.value
-  let backgroundColor: string | undefined = theme.inverted.bg1.value
-  let activeBackgroundColor: string | undefined = theme.primary.value
+  let color: string | undefined = colorTheme.bg0.value
+  let selectedColor = colorTheme.primary.value
+  let backgroundColor: string | undefined = colorTheme.fg1.value
+  let activeBackgroundColor: string | undefined = colorTheme.primary.value
   if (isFocused) {
-    backgroundColor = theme.inverted.primary.value
+    backgroundColor = colorTheme.primary.value
   } else if (isSelected) {
     backgroundColor = selectedColor
     activeBackgroundColor = selectedColor
@@ -93,9 +95,8 @@ function formatOptionLabel(
   )
 }
 
-const Menu = betterReactMemo('Menu', (props: MenuProps<TailWindOption, true>) => {
-  const theme = useColorTheme()
-  const focusedOption = usePubSubAtomReadOnly(focusedOptionAtom)
+const Menu = React.memo((props: MenuProps<TailWindOption, true>) => {
+  const focusedOption = usePubSubAtomReadOnly(focusedOptionAtom, AlwaysTrue)
   const showFooter = props.options.length > 0
   const joinedAttributes = focusedOption?.attributes?.join(', ')
   const attributesText =
@@ -110,11 +111,11 @@ const Menu = betterReactMemo('Menu', (props: MenuProps<TailWindOption, true>) =>
             css={{
               label: 'focusedElementMetadata',
               overflow: 'hidden',
-              boxShadow: 'inset 0px 1px 0px 0px rgba(0,0,0,.1)',
+              boxShadow: `inset 0px 1px 0px 0px ${colorTheme.fg0Opacity10.value}`,
               padding: '8px 8px',
               fontSize: '10px',
               pointerEvents: 'none',
-              color: theme.inverted.textColor.value,
+              color: colorTheme.bg0.value,
             }}
           >
             <FlexColumn>
@@ -134,16 +135,13 @@ const Menu = betterReactMemo('Menu', (props: MenuProps<TailWindOption, true>) =>
   )
 })
 
-const ValueContainer = betterReactMemo(
-  'ValueContainer',
-  (props: ValueContainerProps<TailWindOption, true>) => {
-    return (
-      <div style={{ overflowX: 'scroll', flex: 1 }}>
-        <components.ValueContainer {...props} />
-      </div>
-    )
-  },
-)
+const ValueContainer = React.memo((props: ValueContainerProps<TailWindOption, true>) => {
+  return (
+    <div style={{ overflowX: 'scroll', flex: 1 }}>
+      <components.ValueContainer {...props} />
+    </div>
+  )
+})
 
 const filterOption = () => true
 const MaxResults = 500
@@ -155,12 +153,14 @@ const Input = (props: InputProps) => {
 }
 let queuedDispatchTimeout: number | undefined = undefined
 
-export const ClassNameSelect = betterReactMemo(
-  'ClassNameSelect',
+export const ClassNameSelect = React.memo(
   React.forwardRef<HTMLInputElement>((_, ref) => {
-    const theme = useColorTheme()
-    const targets = useEditorState((store) => store.editor.selectedViews, 'ClassNameSelect targets')
-    const dispatch = useEditorState((store) => store.dispatch, 'ClassNameSelect dispatch')
+    const targets = useEditorState(
+      Substores.selectedViews,
+      (store) => store.editor.selectedViews,
+      'ClassNameSelect targets',
+    )
+    const dispatch = useDispatch()
     const [input, setInput] = React.useState('')
     const focusedValueRef = React.useRef<string | null>(null)
     const updateFocusedOption = usePubSubAtomWriteOnly(focusedOptionAtom)
@@ -182,7 +182,10 @@ export const ClassNameSelect = betterReactMemo(
 
     React.useEffect(() => {
       return function cleanup() {
-        dispatch([EditorActions.clearTransientProps()], 'canvas')
+        setTimeout(() => {
+          // wrapping in a setTimeout so we don't dispatch from inside React lifecycle
+          dispatch([EditorActions.clearTransientProps()], 'canvas')
+        }, 0)
       }
       /** deps is explicitly empty */
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -208,8 +211,8 @@ export const ClassNameSelect = betterReactMemo(
                   [
                     EditorActions.setPropTransient(
                       targets[0],
-                      PP.create(['className']),
-                      jsxAttributeValue(newClassNameString, emptyComments),
+                      PP.create('className'),
+                      jsExpressionValue(newClassNameString, emptyComments),
                     ),
                   ],
                   'canvas',
@@ -238,8 +241,8 @@ export const ClassNameSelect = betterReactMemo(
             [
               EditorActions.setProp_UNSAFE(
                 elementPath,
-                PP.create(['className']),
-                jsxAttributeValue(newValue.map((value) => value.value).join(' '), emptyComments),
+                PP.create('className'),
+                jsExpressionValue(newValue.map((value) => value.value).join(' '), emptyComments),
               ),
               EditorActions.clearTransientProps(),
             ],
@@ -286,17 +289,17 @@ export const ClassNameSelect = betterReactMemo(
             display: 'flex',
             alignItems: 'center',
             height: 18,
-            border: `1px solid ${theme.inverted.primary.value}`,
+            border: `1px solid ${colorTheme.primary.value}`,
             borderRadius: UtopiaTheme.inputBorderRadius,
-            backgroundColor: state.isFocused
-              ? theme.inverted.primary.value
-              : theme.inverted.bg1.value,
+            backgroundColor: (state.isFocused as boolean)
+              ? colorTheme.primary.value
+              : colorTheme.fg1.value,
           }
         },
         multiValueLabel: () => ({
           fontSize: 10,
           padding: '2px 4px',
-          color: theme.inverted.textColor.value,
+          color: colorTheme.textColor.value,
         }),
         multiValueRemove: (styles: React.CSSProperties, { data }) => ({
           width: 11,
@@ -307,7 +310,7 @@ export const ClassNameSelect = betterReactMemo(
           ':hover': {
             opacity: 1,
             backgroundColor: data.color,
-            color: theme.inverted.textColor.value,
+            color: colorTheme.bg0.value,
           },
           '& > svg': {
             overflow: 'hidden',
@@ -316,7 +319,7 @@ export const ClassNameSelect = betterReactMemo(
         input: () => {
           return {
             fontSize: 11,
-            color: theme.inverted.textColor.value,
+            color: colorTheme.bg0.value,
             letterSpacing: 0.3,
             background: 'transparent',
             display: 'flex',
@@ -329,12 +332,12 @@ export const ClassNameSelect = betterReactMemo(
         }),
         menu: (styles) => ({
           ...styles,
-          backgroundColor: theme.inverted.bg1.value,
+          backgroundColor: colorTheme.fg1.value,
           zIndex: 100,
         }),
         option: (styles: React.CSSProperties, { data, isDisabled, isFocused, isSelected }) => {
           // a single entry in the options list
-          const optionColors = getOptionColors(theme, isFocused, isSelected, isDisabled, data)
+          const optionColors = getOptionColors(isFocused, isSelected, isDisabled, data)
           return {
             minHeight: 27,
             display: 'flex',
@@ -343,7 +346,7 @@ export const ClassNameSelect = betterReactMemo(
             paddingRight: 8,
             backgroundColor: optionColors.backgroundColor,
             color: optionColors.color,
-            cursor: isDisabled ? 'not-allowed' : 'default',
+            cursor: (isDisabled as boolean) ? 'not-allowed' : 'default',
 
             ':active': {
               ...(styles as any)[':active'],
@@ -352,11 +355,11 @@ export const ClassNameSelect = betterReactMemo(
           }
         },
       }),
-      [theme],
+      [],
     )
 
     const onInputChange = React.useCallback(
-      (newInput, actionMeta: InputActionMeta) => {
+      (newInput: string, actionMeta: InputActionMeta) => {
         if (newInput === '') {
           dispatch([EditorActions.clearTransientProps()], 'canvas')
         }
@@ -391,7 +394,7 @@ export const ClassNameSelect = betterReactMemo(
           flexGrow: 1,
           display: 'flex',
           alignItems: 'center',
-          '&:focus-within': { boxShadow: `0px 0px 0px 1px ${theme.primary.value}` },
+          '&:focus-within': { boxShadow: `0px 0px 0px 1px ${colorTheme.primary.value}` },
         }}
         onKeyDown={handleKeyDown}
       >

@@ -1,7 +1,7 @@
 import React from 'react'
-import * as PropTypes from 'prop-types'
 import { applyUIDMonkeyPatch } from './canvas-react-utils'
 applyUIDMonkeyPatch()
+import * as PropTypes from 'prop-types'
 import * as ReactDOMServer from 'react-dom/server'
 import * as Prettier from 'prettier'
 import { DatePicker } from 'antd'
@@ -40,11 +40,11 @@ describe('Monkey Function', () => {
     class TestClass extends React.Component {
       render() {
         return (
-          <div data-uid='cica' data-paths='cica'>
-            <div data-uid='kutya' data-paths='kutya'>
+          <div data-uid='cica' data-path='cica'>
+            <div data-uid='kutya' data-path='kutya'>
               Hello!
             </div>
-            <div data-uid='majom' data-paths='majom'>
+            <div data-uid='majom' data-path='majom'>
               Hello!
             </div>
           </div>
@@ -52,11 +52,11 @@ describe('Monkey Function', () => {
       }
     }
 
-    expect(renderToFormattedString(<TestClass data-uid={'test1'} data-paths='test1' />))
+    expect(renderToFormattedString(<TestClass data-uid={'test1'} data-path='test1' />))
       .toMatchInlineSnapshot(`
-      "<div data-uid=\\"cica test1\\" data-paths=\\"cica test1\\">
-        <div data-uid=\\"kutya\\" data-paths=\\"kutya\\">Hello!</div>
-        <div data-uid=\\"majom\\" data-paths=\\"majom\\">Hello!</div>
+      "<div data-uid=\\"cica\\" data-path=\\"cica\\">
+        <div data-uid=\\"kutya\\" data-path=\\"kutya\\">Hello!</div>
+        <div data-uid=\\"majom\\" data-path=\\"majom\\">Hello!</div>
       </div>
       "
     `)
@@ -65,9 +65,10 @@ describe('Monkey Function', () => {
   it('class components have a working context', () => {
     const MyContext = React.createContext({ value: 'wrong!' })
     class TestClass extends React.Component {
+      context: React.ContextType<typeof MyContext> = { value: '' }
       render() {
         return (
-          <div data-uid='inner-div' data-paths='inner-div'>
+          <div data-uid='inner-div' data-path='inner-div'>
             {this.context.value}
           </div>
         )
@@ -77,17 +78,12 @@ describe('Monkey Function', () => {
 
     expect(
       renderToFormattedString(
-        <MyContext.Provider value={{ value: 'hello!' }} data-uid='provider' data-paths='provider'>
-          <TestClass data-uid={'test-class'} data-paths='test-class' />
+        <MyContext.Provider value={{ value: 'hello!' }} data-uid='provider' data-path='provider'>
+          <TestClass data-uid={'test-class'} data-path='test-class' />
         </MyContext.Provider>,
       ),
     ).toMatchInlineSnapshot(`
-      "<div
-        data-uid=\\"inner-div test-class provider\\"
-        data-paths=\\"inner-div test-class provider\\"
-      >
-        hello!
-      </div>
+      "<div data-uid=\\"inner-div\\" data-path=\\"inner-div\\">hello!</div>
       "
     `)
   })
@@ -95,9 +91,10 @@ describe('Monkey Function', () => {
   it('class components have a working context, third variant', () => {
     const MyContext = React.createContext({ value: 'wrong!' })
     class TestClass extends React.Component {
+      context: React.ContextType<typeof MyContext> = { value: '' }
       render() {
         return (
-          <div data-uid='inner-div' data-paths='inner-div'>
+          <div data-uid='inner-div' data-path='inner-div'>
             {this.context.value}
           </div>
         )
@@ -107,20 +104,15 @@ describe('Monkey Function', () => {
 
     const Renderer = () => {
       return (
-        <MyContext.Provider value={{ value: 'hello!' }} data-uid='provider' data-paths='provider'>
-          <TestClass data-uid='test-class' data-paths='test-class' />
+        <MyContext.Provider value={{ value: 'hello!' }} data-uid='provider' data-path='provider'>
+          <TestClass data-uid='test-class' data-path='test-class' />
         </MyContext.Provider>
       )
     }
 
-    expect(renderToFormattedString(<Renderer data-uid={'renderer'} data-paths={'renderer'} />))
+    expect(renderToFormattedString(<Renderer data-uid={'renderer'} data-path={'renderer'} />))
       .toMatchInlineSnapshot(`
-      "<div
-        data-uid=\\"inner-div test-class provider renderer\\"
-        data-paths=\\"inner-div test-class provider renderer\\"
-      >
-        hello!
-      </div>
+      "<div data-uid=\\"inner-div\\" data-path=\\"inner-div\\">hello!</div>
       "
     `)
   })
@@ -135,9 +127,9 @@ describe('Monkey Function', () => {
       )
     }
 
-    const TestStoryboard: React.FunctionComponent = (props) => {
+    const TestStoryboard: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       return (
-        <UtopiaStoryboard data-uid='scene sb test1'>
+        <UtopiaStoryboard data-uid='scene'>
           <UtopiaScene data-uid='scene'>
             <TestComponent data-uid='component-instance' />
           </UtopiaScene>
@@ -146,18 +138,18 @@ describe('Monkey Function', () => {
     }
 
     expect(renderToFormattedString(<TestStoryboard data-uid={'test1'} />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"scene sb test1\\">
-        <div data-uid=\\"component-root component-instance\\">
+      "<div style=\\"overflow: hidden\\" data-uid=\\"scene\\">
+        <div data-uid=\\"component-root\\">
           <div data-uid=\\"kutya\\">Hello!</div>
           <div data-uid=\\"majom\\">Hello!</div>
         </div>
       </div>
       "
-`)
+    `)
   })
 
   it('works for simple function components', () => {
-    const TestComponent: React.FunctionComponent = (props) => {
+    const TestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       return (
         <div data-uid='test1'>
           <div data-uid='kutya'>Hello!</div>
@@ -176,7 +168,7 @@ describe('Monkey Function', () => {
   })
 
   it('function components have working hooks', () => {
-    const TestComponent: React.FunctionComponent = (props) => {
+    const TestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       const [value, setValue] = React.useState('Hello!')
       return (
         <div>
@@ -192,29 +184,33 @@ describe('Monkey Function', () => {
   })
 
   it('works for function components', () => {
-    const OtherTestComponent: React.FunctionComponent = (props) => {
+    const OtherTestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (
+      props,
+    ) => {
       return <div data-uid='root-div'>Hello!</div>
     }
 
-    const TestComponent: React.FunctionComponent = (props) => {
+    const TestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       return <OtherTestComponent data-uid={'cica'} />
     }
 
     expect(renderToFormattedString(<TestComponent data-uid={'test1'} />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"root-div cica test1\\">Hello!</div>
+      "<div data-uid=\\"root-div\\">Hello!</div>
       "
     `)
   })
 
   it('works for function components that have uid returning function components', () => {
-    const MyComponent: React.FunctionComponent = (props) => {
+    const MyComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       return <div>Hello!</div>
     }
-    const OtherTestComponent: React.FunctionComponent = (props) => {
+    const OtherTestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (
+      props,
+    ) => {
       return <MyComponent />
     }
 
-    const TestComponent: React.FunctionComponent = (props) => {
+    const TestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       return <OtherTestComponent data-uid={'cica'} />
     }
 
@@ -225,10 +221,12 @@ describe('Monkey Function', () => {
   })
 
   it('works for function components that have uid returning function components wrapped in divs', () => {
-    const MyComponent: React.FunctionComponent = (props) => {
+    const MyComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       return <div>Hello!</div>
     }
-    const OtherTestComponent: React.FunctionComponent = (props) => {
+    const OtherTestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (
+      props,
+    ) => {
       return (
         <div>
           <MyComponent />
@@ -236,22 +234,24 @@ describe('Monkey Function', () => {
       )
     }
 
-    const TestComponent: React.FunctionComponent = (props) => {
+    const TestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       return <OtherTestComponent data-uid={'cica'} />
     }
 
     expect(renderToFormattedString(<TestComponent data-uid={'test1'} />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"cica test1\\"><div>Hello!</div></div>
+      "<div data-uid=\\"cica\\"><div>Hello!</div></div>
       "
     `)
   })
 
   it('works for function components that have no uid returning function components', () => {
-    const OtherTestComponent: React.FunctionComponent = (props) => {
+    const OtherTestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (
+      props,
+    ) => {
       return <div>Hello!</div>
     }
 
-    const TestComponent: React.FunctionComponent = (props) => {
+    const TestComponent: React.FunctionComponent<React.PropsWithChildren<unknown>> = (props) => {
       return <OtherTestComponent />
     }
 
@@ -275,14 +275,14 @@ describe('Monkey Function', () => {
     }
 
     expect(renderToFormattedString(<TestClass data-uid={'test1'} />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"root-div test-class test1\\">Hello!</div>
+      "<div data-uid=\\"root-div\\">Hello!</div>
       "
     `)
   })
 
   it('works with a silly render prop', () => {
-    const CallRenderPropChild: React.FunctionComponent = (props) => {
-      return (props.children as any)('Hello!')
+    const CallRenderPropChild: React.FunctionComponent<any> = (props) => {
+      return props.children('Hello!')
     }
 
     const Cica = (props: any) => {
@@ -296,14 +296,14 @@ describe('Monkey Function', () => {
     }
 
     expect(renderToFormattedString(<Cica data-uid={'test1'} />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"root-div wrapper-component test1\\">Hello!</div>
+      "<div data-uid=\\"root-div\\">Hello!</div>
       "
     `)
   })
 
   it('works with a render prop with a class component if there is a uid', () => {
-    const CallRenderPropChild: React.FunctionComponent = (props) => {
-      return (props.children as any)('Hello!')
+    const CallRenderPropChild: React.FunctionComponent<any> = (props) => {
+      return props.children('Hello!')
     }
 
     class TestClass extends React.Component {
@@ -317,14 +317,14 @@ describe('Monkey Function', () => {
     }
 
     expect(renderToFormattedString(<TestClass data-uid={'test1'} />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"root-div cica test1\\">Hello!</div>
+      "<div data-uid=\\"root-div\\">Hello!</div>
       "
     `)
   })
 
   it('works with a render prop with a class component if there is NO uid', () => {
-    const CallRenderPropChild: React.FunctionComponent = (props) => {
-      return (props.children as any)('Hello!')
+    const CallRenderPropChild: React.FunctionComponent<any> = (props) => {
+      return props.children('Hello!')
     }
 
     class TestClass extends React.Component {
@@ -358,6 +358,20 @@ describe('Monkey Function', () => {
     `)
   })
 
+  it('Props get pushed down off of a fragment onto the children', () => {
+    const ElementThatIsReallyAFragment: any = React.Fragment as any
+    expect(
+      renderToFormattedString(
+        <ElementThatIsReallyAFragment style={{ backgroundColor: 'red' }}>
+          <div>Hello!</div>
+        </ElementThatIsReallyAFragment>,
+      ),
+    ).toMatchInlineSnapshot(`
+      "<div style=\\"background-color: red\\">Hello!</div>
+      "
+    `)
+  })
+
   it('Fragments work if theres a uid 2', () => {
     const Component = () => {
       return (
@@ -368,7 +382,7 @@ describe('Monkey Function', () => {
     }
 
     expect(renderToFormattedString(<Component data-uid={'test1'} />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"root-div fragment test1\\">Hello!</div>
+      "<div data-uid=\\"root-div\\">Hello!</div>
       "
     `)
   })
@@ -417,8 +431,8 @@ describe('Monkey Function', () => {
 
     expect(renderToFormattedString(<Component />)).toMatchInlineSnapshot(`
       "<div data-uid=\\"cica\\">
-        <div data-uid=\\"hello-div kutya\\">Hello</div>
-        <div data-uid=\\"world-div kutya\\">world!</div>
+        <div data-uid=\\"hello-div\\">Hello</div>
+        <div data-uid=\\"world-div\\">world!</div>
       </div>
       "
     `)
@@ -434,9 +448,7 @@ describe('Monkey Function', () => {
         </Storyboard>,
       ),
     ).toMatchInlineSnapshot(`
-      "<div data-uid=\\"scene ignore\\">
-        <div data-uid=\\"cica scene-component\\">Hello!</div>
-      </div>
+      "<div data-uid=\\"scene\\"><div data-uid=\\"cica\\">Hello!</div></div>
       "
     `)
   })
@@ -474,9 +486,9 @@ describe('Monkey Function', () => {
       }
     }
 
-    class RenderPropsFunctionChild extends React.Component {
+    class RenderPropsFunctionChild extends React.Component<any> {
       render() {
-        return (this.props.children as any)('huha')
+        return this.props.children('huha')
       }
     }
 
@@ -542,7 +554,7 @@ describe('Monkey Function', () => {
       )
     }
     expect(renderToFormattedString(<App data-uid='cica' />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"zzz cica\\">
+      "<div data-uid=\\"zzz\\">
         <div data-uid=\\"aaa\\">
           <div data-uid=\\"bbb\\">4</div>
           <div data-uid=\\"bbb\\">5</div>
@@ -568,7 +580,7 @@ describe('Monkey Function', () => {
       return <div data-uid='zzz'>{[' ']}hello!</div>
     }
     expect(renderToFormattedString(<App data-uid='cica' />)).toMatchInlineSnapshot(`
-      "<div data-uid=\\"zzz cica\\">hello!</div>
+      "<div data-uid=\\"zzz\\">hello!</div>
       "
     `)
   })
@@ -593,13 +605,10 @@ describe('Monkey Function', () => {
       </Storyboard>
     )
     expect(renderToFormattedString(storyboard)).toMatchInlineSnapshot(`
-      "<div
-        data-uid=\\"scene-aaa utopia-storyboard-uid\\"
-        style=\\"left: 0; top: 0; width: 400px; height: 400px;\\"
-      >
-        <div data-uid=\\"zzz app\\">
-          <div data-uid=\\"ccc aaa\\">Hello World!!</div>
-          <div data-uid=\\"ddd bbb\\">Hello Dolly!!</div>
+      "<div data-uid=\\"scene-aaa\\" style=\\"left: 0; top: 0; width: 400px; height: 400px\\">
+        <div data-uid=\\"zzz\\">
+          <div data-uid=\\"ccc\\">Hello World!!</div>
+          <div data-uid=\\"ddd\\">Hello Dolly!!</div>
         </div>
       </div>
       "

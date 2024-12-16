@@ -1,4 +1,5 @@
-import { contentsToTree, ProjectContentTreeRoot } from '../../../components/assets'
+import type { ProjectContentTreeRoot } from '../../../components/assets'
+import { contentsToTree } from '../../../components/assets'
 import {
   RevisionsState,
   textFile,
@@ -10,6 +11,40 @@ import { isResolveSuccess, resolveModule } from './module-resolution'
 import { createNodeModules } from './test-utils'
 
 const sampleProjectContents: ProjectContentTreeRoot = contentsToTree({
+  'jsconfig.json': textFile(
+    textFileContents(
+      `
+    {
+      "compilerOptions": {
+        "paths": {
+          "stars/**/*.stars": [
+            "a/**/*.js"
+          ],
+          "~/*": [
+            "app/*"
+          ]
+        }
+      }
+    }`,
+      unparsed,
+      RevisionsState.CodeAhead,
+    ),
+    null,
+    null,
+    0,
+  ),
+  '/a/some/nested/file.js': textFile(
+    textFileContents('export const Cake = "tasty"', unparsed, RevisionsState.CodeAhead),
+    null,
+    null,
+    0,
+  ),
+  '/app/card.js': textFile(
+    textFileContents('export const Card = "card"', unparsed, RevisionsState.CodeAhead),
+    null,
+    null,
+    0,
+  ),
   '/src/thing.js': textFile(
     textFileContents('export const Thing = 1', unparsed, RevisionsState.CodeAhead),
     null,
@@ -41,6 +76,13 @@ describe('ES Package Manager Module Resolution', () => {
       return null
     }
   }
+
+  it('resolves mapped file paths', () => {
+    expect(resolve('/src/startingFile.js', '~/card')).toEqual('/app/card.js')
+    expect(resolve('/src/startingFile.js', 'stars/some/nested/file.stars')).toEqual(
+      '/a/some/nested/file.js',
+    )
+  })
 
   function testNonRelativeResolve(toImport: string, expectedResult: string | null): void {
     it(`resolves non-relative path ${toImport}`, () => {
@@ -154,6 +196,52 @@ describe('ES Package Manager Module Resolution', () => {
     expect(resolve('/src/app.js', './folder/../icon.png')).toEqual('/src/icon.png')
     expect(resolve('/src/app.js', './simple.css')).toEqual('/src/simple.css')
     expect(resolve('/src/app.js', './thing.js')).toEqual('/src/thing.js')
+  })
+
+  it('resolves the Browser field', () => {
+    expect(resolve('/src/app.js', 'module-with-browser-module-and-main-fields')).toEqual(
+      '/node_modules/module-with-browser-module-and-main-fields/index.browser.js',
+    )
+  })
+
+  it('resolves the Browser field local file replacement', () => {
+    expect(
+      resolve('/node_modules/module-with-browser-replacements/index.module.js', './localFile.js'),
+    ).toEqual('/node_modules/module-with-browser-replacements/localFile.shim.js')
+  })
+
+  it('resolves the Browser field module-to-module replacement', () => {
+    expect(
+      resolve('/node_modules/module-with-browser-replacements/index.module.js', 'node-only-module'),
+    ).toEqual('/node_modules/other-module/index.js')
+  })
+
+  it('resolves the Browser field module-to-file replacement', () => {
+    expect(
+      resolve(
+        '/node_modules/module-with-browser-replacements/index.module.js',
+        'node-only-module-2',
+      ),
+    ).toEqual('/node_modules/module-with-browser-replacements/local.shim.js')
+  })
+
+  it('resolves the Browser field chained replacement', () => {
+    expect(
+      resolve(
+        '/node_modules/module-with-browser-replacements-chained/index.module.js',
+        'some-module',
+      ),
+    ).toEqual('/node_modules/module-with-browser-replacements-chained/local-shim.js')
+  })
+
+  it('resolves the Browser field ignore replacement', () => {
+    const resolveResult = resolveModule(
+      sampleProjectContents,
+      createNodeModules(moduleResolutionExamples.contents),
+      '/node_modules/module-with-browser-replacements-ignore-module/index.module.js',
+      'some-module',
+    )
+    expect(resolveResult.type).toEqual('RESOLVE_SUCCESS_IGNORE_MODULE')
   })
 
   // it('loads self references', () => {

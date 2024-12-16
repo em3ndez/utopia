@@ -1,16 +1,12 @@
-import { LayoutSystem } from 'utopia-api' // TODO fixme this imports utopia-api
-import { UtopiaVSCodeConfig } from 'utopia-vscode-common'
 import type { LoginState } from '../../../common/user'
-import { LayoutTargetableProp, StyleLayoutProp } from '../../../core/layout/layout-helpers-new'
-import type { revertFile, saveFile } from '../../../core/model/project-file-utils'
-import type { foldEither } from '../../../core/shared/either'
+import type { LayoutTargetableProp } from '../../../core/layout/layout-helpers-new'
 import type {
-  ElementInstanceMetadata,
-  JSXAttribute,
+  JSExpression,
   JSXElement,
   JSXElementName,
   ElementInstanceMetadataMap,
-  SettableLayoutSystem,
+  JSXElementChild,
+  TopLevelElement,
 } from '../../../core/shared/element-template'
 import type {
   CanvasPoint,
@@ -23,43 +19,33 @@ import type {
   RequestedNpmDependency,
 } from '../../../core/shared/npm-dependency-types'
 import type {
-  HighlightBoundsForUids,
   Imports,
   NodeModules,
   ParsedTextFile,
   ProjectFile,
   PropertyPath,
-  StaticElementPathPart,
   ElementPath,
+  ImageFile,
+  ExportDetail,
 } from '../../../core/shared/project-file-types'
-import { BuildType } from '../../../core/workers/common/worker-types'
+import type { BuildType } from '../../../core/workers/common/worker-types'
 import type { Key, KeysPressed } from '../../../utils/keyboard'
-import { IndexPosition } from '../../../utils/utils'
-import type { objectKeyParser, parseString } from '../../../utils/value-parser-utils'
+import type { IndexPosition } from '../../../utils/utils'
 import type { CSSCursor } from '../../../uuiui-deps'
-import type {
-  addFileToProjectContents,
-  getContentsTreeFileFromString,
-  ProjectContentTreeRoot,
-} from '../../assets'
+import type { ProjectContentTreeRoot } from '../../assets'
 import CanvasActions from '../../canvas/canvas-actions'
-import type { PinOrFlexFrameChange } from '../../canvas/canvas-types'
-import type { CursorPosition } from '../../code-editor/code-editor-utils'
+import type { PinOrFlexFrameChange, SelectionLocked } from '../../canvas/canvas-types'
+import type { CanvasCommand } from '../../canvas/commands/commands'
 import type { EditorPane, EditorPanel } from '../../common/actions'
-import { Notice } from '../../common/notice'
+import type { Notice } from '../../common/notice'
 import type { CodeResultCache, PropertyControlsInfo } from '../../custom-code/code-file'
 import type { ElementContextMenuInstance } from '../../element-context-menu'
 import type { FontSettings } from '../../inspector/common/css-utils'
 import type { CSSTarget } from '../../inspector/sections/header-section/target-selector'
-import {
-  InsertableComponent,
-  StylePropOption,
-  WrapContentOption,
-} from '../../shared/project-components'
+import type { InsertableComponent, StylePropOption } from '../../shared/project-components'
 import type {
   AddFolder,
   AddMissingDimensions,
-  AddStoryboardFile,
   AddTextFile,
   Alignment,
   AlignSelectedViews,
@@ -83,7 +69,6 @@ import type {
   InsertDroppedImage,
   InsertImageIntoUI,
   InsertJSXElement,
-  InsertScene,
   MoveSelectedBackward,
   MoveSelectedForward,
   MoveSelectedToBack,
@@ -91,17 +76,12 @@ import type {
   OpenCodeEditorFile,
   OpenPopup,
   OpenTextEditor,
-  PasteJSXElements,
-  PropertyControlsIFrameReady,
   AddToast,
   RemoveToast,
   Redo,
   RedrawOldCanvasControls,
-  RegenerateThumbnail,
   RenameStyleSelector,
   ResetPins,
-  ResetPropToDefault,
-  ResizeInterfaceDesignerCodePane,
   SaveAsset,
   SaveCurrentFile,
   SaveDOMReport,
@@ -112,18 +92,14 @@ import type {
   SaveImageSwitchMode,
   SelectAllSiblings,
   SelectComponents,
-  SendLinterRequestMessage,
-  SendPreviewModel,
   SetAspectRatioLock,
-  SetCanvasAnimationsEnabled,
   SetCanvasFrames,
   SetCodeEditorBuildErrors,
   SetCodeEditorLintErrors,
   SetCodeEditorVisibility,
   SetCursorOverlay,
   SetFilebrowserRenamingTarget,
-  SetHighlightedView,
-  SetHighlightsEnabled,
+  SetHighlightedViews,
   SetLeftMenuExpanded,
   SetLeftMenuTab,
   SetMainUIFile,
@@ -134,7 +110,6 @@ import type {
   SetProjectName,
   SetProjectDescription,
   SetProp,
-  SetPropWithElementPath,
   SetRightMenuExpanded,
   SetRightMenuTab,
   SetSafeMode,
@@ -146,19 +121,17 @@ import type {
   ShowModal,
   StartCheckpointTimer,
   SwitchEditorMode,
-  SwitchLayoutSystem,
   ToggleCanvasIsLive,
   ToggleCollapse,
   ToggleHidden,
   ToggleInterfaceDesignerAdditionalControls,
-  ToggleInterfaceDesignerCodeEditor,
   TogglePane,
   ToggleProperty,
   TransientActions,
   Undo,
   UnsetProperty,
-  UnwrapGroupOrView,
-  UpdateChildText,
+  UnwrapElements,
+  UpdateText,
   UpdateCodeResultCache,
   UpdateDuplicationState,
   UpdateEditorMode,
@@ -170,22 +143,13 @@ import type {
   UpdateKeysPressed,
   UpdateNodeModulesContents,
   UpdatePackageJson,
-  UpdatePreviewConnected,
   UpdatePropertyControlsInfo,
-  UpdateThumbnailGenerated,
-  WrapInView,
-  UpdateFromCodeEditor,
-  MarkVSCodeBridgeReady,
-  SelectFromFileAndPosition,
-  SendCodeEditorInitialisation,
   CloseDesignerFile,
   SetFocusedElement,
   AddImports,
   ScrollToElement,
-  WorkerCodeUpdate,
   WorkerParsedUpdate,
   SetScrollAnimation,
-  UpdateConfigFromVSCode,
   SetFollowSelectionEnabled,
   SetLoginState,
   ResetCanvas,
@@ -194,32 +158,126 @@ import type {
   SetCurrentTheme,
   FocusFormulaBar,
   UpdateFormulaBarMode,
-  OpenFloatingInsertMenu,
-  CloseFloatingInsertMenu,
-  InsertWithDefaults,
+  InsertInsertable,
   ToggleFocusedOmniboxTab,
   SetPropTransient,
   ClearTransientProps,
   AddTailwindConfig,
   FocusClassNameInput,
   WrapInElement,
-  SetInspectorLayoutSectionHovered,
   DecrementResizeOptionsSelectedIndex,
   IncrementResizeOptionsSelectedIndex,
   SetResizeOptionsTargetOptions,
-  HideVSCodeLoadingScreen,
+  ForceParseFile,
+  RemoveFromNodeModulesContents,
+  RunEscapeHatch,
+  UpdateMouseButtonsPressed,
+  ToggleSelectionLock,
+  ElementPaste,
+  SetGithubState,
+  UpdateProjectContents,
+  UpdateGithubSettings,
+  SetImageDragSessionState as SetDragSessionState,
+  UpdateGithubOperations,
+  UpdateBranchContents,
+  UpdateAgainstGithub,
+  UpdateGithubData,
+  RemoveFileConflict,
+  SetRefreshingDependencies,
+  SetUserConfiguration,
+  SetHoveredViews,
+  ClearHoveredViews,
+  ApplyCommandsAction,
+  WorkerCodeAndParsedUpdate,
+  UpdateColorSwatches,
+  PasteProperties,
+  CopyProperties,
+  MergeWithPrevUndo,
+  SetConditionalOverriddenCondition,
+  SwitchConditionalBranches,
+  UpdateConditionalExpression,
+  CutSelectionToClipboard,
+  ExecutePostActionMenuChoice,
+  StartPostActionSession,
+  ClearPostActionSession,
+  ScrollToElementBehaviour,
+  OpenCodeEditor,
+  SetMapCountOverride,
+  TruncateHistory,
+  RunDOMWalker,
+  WrapInElementWith,
+  ScrollToPosition,
+  UpdateProjectServerState,
+  UpdateTopLevelElementsFromCollaborationUpdate,
+  DeleteFileFromCollaboration,
+  UpdateExportsDetailFromCollaborationUpdate,
+  UpdateImportsFromCollaborationUpdate,
+  UpdateCodeFromCollaborationUpdate,
+  SetCommentFilterMode,
+  SetForking,
+  SetCollaborators,
+  ExtractPropertyControlsFromDescriptorFiles,
+  SetSharingDialogOpen,
+  SetCodeEditorComponentDescriptorErrors,
+  AddNewPage,
+  UpdateRemixRoute,
+  AddNewFeaturedRoute,
+  RemoveFeaturedRoute,
+  ResetOnlineState,
+  IncreaseOnlineStateFailureCount,
+  AddCollapsedViews,
+  ReplaceMappedElement,
+  ReplaceTarget,
+  InsertAsChildTarget,
+  ReplaceKeepChildrenAndStyleTarget,
+  WrapTarget,
+  ReplaceElementInScope,
+  ElementReplacementPath,
+  ReplaceJSXElement,
+  ToggleDataCanCondense,
+  UpdateMetadataInEditorState,
+  SetErrorBoundaryHandling,
+  SetImportWizardOpen,
+  UpdateImportOperations,
+  UpdateProjectRequirements,
+  UpdateImportStatus,
 } from '../action-types'
-import { EditorModes, elementInsertionSubject, Mode, SceneInsertionSubject } from '../editor-modes'
+import type { InsertionSubjectWrapper, Mode } from '../editor-modes'
+import { EditorModes, insertionSubject } from '../editor-modes'
 import type {
+  ImageDragSessionState,
   DuplicationState,
   ErrorMessages,
-  FloatingInsertMenuState,
+  GithubState,
   LeftMenuTab,
   ModalDialog,
   OriginalFrame,
+  ProjectGithubSettings,
   RightMenuTab,
-  Theme,
+  GithubOperation,
+  GithubData,
+  UserConfiguration,
+  ThemeSetting,
+  ColorSwatch,
+  PostActionMenuData,
+  ErrorBoundaryHandling,
 } from '../store/editor-state'
+import type { InsertionPath } from '../store/insertion-path'
+import type { TextProp } from '../../text-editor/text-editor'
+import type { PostActionChoice } from '../../canvas/canvas-strategies/post-action-options/post-action-options'
+import type { ProjectServerState } from '../store/project-server-state'
+import type { SetHuggingParentToFixed } from '../../canvas/canvas-strategies/strategies/convert-to-absolute-and-move-strategy'
+import type { CommentFilterMode } from '../../inspector/sections/comment-section'
+import type { Collaborator } from '../../../core/shared/multiplayer'
+import type { PageTemplate } from '../../canvas/remix/remix-utils'
+import type { Bounds } from 'utopia-vscode-common'
+import type { ElementPathTrees } from '../../../core/shared/element-path-tree'
+import type {
+  ImportOperation,
+  ImportOperationAction,
+  ImportStatus,
+} from '../../../core/shared/import/import-operation-types'
+import type { ProjectRequirements } from '../../../core/shared/import/project-health-check/utopia-requirements-types'
 
 export function clearSelection(): EditorAction {
   return {
@@ -227,23 +285,66 @@ export function clearSelection(): EditorAction {
   }
 }
 
-export function insertScene(frame: CanvasRectangle): InsertScene {
-  return {
-    action: 'INSERT_SCENE',
-    frame: frame,
-  }
+export const replaceTarget: ReplaceTarget = { type: 'replace-target' }
+export const wrapTarget: WrapTarget = { type: 'wrap-target' }
+export const replaceKeepChildrenAndStyleTarget: ReplaceKeepChildrenAndStyleTarget = {
+  type: 'replace-target-keep-children-and-style',
+}
+export function insertAsChildTarget(indexPosition?: IndexPosition): InsertAsChildTarget {
+  return { type: 'insert-as-child', indexPosition: indexPosition }
 }
 
 export function insertJSXElement(
   element: JSXElement,
-  parent: ElementPath | null,
+  target: ElementPath | null,
   importsToAdd: Imports,
+  indexPosition?: IndexPosition,
 ): InsertJSXElement {
   return {
     action: 'INSERT_JSX_ELEMENT',
     jsxElement: element,
-    parent: parent,
+    target: target,
     importsToAdd: importsToAdd,
+    indexPosition: indexPosition ?? null,
+  }
+}
+
+export function replaceJSXElement(
+  element: JSXElement,
+  target: ElementPath,
+  importsToAdd: Imports,
+  behaviour: ReplaceKeepChildrenAndStyleTarget | ReplaceTarget,
+): ReplaceJSXElement {
+  return {
+    action: 'REPLACE_JSX_ELEMENT',
+    jsxElement: element,
+    target: target,
+    importsToAdd: importsToAdd,
+    behaviour: behaviour,
+  }
+}
+
+export function replaceMappedElement(
+  element: JSXElement,
+  target: ElementPath,
+  importsToAdd: Imports,
+): ReplaceMappedElement {
+  return {
+    action: 'REPLACE_MAPPED_ELEMENT',
+    jsxElement: element,
+    target: target,
+    importsToAdd: importsToAdd,
+  }
+}
+
+export function replaceElementInScope(
+  target: ElementPath,
+  replacementPath: ElementReplacementPath,
+): ReplaceElementInScope {
+  return {
+    action: 'REPLACE_ELEMENT_IN_SCOPE',
+    target: target,
+    replacementPath: replacementPath,
   }
 }
 
@@ -275,10 +376,28 @@ export function toggleHidden(targets: Array<ElementPath> = []): ToggleHidden {
   }
 }
 
-export function transientActions(actions: Array<EditorAction>): TransientActions {
+export function toggleDataCanCondense(targets: Array<ElementPath>): ToggleDataCanCondense {
+  return {
+    action: 'TOGGLE_DATA_CAN_CONDENSE',
+    targets: targets,
+  }
+}
+
+export function transientActions(
+  actions: Array<EditorAction>,
+  elementsToRerender: Array<ElementPath>,
+): TransientActions {
   return {
     action: 'TRANSIENT_ACTIONS',
     transientActions: actions,
+    elementsToRerender: elementsToRerender,
+  }
+}
+
+export function mergeWithPrevUndo(actions: Array<EditorAction>): MergeWithPrevUndo {
+  return {
+    action: 'MERGE_WITH_PREV_UNDO',
+    actions: actions,
   }
 }
 
@@ -300,10 +419,14 @@ export function updateEditorMode(mode: Mode): UpdateEditorMode {
   }
 }
 
-export function switchEditorMode(mode: Mode): SwitchEditorMode {
+export function switchEditorMode(
+  mode: Mode,
+  unlessMode?: 'select' | 'live' | 'insert' | 'textEdit',
+): SwitchEditorMode {
   return {
     action: 'SWITCH_EDITOR_MODE',
     mode: mode,
+    unlessMode: unlessMode,
   }
 }
 
@@ -379,22 +502,42 @@ export function closePopup(): ClosePopup {
   }
 }
 
-export function pasteJSXElements(
-  elements: Array<JSXElement>,
-  originalElementPaths: Array<ElementPath>,
-  targetOriginalContextMetadata: ElementInstanceMetadataMap,
-): PasteJSXElements {
+export function elementPaste(
+  element: JSXElementChild,
+  importsToAdd: Imports,
+  originalElementPath: ElementPath,
+  duplicateNameMap?: Map<string, string>,
+): ElementPaste {
   return {
-    action: 'PASTE_JSX_ELEMENTS',
-    elements: elements,
-    originalElementPaths: originalElementPaths,
-    targetOriginalContextMetadata: targetOriginalContextMetadata,
+    element: element,
+    importsToAdd: importsToAdd,
+    originalElementPath: originalElementPath,
+    duplicateNameMap: duplicateNameMap,
   }
 }
 
 export function copySelectionToClipboard(): CopySelectionToClipboard {
   return {
     action: 'COPY_SELECTION_TO_CLIPBOARD',
+  }
+}
+
+export function cutSelectionToClipboard(): CutSelectionToClipboard {
+  return {
+    action: 'CUT_SELECTION_TO_CLIPBOARD',
+  }
+}
+
+export function copyProperties(): CopyProperties {
+  return {
+    action: 'COPY_PROPERTIES',
+  }
+}
+
+export function pasteProperties(type: 'style' | 'layout'): PasteProperties {
+  return {
+    action: 'PASTE_PROPERTIES',
+    type: type,
   }
 }
 
@@ -422,19 +565,36 @@ export function toggleCollapse(target: ElementPath): ToggleCollapse {
   }
 }
 
+export function addCollapsedViews(collapsedViews: ElementPath[]): AddCollapsedViews {
+  return {
+    action: 'ADD_COLLAPSED_VIEWS',
+    collapsedViews: collapsedViews,
+  }
+}
+
 export function enableInsertModeForJSXElement(
   element: JSXElement,
   uid: string,
   importsToAdd: Imports,
   size: Size | null,
+  options?: {
+    textEdit?: boolean
+    wrapInContainer?: InsertionSubjectWrapper
+  },
 ): SwitchEditorMode {
   return switchEditorMode(
-    EditorModes.insertMode(false, elementInsertionSubject(uid, element, size, importsToAdd, null)),
+    EditorModes.insertMode([
+      insertionSubject(
+        uid,
+        element,
+        size,
+        importsToAdd,
+        null,
+        options?.textEdit ?? false,
+        options?.wrapInContainer ?? null,
+      ),
+    ]),
   )
-}
-
-export function enableInsertModeForScene(name: JSXElementName | 'scene'): SwitchEditorMode {
-  return switchEditorMode(EditorModes.insertMode(false, SceneInsertionSubject()))
 }
 
 export function addToast(toastContent: Notice): AddToast {
@@ -453,6 +613,13 @@ export function removeToast(id: string): RemoveToast {
 
 export function showToast(toastContent: Notice): AddToast {
   return addToast(toastContent)
+}
+
+export function setForking(forking: boolean): SetForking {
+  return {
+    action: 'SET_FORKING',
+    forking: forking,
+  }
 }
 
 let selectionControlTimer: any // TODO maybe this should live inside the editormodel
@@ -495,10 +662,31 @@ export function setRightMenuExpanded(expanded: boolean): SetRightMenuExpanded {
   }
 }
 
-export function setHighlightedView(target: ElementPath): SetHighlightedView {
+export function setHighlightedView(target: ElementPath): SetHighlightedViews {
   return {
-    action: 'SET_HIGHLIGHTED_VIEW',
-    target: target,
+    action: 'SET_HIGHLIGHTED_VIEWS',
+    targets: [target],
+  }
+}
+
+export function setHighlightedViews(targets: ElementPath[]): SetHighlightedViews {
+  return {
+    action: 'SET_HIGHLIGHTED_VIEWS',
+    targets: targets,
+  }
+}
+
+export function setHoveredView(target: ElementPath): SetHoveredViews {
+  return {
+    action: 'SET_HOVERED_VIEWS',
+    targets: [target],
+  }
+}
+
+export function setHoveredViews(targets: ElementPath[]): SetHoveredViews {
+  return {
+    action: 'SET_HOVERED_VIEWS',
+    targets: targets,
   }
 }
 
@@ -508,10 +696,27 @@ export function clearHighlightedViews(): ClearHighlightedViews {
   }
 }
 
+export function clearHoveredViews(): ClearHoveredViews {
+  return {
+    action: 'CLEAR_HOVERED_VIEWS',
+  }
+}
+
 export function updateKeys(keys: KeysPressed): UpdateKeysPressed {
   return {
     action: 'UPDATE_KEYS_PRESSED',
     keys: keys,
+  }
+}
+
+export function updateMouseButtonsPressed(
+  added: number | null,
+  removed: number | null,
+): UpdateMouseButtonsPressed {
+  return {
+    action: 'UPDATE_MOUSE_BUTTONS_PRESSED',
+    added: added,
+    removed: removed,
   }
 }
 
@@ -525,21 +730,6 @@ export function showModal(modal: ModalDialog): ShowModal {
   return {
     action: 'SHOW_MODAL',
     modal: modal,
-  }
-}
-
-export function resizeInterfaceDesignerCodePane(
-  deltaCodePaneWidth: number,
-): ResizeInterfaceDesignerCodePane {
-  return {
-    action: 'RESIZE_INTERFACEDESIGNER_CODEPANE',
-    deltaCodePaneWidth: deltaCodePaneWidth,
-  }
-}
-
-export function toggleInterfaceDesignerCodeEditor(): ToggleInterfaceDesignerCodeEditor {
-  return {
-    action: 'TOGGLE_INTERFACEDESIGNER_CODEEDITOR',
   }
 }
 
@@ -568,7 +758,7 @@ export function saveImageReplace(): SaveImageReplace {
 }
 
 export function saveImageInsertWith(
-  parentPath: ElementPath | null,
+  parentPath: InsertionPath | null,
   frame: CanvasRectangle,
   multiplier: number,
 ): SaveImageInsertWith {
@@ -602,6 +792,7 @@ export function saveAsset(
   base64: string,
   hash: number,
   imageDetails: SaveImageDetails | null,
+  gitBlobSha: string,
 ): SaveAsset {
   return {
     action: 'SAVE_ASSET',
@@ -610,6 +801,7 @@ export function saveAsset(
     base64: base64,
     hash: hash,
     imageDetails: imageDetails,
+    gitBlobSha: gitBlobSha,
   }
 }
 
@@ -620,50 +812,16 @@ export function resetPins(target: ElementPath): ResetPins {
   }
 }
 
-export function wrapInGroup(targets: Array<ElementPath>): WrapInView {
-  return wrapInView(targets, 'default-empty-div')
-  // FIXME: Make Groups Great Again.
-  //return {
-  //  action: 'WRAP_IN_VIEW',
-  //  targets: targets,
-  //  layoutSystem: LayoutSystem.Group,
-  //}
-}
-
-export function unwrapGroupOrView(target: ElementPath): UnwrapGroupOrView {
+export function unwrapElements(targets: ElementPath[]): UnwrapElements {
   return {
-    // TODO make it only run when the target is a group
-    action: 'UNWRAP_GROUP_OR_VIEW',
-    target: target,
-    onlyForGroups: false,
-  }
-}
-
-export function openFloatingInsertMenu(mode: FloatingInsertMenuState): OpenFloatingInsertMenu {
-  return {
-    action: 'OPEN_FLOATING_INSERT_MENU',
-    mode: mode,
-  }
-}
-
-export function wrapInView(
-  targets: Array<ElementPath>,
-  whatToWrapWith: { element: JSXElement; importsToAdd: Imports } | 'default-empty-div',
-  layoutSystem: SettableLayoutSystem = LayoutSystem.PinSystem,
-  newParentMainAxis: 'horizontal' | 'vertical' | null = null,
-): WrapInView {
-  return {
-    action: 'WRAP_IN_VIEW',
+    action: 'UNWRAP_ELEMENTS',
     targets: targets,
-    layoutSystem: layoutSystem,
-    newParentMainAxis: newParentMainAxis,
-    whatToWrapWith: whatToWrapWith,
   }
 }
 
 export function wrapInElement(
   targets: Array<ElementPath>,
-  whatToWrapWith: { element: JSXElement; importsToAdd: Imports },
+  whatToWrapWith: WrapInElementWith,
 ): WrapInElement {
   return {
     action: 'WRAP_IN_ELEMENT',
@@ -672,23 +830,10 @@ export function wrapInElement(
   }
 }
 
-export function closeFloatingInsertMenu(): CloseFloatingInsertMenu {
-  return {
-    action: 'CLOSE_FLOATING_INSERT_MENU',
-  }
-}
-
 export function setCursorOverlay(cursor: CSSCursor | null): SetCursorOverlay {
   return {
     action: 'SET_CURSOR_OVERLAY',
     cursor: cursor,
-  }
-}
-
-export function setCanvasAnimationsEnabled(value: boolean): SetCanvasAnimationsEnabled {
-  return {
-    action: 'SET_CANVAS_ANIMATIONS_ENABLED',
-    value: value,
   }
 }
 
@@ -817,6 +962,12 @@ export function setCodeEditorVisibility(value: boolean): SetCodeEditorVisibility
   }
 }
 
+export function openCodeEditor(): OpenCodeEditor {
+  return {
+    action: 'OPEN_CODE_EDITOR',
+  }
+}
+
 export function setProjectName(projectName: string): SetProjectName {
   return {
     action: 'SET_PROJECT_NAME',
@@ -828,33 +979,6 @@ export function setProjectDescription(projectDescription: string): SetProjectDes
   return {
     action: 'SET_PROJECT_DESCRIPTION',
     description: projectDescription,
-  }
-}
-
-export function regenerateThumbnail(): RegenerateThumbnail {
-  return {
-    action: 'REGENERATE_THUMBNAIL',
-  }
-}
-
-export function updateThumbnailGenerated(timestamp: number): UpdateThumbnailGenerated {
-  return {
-    action: 'UPDATE_THUMBNAIL_GENERATED',
-    timestamp: timestamp,
-  }
-}
-
-export function updatePreviewConnected(connected: boolean): UpdatePreviewConnected {
-  return {
-    action: 'UPDATE_PREVIEW_CONNECTED',
-    connected: connected,
-  }
-}
-
-export function setHighlightsEnabled(value: boolean): SetHighlightsEnabled {
-  return {
-    action: 'SET_HIGHLIGHTS_ENABLED',
-    value: value,
   }
 }
 
@@ -883,12 +1007,6 @@ export function showContextMenu(
   }
 }
 
-export function sendPreviewModel(): SendPreviewModel {
-  return {
-    action: 'SEND_PREVIEW_MODEL',
-  }
-}
-
 export function updateFilePath(oldPath: string, newPath: string): UpdateFilePath {
   return {
     action: 'UPDATE_FILE_PATH',
@@ -897,9 +1015,31 @@ export function updateFilePath(oldPath: string, newPath: string): UpdateFilePath
   }
 }
 
+export function updateRemixRoute(
+  oldPath: string,
+  newPath: string,
+  oldRoute: string,
+  newRoute: string,
+): UpdateRemixRoute {
+  return {
+    action: 'UPDATE_REMIX_ROUTE',
+    oldPath: oldPath,
+    newPath: newPath,
+    oldRoute: oldRoute,
+    newRoute: newRoute,
+  }
+}
+
 export function deleteFile(filename: string): DeleteFile {
   return {
     action: 'DELETE_FILE',
+    filename: filename,
+  }
+}
+
+export function deleteFileFromCollaboration(filename: string): DeleteFileFromCollaboration {
+  return {
+    action: 'DELETE_FILE_FROM_COLLABORATION',
     filename: filename,
   }
 }
@@ -915,11 +1055,13 @@ export function addFolder(parentPath: string, fileName: string): AddFolder {
 export function openCodeEditorFile(
   filename: string,
   forceShowCodeEditor: boolean,
+  bounds: Bounds | null = null,
 ): OpenCodeEditorFile {
   return {
     action: 'OPEN_CODE_EDITOR_FILE',
     filename: filename,
     forceShowCodeEditor: forceShowCodeEditor,
+    bounds: bounds,
   }
 }
 
@@ -940,56 +1082,97 @@ export function updateFile(
     filePath: filePath,
     file: file,
     addIfNotInFiles: addIfNotInFiles,
+    fromCollaboration: false,
   }
 }
 
-export function workerCodeUpdate(
+export function updateFileFromCollaboration(
+  filePath: string,
+  file: ProjectFile,
+  addIfNotInFiles: boolean,
+): UpdateFile {
+  return {
+    action: 'UPDATE_FILE',
+    filePath: filePath,
+    file: file,
+    addIfNotInFiles: addIfNotInFiles,
+    fromCollaboration: true,
+  }
+}
+
+export function updateProjectContents(contents: ProjectContentTreeRoot): UpdateProjectContents {
+  return {
+    action: 'UPDATE_PROJECT_CONTENTS',
+    contents: contents,
+  }
+}
+
+export function updateBranchContents(
+  contents: ProjectContentTreeRoot | null,
+): UpdateBranchContents {
+  return {
+    action: 'UPDATE_BRANCH_CONTENTS',
+    contents: contents,
+  }
+}
+
+export function updateGithubSettings(
+  settings: Partial<ProjectGithubSettings>,
+): UpdateGithubSettings {
+  return {
+    action: 'UPDATE_GITHUB_SETTINGS',
+    settings: settings,
+  }
+}
+
+export function updateGithubData(data: Partial<GithubData>): UpdateGithubData {
+  return {
+    action: 'UPDATE_GITHUB_DATA',
+    data: data,
+  }
+}
+
+export function removeFileConflict(path: string): RemoveFileConflict {
+  return {
+    action: 'REMOVE_FILE_CONFLICT',
+    path: path,
+  }
+}
+
+export function workerCodeAndParsedUpdate(
   filePath: string,
   code: string,
-  highlightBounds: HighlightBoundsForUids,
-  lastRevisedTime: number,
-): WorkerCodeUpdate {
+  parsed: ParsedTextFile,
+  versionNumber: number,
+): WorkerCodeAndParsedUpdate {
   return {
-    type: 'WORKER_CODE_UPDATE',
+    type: 'WORKER_CODE_AND_PARSED_UPDATE',
     filePath: filePath,
     code: code,
-    highlightBounds: highlightBounds,
-    lastRevisedTime: lastRevisedTime,
+    parsed: parsed,
+    versionNumber: versionNumber,
   }
 }
 
 export function workerParsedUpdate(
   filePath: string,
   parsed: ParsedTextFile,
-  lastRevisedTime: number,
+  versionNumber: number,
 ): WorkerParsedUpdate {
   return {
     type: 'WORKER_PARSED_UPDATE',
     filePath: filePath,
     parsed: parsed,
-    lastRevisedTime: lastRevisedTime,
+    versionNumber: versionNumber,
   }
 }
 
 export function updateFromWorker(
-  updates: Array<WorkerCodeUpdate | WorkerParsedUpdate>,
+  updates: Array<WorkerParsedUpdate | WorkerCodeAndParsedUpdate>,
 ): UpdateFromWorker {
   return {
     action: 'UPDATE_FROM_WORKER',
     updates: updates,
-  }
-}
-
-export function updateFromCodeEditor(
-  filePath: string,
-  savedContent: string,
-  unsavedContent: string | null,
-): UpdateFromCodeEditor {
-  return {
-    action: 'UPDATE_FROM_CODE_EDITOR',
-    filePath: filePath,
-    savedContent: savedContent,
-    unsavedContent: unsavedContent,
   }
 }
 
@@ -1015,6 +1198,33 @@ export function addTextFile(parentPath: string, fileName: string): AddTextFile {
   }
 }
 
+export function addNewPage(
+  parentPath: string,
+  template: PageTemplate,
+  newPageName: string,
+): AddNewPage {
+  return {
+    action: 'ADD_NEW_PAGE',
+    template: template,
+    parentPath: parentPath,
+    newPageName: newPageName,
+  }
+}
+
+export function addNewFeaturedRoute(featuredRoute: string): AddNewFeaturedRoute {
+  return {
+    action: 'ADD_NEW_FEATURED_ROUTE',
+    featuredRoute: featuredRoute,
+  }
+}
+
+export function removeFeaturedRoute(routeToRemove: string): RemoveFeaturedRoute {
+  return {
+    action: 'REMOVE_FEATURED_ROUTE',
+    routeToRemove: routeToRemove,
+  }
+}
+
 export function setMainUIFile(uiFile: string): SetMainUIFile {
   return {
     action: 'SET_MAIN_UI_FILE',
@@ -1023,13 +1233,33 @@ export function setMainUIFile(uiFile: string): SetMainUIFile {
 }
 
 export function saveDOMReport(
-  elementMetadata: ReadonlyArray<ElementInstanceMetadata>,
+  elementMetadata: ElementInstanceMetadataMap,
   cachedPaths: Array<ElementPath>,
+  invalidatedPaths: Array<string>,
 ): SaveDOMReport {
   return {
     action: 'SAVE_DOM_REPORT',
     elementMetadata: elementMetadata,
     cachedPaths: cachedPaths,
+    invalidatedPaths: invalidatedPaths,
+  }
+}
+
+export function updateMetadataInEditorState(
+  newFinalMetadata: ElementInstanceMetadataMap,
+  tree: ElementPathTrees,
+): UpdateMetadataInEditorState {
+  return {
+    action: 'UPDATE_METADATA_IN_EDITOR_STATE',
+    newFinalMetadata: newFinalMetadata,
+    tree: tree,
+  }
+}
+
+export function runDOMWalker(restrictToElements: Array<ElementPath> | null): RunDOMWalker {
+  return {
+    action: 'RUN_DOM_WALKER',
+    restrictToElements: restrictToElements,
   }
 }
 
@@ -1037,34 +1267,22 @@ export function saveDOMReport(
 export function setProp_UNSAFE(
   target: ElementPath,
   propertyPath: PropertyPath,
-  value: JSXAttribute,
+  value: JSExpression,
+  importsToAdd: Imports = {},
 ): SetProp {
   return {
     action: 'SET_PROP',
     target: target,
     propertyPath: propertyPath,
     value: value,
-  }
-}
-
-/** WARNING: you probably don't want to use setProp, instead you should use a domain-specific action! */
-export function setPropWithElementPath_UNSAFE(
-  target: StaticElementPathPart,
-  propertyPath: PropertyPath,
-  value: JSXAttribute,
-): SetPropWithElementPath {
-  return {
-    action: 'SET_PROP_WITH_ELEMENT_PATH',
-    target: target,
-    propertyPath: propertyPath,
-    value: value,
+    importsToAdd: importsToAdd,
   }
 }
 
 export function setPropTransient(
   target: ElementPath,
   propertyPath: PropertyPath,
-  value: JSXAttribute,
+  value: JSExpression,
 ): SetPropTransient {
   return {
     action: 'SET_PROP_TRANSIENT',
@@ -1107,6 +1325,15 @@ export function setCodeEditorLintErrors(lintErrors: ErrorMessages): SetCodeEdito
   }
 }
 
+export function setCodeEditorComponentDescriptorErrors(
+  componentDescriptorErrors: ErrorMessages,
+): SetCodeEditorComponentDescriptorErrors {
+  return {
+    action: 'SET_CODE_EDITOR_COMPONENT_DESCRIPTOR_ERRORS',
+    componentDescriptorErrors: componentDescriptorErrors,
+  }
+}
+
 export function setFilebrowserRenamingTarget(
   filename: string | null,
 ): SetFilebrowserRenamingTarget {
@@ -1127,13 +1354,6 @@ export function toggleProperty(
   }
 }
 
-export function switchLayoutSystem(layoutSystem: SettableLayoutSystem): SwitchLayoutSystem {
-  return {
-    action: 'SWITCH_LAYOUT_SYSTEM',
-    layoutSystem: layoutSystem,
-  }
-}
-
 export function insertImageIntoUI(imagePath: string): InsertImageIntoUI {
   return {
     action: 'INSERT_IMAGE_INTO_UI',
@@ -1143,7 +1363,7 @@ export function insertImageIntoUI(imagePath: string): InsertImageIntoUI {
 
 export function updateJSXElementName(
   target: ElementPath,
-  elementName: JSXElementName,
+  elementName: { type: 'JSX_ELEMENT'; name: JSXElementName } | { type: 'JSX_FRAGMENT' },
   importsToAdd: Imports,
 ): UpdateJSXElementName {
   return {
@@ -1190,33 +1410,32 @@ export function setSaveError(value: boolean): SetSaveError {
   }
 }
 
-export function insertDroppedImage(imagePath: string, position: CanvasPoint): InsertDroppedImage {
+export function insertDroppedImage(
+  image: ImageFile,
+  path: string,
+  position: CanvasPoint,
+): InsertDroppedImage {
   return {
     action: 'INSERT_DROPPED_IMAGE',
-    imagePath: imagePath,
+    image: image,
+    path: path,
     position: position,
   }
 }
 
-export function resetPropToDefault(
-  target: ElementPath,
-  path: PropertyPath | null,
-): ResetPropToDefault {
+export function removeFromNodeModulesContents(
+  modulesToRemove: Array<string>,
+): RemoveFromNodeModulesContents {
   return {
-    action: 'RESET_PROP_TO_DEFAULT',
-    target: target,
-    path: path,
+    action: 'REMOVE_FROM_NODE_MODULES_CONTENTS',
+    modulesToRemove: modulesToRemove,
   }
 }
 
-export function updateNodeModulesContents(
-  contentsToAdd: NodeModules,
-  buildType: BuildType,
-): UpdateNodeModulesContents {
+export function updateNodeModulesContents(contentsToAdd: NodeModules): UpdateNodeModulesContents {
   return {
     action: 'UPDATE_NODE_MODULES_CONTENTS',
     contentsToAdd: contentsToAdd,
-    buildType: buildType,
   }
 }
 
@@ -1275,60 +1494,18 @@ export function updatePropertyControlsInfo(
   }
 }
 
-export function propertyControlsIFrameReady(): PropertyControlsIFrameReady {
+export function updateText(target: ElementPath, text: string, textProp: TextProp): UpdateText {
   return {
-    action: 'PROPERTY_CONTROLS_IFRAME_READY',
-  }
-}
-
-export function addStoryboardFile(): AddStoryboardFile {
-  return {
-    action: 'ADD_STORYBOARD_FILE',
-  }
-}
-
-export function sendLinterRequestMessage(
-  filePath: string,
-  content: string,
-): SendLinterRequestMessage {
-  return {
-    action: 'SEND_LINTER_REQUEST_MESSAGE',
-    filePath: filePath,
-    content: content,
-  }
-}
-
-export function updateChildText(target: ElementPath, text: string): UpdateChildText {
-  return {
-    action: 'UPDATE_CHILD_TEXT',
+    action: 'UPDATE_TEXT',
     target: target,
     text: text,
+    textProp: textProp,
   }
 }
 
-export function markVSCodeBridgeReady(ready: boolean): MarkVSCodeBridgeReady {
+export function truncateHistory(): TruncateHistory {
   return {
-    action: 'MARK_VSCODE_BRIDGE_READY',
-    ready: ready,
-  }
-}
-
-export function selectFromFileAndPosition(
-  filePath: string,
-  line: number,
-  column: number,
-): SelectFromFileAndPosition {
-  return {
-    action: 'SELECT_FROM_FILE_AND_POSITION',
-    filePath: filePath,
-    line: line,
-    column: column,
-  }
-}
-
-export function sendCodeEditorInitialisation(): SendCodeEditorInitialisation {
-  return {
-    action: 'SEND_CODE_EDITOR_INITIALISATION',
+    action: 'TRUNCATE_HISTORY',
   }
 }
 
@@ -1343,12 +1520,23 @@ export function setFocusedElement(
 
 export function scrollToElement(
   focusedElementElementPath: ElementPath,
-  keepScrollPositionIfVisible: boolean,
+  behaviour: ScrollToElementBehaviour,
 ): ScrollToElement {
   return {
     action: 'SCROLL_TO_ELEMENT',
     target: focusedElementElementPath,
-    keepScrollPositionIfVisible: keepScrollPositionIfVisible,
+    behaviour: behaviour,
+  }
+}
+
+export function scrollToPosition(
+  target: CanvasRectangle,
+  behaviour: ScrollToElementBehaviour,
+): ScrollToPosition {
+  return {
+    action: 'SCROLL_TO_POSITION',
+    target: target,
+    behaviour: behaviour,
   }
 }
 
@@ -1366,13 +1554,6 @@ export function setFollowSelectionEnabled(value: boolean): SetFollowSelectionEna
   }
 }
 
-export function updateConfigFromVSCode(config: UtopiaVSCodeConfig): UpdateConfigFromVSCode {
-  return {
-    action: 'UPDATE_CONFIG_FROM_VSCODE',
-    config: config,
-  }
-}
-
 export function setLoginState(loginState: LoginState): SetLoginState {
   return {
     action: 'SET_LOGIN_STATE',
@@ -1380,9 +1561,77 @@ export function setLoginState(loginState: LoginState): SetLoginState {
   }
 }
 
+export function setGithubState(githubState: Partial<GithubState>): SetGithubState {
+  return {
+    action: 'SET_GITHUB_STATE',
+    githubState: githubState,
+  }
+}
+
+export function setUserConfiguration(userConfiguration: UserConfiguration): SetUserConfiguration {
+  return {
+    action: 'SET_USER_CONFIGURATION',
+    userConfiguration: userConfiguration,
+  }
+}
+
+export type GithubOperationType = 'add' | 'remove'
+
+export function updateGithubOperations(
+  operation: GithubOperation,
+  type: GithubOperationType,
+): UpdateGithubOperations {
+  return {
+    action: 'UPDATE_GITHUB_OPERATIONS',
+    operation: operation,
+    type: type,
+  }
+}
+
+export function setRefreshingDependencies(value: boolean): SetRefreshingDependencies {
+  return {
+    action: 'SET_REFRESHING_DEPENDENCIES',
+    value: value,
+  }
+}
+
 export function resetCanvas(): ResetCanvas {
   return {
     action: 'RESET_CANVAS',
+  }
+}
+
+export function updateImportOperations(
+  operations: ImportOperation[],
+  type: ImportOperationAction,
+): UpdateImportOperations {
+  return {
+    action: 'UPDATE_IMPORT_OPERATIONS',
+    operations: operations,
+    type: type,
+  }
+}
+
+export function updateImportStatus(importStatus: ImportStatus): UpdateImportStatus {
+  return {
+    action: 'UPDATE_IMPORT_STATUS',
+    importStatus: importStatus,
+  }
+}
+
+export function updateProjectRequirements(
+  requirements: Partial<ProjectRequirements>,
+): UpdateProjectRequirements {
+  return {
+    action: 'UPDATE_PROJECT_REQUIREMENTS',
+    requirements: requirements,
+  }
+}
+
+export function setImportWizardOpen(open: boolean): SetImportWizardOpen {
+  return {
+    action: 'SET_IMPORT_WIZARD_OPEN',
+    open: open,
   }
 }
 
@@ -1393,7 +1642,7 @@ export function setFilebrowserDropTarget(target: string | null): SetFilebrowserD
   }
 }
 
-export function setCurrentTheme(theme: Theme): SetCurrentTheme {
+export function setCurrentTheme(theme: ThemeSetting): SetCurrentTheme {
   return {
     action: 'SET_CURRENT_THEME',
     theme: theme,
@@ -1419,19 +1668,17 @@ export function updateFormulaBarMode(value: 'css' | 'content'): UpdateFormulaBar
   }
 }
 
-export function insertWithDefaults(
-  targetParent: ElementPath,
+export function insertInsertable(
+  insertionPath: InsertionPath | null,
   toInsert: InsertableComponent,
   styleProps: StylePropOption,
-  wrapContent: WrapContentOption,
   indexPosition: IndexPosition | null,
-): InsertWithDefaults {
+): InsertInsertable {
   return {
-    action: 'INSERT_WITH_DEFAULTS',
-    targetParent: targetParent,
+    action: 'INSERT_INSERTABLE',
+    insertionPath: insertionPath,
     toInsert: toInsert,
     styleProps: styleProps,
-    wrapContent: wrapContent,
     indexPosition: indexPosition,
   }
 }
@@ -1439,15 +1686,6 @@ export function insertWithDefaults(
 export function addTailwindConfig(): AddTailwindConfig {
   return {
     action: 'ADD_TAILWIND_CONFIG',
-  }
-}
-
-export function setInspectorLayoutSectionHovered(
-  hovered: boolean,
-): SetInspectorLayoutSectionHovered {
-  return {
-    action: 'SET_INSPECTOR_LAYOUT_SECTION_HOVERED',
-    hovered: hovered,
   }
 }
 
@@ -1473,8 +1711,232 @@ export function setResizeOptionsTargetOptions(
     index: index,
   }
 }
-export function hideVSCodeLoadingScreen(): HideVSCodeLoadingScreen {
+
+export function forceParseFile(filePath: string): ForceParseFile {
   return {
-    action: 'HIDE_VSCODE_LOADING_SCREEN',
+    action: 'FORCE_PARSE_FILE',
+    filePath: filePath,
+  }
+}
+
+export function runEscapeHatch(
+  targets: Array<ElementPath>,
+  setHuggingParentToFixed: SetHuggingParentToFixed,
+): RunEscapeHatch {
+  return {
+    action: 'RUN_ESCAPE_HATCH',
+    targets: targets,
+    setHuggingParentToFixed: setHuggingParentToFixed,
+  }
+}
+
+export function toggleSelectionLock(
+  targets: Array<ElementPath>,
+  newValue: SelectionLocked,
+): ToggleSelectionLock {
+  return {
+    action: 'TOGGLE_SELECTION_LOCK',
+    targets: targets,
+    newValue: newValue,
+  }
+}
+
+export function updateAgainstGithub(
+  branchLatestContent: ProjectContentTreeRoot,
+  specificCommitContent: ProjectContentTreeRoot,
+  latestCommit: string,
+): UpdateAgainstGithub {
+  return {
+    action: 'UPDATE_AGAINST_GITHUB',
+    branchLatestContent: branchLatestContent,
+    specificCommitContent: specificCommitContent,
+    latestCommit: latestCommit,
+  }
+}
+
+export function setImageDragSessionState(
+  imageDragSessionState: ImageDragSessionState,
+): SetDragSessionState {
+  return {
+    action: 'SET_IMAGE_DRAG_SESSION_STATE',
+    imageDragSessionState: imageDragSessionState,
+  }
+}
+
+export function applyCommandsAction(commands: CanvasCommand[]): ApplyCommandsAction {
+  return {
+    action: 'APPLY_COMMANDS',
+    commands: commands,
+  }
+}
+
+export function updateColorSwatches(colorSwatches: Array<ColorSwatch>): UpdateColorSwatches {
+  return {
+    action: 'UPDATE_COLOR_SWATCHES',
+    colorSwatches: colorSwatches,
+  }
+}
+
+export function setConditionalOverriddenCondition(
+  target: ElementPath,
+  condition: boolean | null,
+): SetConditionalOverriddenCondition {
+  return {
+    action: 'SET_CONDITIONAL_OVERRIDDEN_CONDITION',
+    target: target,
+    condition: condition,
+  }
+}
+
+export function setMapCountOverride(
+  target: ElementPath,
+  value: number | null,
+): SetMapCountOverride {
+  return {
+    action: 'SET_MAP_COUNT_OVERRIDE',
+    target: target,
+    value: value,
+  }
+}
+
+export function updateConditionalExpression(
+  target: ElementPath,
+  expression: string,
+): UpdateConditionalExpression {
+  return {
+    action: 'UPDATE_CONIDTIONAL_EXPRESSION',
+    target: target,
+    expression: expression,
+  }
+}
+
+export function switchConditionalBranches(target: ElementPath): SwitchConditionalBranches {
+  return {
+    action: 'SWITCH_CONDITIONAL_BRANCHES',
+    target: target,
+  }
+}
+
+export function executePostActionMenuChoice(choice: PostActionChoice): ExecutePostActionMenuChoice {
+  return {
+    action: 'EXECUTE_POST_ACTION_MENU_CHOICE',
+    choice: choice,
+  }
+}
+
+export function startPostActionSession(data: PostActionMenuData): StartPostActionSession {
+  return {
+    action: 'START_POST_ACTION_SESSION',
+    data: data,
+  }
+}
+
+export function clearPostActionData(): ClearPostActionSession {
+  return {
+    action: 'CLEAR_POST_ACTION_SESSION',
+  }
+}
+
+export function updateProjectServerState(
+  projectServerState: Partial<ProjectServerState>,
+): UpdateProjectServerState {
+  return {
+    action: 'UPDATE_PROJECT_SERVER_STATE',
+    serverState: projectServerState,
+  }
+}
+
+export function updateTopLevelElementsFromCollaborationUpdate(
+  fullPath: string,
+  topLevelElements: Array<TopLevelElement>,
+): UpdateTopLevelElementsFromCollaborationUpdate {
+  return {
+    action: 'UPDATE_TOP_LEVEL_ELEMENTS_FROM_COLLABORATION_UPDATE',
+    fullPath: fullPath,
+    topLevelElements: topLevelElements,
+  }
+}
+
+export function updateExportsDetailFromCollaborationUpdate(
+  fullPath: string,
+  exportsDetail: Array<ExportDetail>,
+): UpdateExportsDetailFromCollaborationUpdate {
+  return {
+    action: 'UPDATE_EXPORTS_DETAIL_FROM_COLLABORATION_UPDATE',
+    fullPath: fullPath,
+    exportsDetail: exportsDetail,
+  }
+}
+
+export function updateImportsFromCollaborationUpdate(
+  fullPath: string,
+  imports: Imports,
+): UpdateImportsFromCollaborationUpdate {
+  return {
+    action: 'UPDATE_IMPORTS_FROM_COLLABORATION_UPDATE',
+    fullPath: fullPath,
+    imports: imports,
+  }
+}
+
+export function updateCodeFromCollaborationUpdate(
+  fullPath: string,
+  code: string,
+): UpdateCodeFromCollaborationUpdate {
+  return {
+    action: 'UPDATE_CODE_FROM_COLLABORATION_UPDATE',
+    fullPath: fullPath,
+    code: code,
+  }
+}
+
+export function setCommentFilterMode(commentFilterMode: CommentFilterMode): SetCommentFilterMode {
+  return {
+    action: 'SET_COMMENT_FILTER_MODE',
+    commentFilterMode: commentFilterMode,
+  }
+}
+
+export function setCollaborators(collaborators: Collaborator[]): SetCollaborators {
+  return {
+    action: 'SET_COLLABORATORS',
+    collaborators: collaborators,
+  }
+}
+
+export function extractPropertyControlsFromDescriptorFiles(
+  paths: string[],
+): ExtractPropertyControlsFromDescriptorFiles {
+  return {
+    action: 'EXTRACT_PROPERTY_CONTROLS_FROM_DESCRIPTOR_FILES',
+    paths: paths,
+  }
+}
+
+export function setSharingDialogOpen(open: boolean): SetSharingDialogOpen {
+  return {
+    action: 'SET_SHARING_DIALOG_OPEN',
+    open: open,
+  }
+}
+
+export function resetOnlineState(): ResetOnlineState {
+  return {
+    action: 'RESET_ONLINE_STATE',
+  }
+}
+
+export function increaseOnlineStateFailureCount(): IncreaseOnlineStateFailureCount {
+  return {
+    action: 'INCREASE_ONLINE_STATE_FAILURE_COUNT',
+  }
+}
+
+export function setErrorBoundaryHandling(
+  errorBoundaryHandling: ErrorBoundaryHandling,
+): SetErrorBoundaryHandling {
+  return {
+    action: 'SET_ERROR_BOUNDARY_HANDLING',
+    errorBoundaryHandling: errorBoundaryHandling,
   }
 }

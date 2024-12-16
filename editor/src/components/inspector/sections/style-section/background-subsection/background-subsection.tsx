@@ -1,20 +1,22 @@
 import React from 'react'
 import { animated } from 'react-spring'
-import utils from '../../../../../utils/utils'
 import { InspectorContextMenuWrapper } from '../../../../context-menu-wrapper'
 import { useArraySuperControl } from '../../../controls/array-supercontrol'
 import { FakeUnknownArrayItem, UnknownArrayItem } from '../../../controls/unknown-array-item'
 import { addOnUnsetValues } from '../../../common/context-menu-items'
-import {
+import type {
   CSSBackgroundLayer,
   CSSBackgroundLayers,
-  cssBackgroundLayerToCSSBackground,
   CSSBackgrounds,
   CSSBackgroundSize,
-  cssBackgroundToCSSBackgroundLayer,
   CSSBGSize,
-  cssSolidBackgroundLayer,
   CSSSolidColor,
+  CSSDefault,
+} from '../../../common/css-utils'
+import {
+  cssBackgroundLayerToCSSBackground,
+  cssBackgroundToCSSBackgroundLayer,
+  cssSolidBackgroundLayer,
   cssSolidColor,
   defaultBGSize,
   defaultLinearGradientBackgroundLayer,
@@ -22,11 +24,12 @@ import {
   isCSSBackgroundLayerWithBGSize,
   isCSSSolidBackgroundLayer,
   cssDefault,
-  CSSDefault,
 } from '../../../common/css-utils'
-import { useGetSubsectionHeaderStyle } from '../../../common/inspector-utils'
+import { RemovePropertyButton, useGetSubsectionHeaderStyle } from '../../../common/inspector-utils'
 import {
+  InspectorPropsContext,
   stylePropPathMappingFn,
+  useInspectorContext,
   useInspectorInfo,
   useIsSubSectionVisible,
 } from '../../../common/property-path-hooks'
@@ -36,17 +39,16 @@ import { RadialGradientBackgroundLayer } from './radial-gradient-layer'
 import { SolidBackgroundLayer } from './solid-background-layer'
 import { URLBackgroundLayer } from './url-background-layer'
 import {
-  betterReactMemo,
-  useKeepReferenceEqualityIfPossible,
-} from '../../../../../utils/react-performance'
-import {
   UtopiaTheme,
   InspectorSubsectionHeader,
   FlexRow,
   SquareButton,
   Icn,
-  InspectorSectionIcons,
+  Icons,
 } from '../../../../../uuiui'
+import { useContextSelector } from 'use-context-selector'
+import { BackgroundPrefixedProperties } from '../../../../../core/properties/css-properties'
+import * as PP from '../../../../../core/shared/property-path'
 
 function insertBackgroundLayer(
   cssBackgroundLayers: CSSBackgroundLayers,
@@ -162,14 +164,13 @@ export const backgroundLonghandPaths: Array<
 
 const rowHeight = UtopiaTheme.layout.rowHeight.max
 
-export const BackgroundSubsection = betterReactMemo('BackgroundSubsection', () => {
+export const BackgroundSubsection = React.memo(() => {
   const [openPopup, setOpenPopup] = React.useState<number | undefined>(undefined)
   const {
     controlStatus,
     controlStyles,
     propertyStatus,
     value,
-    onUnsetValues,
     onSubmitValue,
     useSubmitValueFactory,
   } = useInspectorInfo(
@@ -185,30 +186,22 @@ export const BackgroundSubsection = betterReactMemo('BackgroundSubsection', () =
 
   const { springs, bind } = useArraySuperControl(value, onSubmitValue, rowHeight, true)
 
-  let unsetPropertyValues: Array<string> = []
-  const zerothValue = value[0]
-  if (zerothValue != null) {
-    if (isCSSSolidBackgroundLayer(zerothValue)) {
-      unsetPropertyValues.push('backgroundColor')
-      if (value.length > 1) {
-        unsetPropertyValues.push('backgroundImage')
-      }
-    } else {
-      unsetPropertyValues.push('backgroundImage')
-    }
-  }
+  const { onContextUnsetValue } = useInspectorContext()
 
-  const memoizedUnsetPropertyValues = useKeepReferenceEqualityIfPossible(unsetPropertyValues)
+  const targetPath = useContextSelector(InspectorPropsContext, (context) => context.targetPath)
 
-  const valueLength = value.length
+  const onUnsetSubsectionValues = React.useCallback(() => {
+    onContextUnsetValue(
+      BackgroundPrefixedProperties.map((prop) => {
+        return PP.createFromArray([...targetPath, prop])
+      }),
+      false,
+    )
+  }, [onContextUnsetValue, targetPath])
 
-  const unsetContextMenuItem = React.useMemo(
-    () =>
-      utils.stripNulls([
-        valueLength > 0 ? addOnUnsetValues(memoizedUnsetPropertyValues, onUnsetValues) : null,
-      ]),
-    [memoizedUnsetPropertyValues, onUnsetValues, valueLength],
-  )
+  const unsetContextMenuItem = React.useMemo(() => {
+    return [addOnUnsetValues(['all background properties'], onUnsetSubsectionValues)]
+  }, [onUnsetSubsectionValues])
 
   const backgroundLayerArrayForDisplay = value.map((backgroundLayer, index) => {
     switch (backgroundLayer.type) {
@@ -222,7 +215,7 @@ export const BackgroundSubsection = betterReactMemo('BackgroundSubsection', () =
             useSubmitTransformedValuesFactory={useSubmitValueFactory}
             popupOpen={openPopup === index}
             setOpenPopup={setOpenPopup}
-            unsetContextMenuItem={unsetContextMenuItem}
+            unsetContextMenuItem={[]}
           />
         )
       }
@@ -237,7 +230,7 @@ export const BackgroundSubsection = betterReactMemo('BackgroundSubsection', () =
             useSubmitTransformedValuesFactory={useSubmitValueFactory}
             popupOpen={openPopup === index}
             setOpenPopup={setOpenPopup}
-            unsetContextMenuItem={unsetContextMenuItem}
+            unsetContextMenuItem={[]}
           />
         )
       }
@@ -252,7 +245,7 @@ export const BackgroundSubsection = betterReactMemo('BackgroundSubsection', () =
             useSubmitTransformedValuesFactory={useSubmitValueFactory}
             popupOpen={openPopup === index}
             setOpenPopup={setOpenPopup}
-            unsetContextMenuItem={unsetContextMenuItem}
+            unsetContextMenuItem={[]}
           />
         )
       }
@@ -267,7 +260,7 @@ export const BackgroundSubsection = betterReactMemo('BackgroundSubsection', () =
             controlStyles={controlStyles}
             popupOpen={openPopup === index}
             setOpenPopup={setOpenPopup}
-            unsetContextMenuItem={unsetContextMenuItem}
+            unsetContextMenuItem={[]}
           />
         )
       }
@@ -282,7 +275,7 @@ export const BackgroundSubsection = betterReactMemo('BackgroundSubsection', () =
             controlStyles={controlStyles}
             popupOpen={openPopup === index}
             setOpenPopup={setOpenPopup}
-            unsetContextMenuItem={unsetContextMenuItem}
+            unsetContextMenuItem={[]}
           />
         )
       }
@@ -347,20 +340,19 @@ export const BackgroundSubsection = betterReactMemo('BackgroundSubsection', () =
     >
       <InspectorSubsectionHeader style={headerStyle}>
         <FlexRow style={{ flexGrow: 1, gap: 8 }}>
-          <InspectorSectionIcons.Background />
           <span>Background</span>
         </FlexRow>
         {propertyStatus.overwritable ? (
-          <SquareButton highlight onMouseDown={insertBackgroundLayerMouseDown}>
-            <Icn
-              style={{ paddingTop: 1 }}
-              category='semantic'
-              type='plus'
-              color={propertyStatus.controlled ? 'primary' : 'secondary'}
-              width={16}
-              height={16}
+          <FlexRow>
+            <RemovePropertyButton
+              testId='inspector-background-remove-all'
+              onUnsetValues={onUnsetSubsectionValues}
+              propertySet={propertyStatus.set}
             />
-          </SquareButton>
+            <SquareButton highlight onMouseDown={insertBackgroundLayerMouseDown}>
+              <Icons.SmallPlus />
+            </SquareButton>
+          </FlexRow>
         ) : null}
       </InspectorSubsectionHeader>
       {controlStyles.unknown ? (

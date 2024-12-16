@@ -2,7 +2,6 @@ import React from 'react'
 import * as ReactDOM from 'react-dom'
 import { useHandleCloseOnESCOrEnter } from '../common/inspector-utils'
 import { EditorID, PortalTargetID } from '../../../core/shared/utils'
-import ResizeObserver from 'resize-observer-polyfill'
 import { OnClickOutsideHOC } from '../../../uuiui'
 
 export type InspectorModalProps = {
@@ -13,17 +12,21 @@ export type InspectorModalProps = {
   children: JSX.Element
   style?: React.CSSProperties
   closePopupOnUnmount?: boolean
+  outsideClickIgnoreClass?: string
 }
 
 const padding = 16
 
-export const InspectorModal: React.FunctionComponent<InspectorModalProps> = ({
+export const InspectorModal: React.FunctionComponent<
+  React.PropsWithChildren<InspectorModalProps>
+> = ({
   offsetX,
   offsetY,
   portalTarget = document.getElementById(PortalTargetID) as HTMLElement,
   closePopup,
   children,
   style,
+  outsideClickIgnoreClass,
   closePopupOnUnmount = true,
 }) => {
   useHandleCloseOnESCOrEnter(closePopup)
@@ -58,7 +61,7 @@ export const InspectorModal: React.FunctionComponent<InspectorModalProps> = ({
       setOriginLeft(boundingRect.left)
       setOriginTop(boundingRect.top)
     }
-  }, [editor.clientWidth, editor.clientHeight])
+  }, [editor.clientHeight, editor.clientWidth])
 
   React.useLayoutEffect(() => {
     window.addEventListener('resize', updatePositionAndSize)
@@ -84,7 +87,10 @@ export const InspectorModal: React.FunctionComponent<InspectorModalProps> = ({
   return (
     <div ref={outerElementRef}>
       {ReactDOM.createPortal(
-        <OnClickOutsideHOC onClickOutside={closePopup}>
+        <OnClickOutsideHOC
+          onClickOutside={closePopup}
+          outsideClickIgnoreClass={outsideClickIgnoreClass}
+        >
           <div
             style={{
               position: 'absolute',

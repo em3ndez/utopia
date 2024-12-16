@@ -1,18 +1,10 @@
-import {
-  FlexAlignment,
-  FlexElementProps,
-  FlexLength,
-  FlexStretch,
-  FramePoint,
-  getUnstretchedWidthHeight,
-  LayoutSystem,
-  UtopiaComponentProps,
-} from 'utopia-api'
-import { FullFrame } from '../../components/frame'
+import type { FlexLength, FlexStretch } from 'utopia-api/core'
+import { getUnstretchedWidthHeight } from 'utopia-api/core'
+import type { UtopiaComponentProps } from 'utopia-api'
+import type { FullFrame } from '../../components/frame'
+import type { Either } from '../shared/either'
 import {
   applicative2Either,
-  defaultEither,
-  Either,
   flatMapEither,
   foldEither,
   isRight,
@@ -24,80 +16,54 @@ import {
   eitherToMaybe,
   eitherFromMaybe,
 } from '../shared/either'
+import type { ElementInstanceMetadata, JSXAttributes, JSXElement } from '../shared/element-template'
+import { isJSXElement, jsExpressionValue, emptyComments } from '../shared/element-template'
+import type { ValueAtPath } from '../shared/jsx-attributes'
+import { setJSXValuesAtPaths, unsetJSXValuesAtPaths } from '../shared/jsx-attributes'
+import type { PropertyPath, ElementPath } from '../shared/project-file-types'
+import { getLayoutProperty } from './getLayoutProperty'
+import type { PropsOrJSXAttributes } from '../model/element-metadata-utils'
+import { getSimpleAttributeAtPath } from '../model/element-metadata-utils'
+import type { EdgePosition } from '../../components/canvas/canvas-types'
 import {
-  ElementInstanceMetadata,
-  isJSXElement,
-  JSXAttributes,
-  jsxAttributeValue,
-  JSXElement,
-  UtopiaJSXComponent,
-  ElementInstanceMetadataMap,
-  emptyComments,
-} from '../shared/element-template'
-import {
-  setJSXValueAtPath,
-  setJSXValuesAtPaths,
-  unsetJSXValuesAtPaths,
-  ValueAtPath,
-} from '../shared/jsx-attributes'
-import { Imports, NodeModules, PropertyPath, ElementPath } from '../shared/project-file-types'
-import { createLayoutPropertyPath, pinnedPropForFramePoint } from './layout-helpers-new'
-import { getLayoutProperty, getLayoutPropertyOr } from './getLayoutProperty'
-import { PropsOrJSXAttributes, getSimpleAttributeAtPath } from '../model/element-metadata-utils'
-import { EdgePosition } from '../../components/canvas/canvas-types'
-import { getPropertyControlsForTarget } from '../property-controls/property-controls-utils'
-import { PropertyControlsInfo } from '../../components/custom-code/code-file'
-import { ProjectContentTreeRoot } from '../../components/assets'
+  getPropertyControlsForTarget,
+  hasStyleControls,
+} from '../property-controls/property-controls-utils'
+import type { PropertyControlsInfo } from '../../components/custom-code/code-file'
+import type { ProjectContentTreeRoot } from '../../components/assets'
+import { stylePropPathMappingFn } from '../../components/inspector/common/property-path-hooks'
+import { setJSXValueAtPath } from '../shared/jsx-attribute-utils'
 
 export function targetRespectsLayout(
   target: ElementPath,
   propertyControlsInfo: PropertyControlsInfo,
-  openFilePath: string | null,
   projectContents: ProjectContentTreeRoot,
-  nodeModules: NodeModules,
 ): boolean {
-  const propControls = getPropertyControlsForTarget(
-    target,
-    propertyControlsInfo,
-    openFilePath,
-    projectContents,
-    nodeModules,
-  )
-  return propControls?.style?.type === 'styleobject'
+  const propControls = getPropertyControlsForTarget(target, propertyControlsInfo, projectContents)
+
+  return propControls != null && hasStyleControls(propControls)
 }
 
 export const PinLayoutHelpers = {
   setLayoutPropsToPinsWithFrame(
     props: JSXAttributes,
     frame: Partial<FullFrame>,
+    propertyTarget: Array<string>,
   ): Either<string, JSXAttributes> {
     return reduceWithEither(
-      (workingProps, frameProp: FramePoint) => {
-        return setJSXValueAtPath(
-          workingProps,
-          createLayoutPropertyPath(pinnedPropForFramePoint(frameProp)),
-          jsxAttributeValue(frame[frameProp], emptyComments),
-        )
+      (workingProps, frameProp: keyof FullFrame) => {
+        if (frameProp === 'centerX' || frameProp === 'centerY') {
+          return right(workingProps)
+        } else {
+          return setJSXValueAtPath(
+            workingProps,
+            stylePropPathMappingFn(frameProp, propertyTarget),
+            jsExpressionValue(frame[frameProp], emptyComments),
+          )
+        }
       },
       props,
-      Object.keys(frame) as FramePoint[],
-    )
-  },
-  updateLayoutPropsWithFrame(
-    props: JSXAttributes,
-    frame: Partial<FullFrame>,
-  ): Either<string, JSXAttributes> {
-    // like setLayoutPropsToPinsWithFrame, but preserves the original layout props
-    return reduceWithEither(
-      (updatedAttributes, frameProp) => {
-        return setJSXValueAtPath(
-          updatedAttributes,
-          createLayoutPropertyPath(pinnedPropForFramePoint(frameProp as FramePoint)),
-          jsxAttributeValue(frame[frameProp], emptyComments),
-        )
-      },
-      props,
-      Object.keys(frame) as Array<keyof Partial<FullFrame>>,
+      Object.keys(frame) as Array<keyof FullFrame>,
     )
   },
 }
@@ -110,17 +76,17 @@ export type FixedAndBases = {
 
 export type TopLeftWidthHeight = Pick<FullFrame, 'top' | 'left' | 'width' | 'height'>
 
-export const FlexBasisPath = createLayoutPropertyPath('flexBasis')
-
 export const FlexLayoutHelpers = {
   updateLayoutPropsToFlexWithFrame(
     parentProps: PropsOrJSXAttributes,
     elementProps: JSXAttributes,
     width: number,
     height: number,
+    propertyTarget: ReadonlyArray<string>,
   ): Either<string, JSXAttributes> {
+    const flexBasisPath = stylePropPathMappingFn('flexBasis', propertyTarget)
     // Remove all of the properties so that old values don't mess with this.
-    const withoutLayoutProps = unsetJSXValuesAtPaths(elementProps, [FlexBasisPath])
+    const withoutLayoutProps = unsetJSXValuesAtPaths(elementProps, [flexBasisPath])
 
     return joinEither(
       applicative2Either(
@@ -129,17 +95,17 @@ export const FlexLayoutHelpers = {
           let propsToSet: Array<ValueAtPath> = []
           function addPropToSet(path: PropertyPath, value: string | number | undefined): void {
             if (value != null) {
-              propsToSet.push({ path: path, value: jsxAttributeValue(value, emptyComments) })
+              propsToSet.push({ path: path, value: jsExpressionValue(value, emptyComments) })
             }
           }
           if (flexBasis != null) {
-            addPropToSet(FlexBasisPath, flexBasis)
+            addPropToSet(flexBasisPath, flexBasis)
           }
           if (widthToSet != null) {
-            addPropToSet(createLayoutPropertyPath('Width'), widthToSet)
+            addPropToSet(stylePropPathMappingFn('width', propertyTarget), widthToSet)
           }
           if (heightToSet != null) {
-            addPropToSet(createLayoutPropertyPath('Height'), heightToSet)
+            addPropToSet(stylePropPathMappingFn('height', propertyTarget), heightToSet)
           }
 
           // Assign the new properties
@@ -151,76 +117,32 @@ export const FlexLayoutHelpers = {
           height,
           elementProps,
           parentProps,
-          eitherToMaybe(FlexLayoutHelpers.getMainAxis(parentProps)),
+          eitherToMaybe(FlexLayoutHelpers.getMainAxis(propertyTarget, parentProps)),
           null,
+          propertyTarget,
         ),
       ),
     )
   },
-  getFlexDirectionFromProps(
-    props: JSXAttributes,
-  ): 'row' | 'row-reverse' | 'column' | 'column-reverse' {
-    return getLayoutPropertyOr(
-      'row', // TODO read this value from spy
-      'flexDirection',
-      right(props),
-    )
-  },
-  getFlexWrap: function (props: JSXAttributes): 'wrap' | 'wrap-reverse' | 'nowrap' {
-    return getLayoutPropertyOr(
-      'nowrap', // TODO read this value from spy
-      'flexWrap',
-      right(props),
-    )
-  },
-  setTopLeftAttributes: (pos: { top: number; left: number }) => (props: JSXAttributes) => {
-    return reduceWithEither(
-      (workingProps, propToSet) => {
-        return setJSXValueAtPath(
-          workingProps,
-          createLayoutPropertyPath(propToSet),
-          jsxAttributeValue(pos[propToSet], emptyComments),
-        )
-      },
-      props,
-      ['top', 'left'] as const,
-    )
-  },
-  setWidthHeightAttributes: (size: { width: number; height: number }) => (props: JSXAttributes) => {
-    return reduceWithEither(
-      (workingProps, propToSet) => {
-        return setJSXValueAtPath(
-          workingProps,
-          createLayoutPropertyPath(pinnedPropForFramePoint(propToSet)),
-          jsxAttributeValue(size[propToSet], emptyComments),
-        )
-      },
-      props,
-      [FramePoint.Width, FramePoint.Height] as const,
-    )
-  },
-  setFlexAlignSelf: (newValue: FlexAlignment) => (
-    props: JSXAttributes,
-  ): Either<string, JSXAttributes> => {
-    return setJSXValueAtPath(
-      props,
-      createLayoutPropertyPath('alignSelf'),
-      jsxAttributeValue(newValue, emptyComments),
-    )
-  },
-  getMainAxis(props: PropsOrJSXAttributes): Either<string, 'horizontal' | 'vertical'> {
+  getMainAxis(
+    propertyTarget: ReadonlyArray<string>,
+    props: PropsOrJSXAttributes,
+  ): Either<string, 'horizontal' | 'vertical'> {
     return mapEither((fd) => {
       if (fd === 'column' || fd === 'column-reverse') {
         return 'vertical'
       } else {
         return 'horizontal'
       }
-    }, getSimpleAttributeAtPath(props, createLayoutPropertyPath('flexDirection')))
+    }, getSimpleAttributeAtPath(props, stylePropPathMappingFn('flexDirection', propertyTarget)))
   },
-  getCrossAxis(props: PropsOrJSXAttributes): Either<string, 'horizontal' | 'vertical'> {
+  getCrossAxis(
+    propertyTarget: Array<string>,
+    props: PropsOrJSXAttributes,
+  ): Either<string, 'horizontal' | 'vertical'> {
     return mapEither(
       (fd) => (fd === 'vertical' ? 'horizontal' : 'vertical'),
-      this.getMainAxis(props),
+      this.getMainAxis(propertyTarget, props),
     )
   },
   convertWidthHeightToFlex: (
@@ -230,13 +152,15 @@ export const FlexLayoutHelpers = {
     parentProps: PropsOrJSXAttributes,
     possibleMainAxis: 'horizontal' | 'vertical' | null,
     edgePosition: EdgePosition | null,
+    propertyTarget: ReadonlyArray<string>,
   ): Either<string, FixedAndBases> => {
-    const currentFlexBasis = eitherToMaybe(getSimpleAttributeAtPath(right(props), FlexBasisPath))
+    const flexBasisPath = stylePropPathMappingFn('flexBasis', propertyTarget)
+    const currentFlexBasis = eitherToMaybe(getSimpleAttributeAtPath(right(props), flexBasisPath))
     const currentWidth = eitherToMaybe(
-      getSimpleAttributeAtPath(right(props), createLayoutPropertyPath('Width')),
+      getSimpleAttributeAtPath(right(props), stylePropPathMappingFn('width', propertyTarget)),
     )
     const currentHeight = eitherToMaybe(
-      getSimpleAttributeAtPath(right(props), createLayoutPropertyPath('Height')),
+      getSimpleAttributeAtPath(right(props), stylePropPathMappingFn('height', propertyTarget)),
     )
     return mapEither((mainAxis) => {
       const flexBasis = mainAxis === 'horizontal' ? width : height
@@ -274,6 +198,7 @@ export const LayoutHelpers = {
     parentProps: PropsOrJSXAttributes | null,
     elementProps: JSXAttributes,
     frame: TopLeftWidthHeight,
+    propertyTarget: Array<string>,
   ): Either<string, JSXAttributes> {
     if (parentIsFlex && parentProps != null) {
       return FlexLayoutHelpers.updateLayoutPropsToFlexWithFrame(
@@ -281,21 +206,16 @@ export const LayoutHelpers = {
         elementProps,
         frame.width,
         frame.height,
+        propertyTarget,
       )
     } else {
-      return PinLayoutHelpers.updateLayoutPropsWithFrame(elementProps, frame)
+      return PinLayoutHelpers.setLayoutPropsToPinsWithFrame(elementProps, frame, propertyTarget)
     }
-  },
-  getLayoutSystemFromAttributes(props: PropsOrJSXAttributes): Either<string, LayoutSystem> {
-    return getSimpleAttributeAtPath(props, createLayoutPropertyPath('LayoutSystem')) // TODO LAYOUT investigate if we should use the DOM walker results here
-  },
-  getLayoutSystemFromProps(props: PropsOrJSXAttributes): LayoutSystem {
-    const parsedLayoutSystem = this.getLayoutSystemFromAttributes(props)
-    return isRight(parsedLayoutSystem) ? parsedLayoutSystem.value : LayoutSystem.PinSystem
   },
   stretchesChild(
     parentProps: PropsOrJSXAttributes,
     childProps: JSXAttributes,
+    propertyTarget: Array<string>,
   ): Either<string, boolean> {
     return applicative2Either(
       (alignSelf, alignItems) => {
@@ -304,13 +224,14 @@ export const LayoutHelpers = {
         const parentStretchesChildren = alignItems === 'stretch'
         return childrenStretchesSelf || (parentStretchesChildren && childrenAlignsSelfAuto)
       },
-      getLayoutProperty('alignSelf', right(childProps)),
-      getLayoutProperty('alignItems', parentProps),
+      getLayoutProperty('alignSelf', right(childProps), propertyTarget),
+      getLayoutProperty('alignItems', parentProps, propertyTarget),
     )
   },
   getFlexStretchForChild(
     parent: ElementInstanceMetadata,
     child: ElementInstanceMetadata,
+    propertyTarget: Array<string>,
   ): Either<string, FlexStretch> {
     const parentScenePropsOrElementAttributes: PropsOrJSXAttributes | null = foldEither(
       (_) => null,
@@ -330,11 +251,14 @@ export const LayoutHelpers = {
         const childJSXElement: JSXElement = child.element.value
         return flatMapEither((stretched) => {
           if (stretched) {
-            return FlexLayoutHelpers.getCrossAxis(parentScenePropsOrElementAttributes)
+            return FlexLayoutHelpers.getCrossAxis(
+              propertyTarget,
+              parentScenePropsOrElementAttributes,
+            )
           } else {
             return right('none')
           }
-        }, this.stretchesChild(parentScenePropsOrElementAttributes, childJSXElement.props))
+        }, this.stretchesChild(parentScenePropsOrElementAttributes, childJSXElement.props, propertyTarget))
       } else {
         return left('Unknown child attributes.')
       }
@@ -342,6 +266,7 @@ export const LayoutHelpers = {
   },
   getElementSizePropertyPaths(
     element: ElementInstanceMetadata,
+    propertyTarget: Array<string>,
   ): {
     horizontal: PropertyPath
     vertical: PropertyPath
@@ -349,19 +274,19 @@ export const LayoutHelpers = {
     if (element.specialSizeMeasurements.parentLayoutSystem === 'flex') {
       if (element.specialSizeMeasurements.parentFlexDirection === 'row') {
         return {
-          horizontal: createLayoutPropertyPath('flexBasis'),
-          vertical: createLayoutPropertyPath('Height'),
+          horizontal: stylePropPathMappingFn('flexBasis', propertyTarget),
+          vertical: stylePropPathMappingFn('height', propertyTarget),
         }
       } else {
         return {
-          horizontal: createLayoutPropertyPath('Width'),
-          vertical: createLayoutPropertyPath('flexBasis'),
+          horizontal: stylePropPathMappingFn('width', propertyTarget),
+          vertical: stylePropPathMappingFn('flexBasis', propertyTarget),
         }
       }
     } else {
       return {
-        horizontal: createLayoutPropertyPath('Width'),
-        vertical: createLayoutPropertyPath('Height'),
+        horizontal: stylePropPathMappingFn('width', propertyTarget),
+        vertical: stylePropPathMappingFn('height', propertyTarget),
       }
     }
   },

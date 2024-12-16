@@ -1,4 +1,6 @@
-import { LoadModule, loadModuleResult, MatchFile, ModuleLoader } from './loader-types'
+import { convertCssToUtopia } from '../shared/css-utils'
+import type { LoadModule, MatchFile, ModuleLoader } from './loader-types'
+import { loadModuleResult } from './loader-types'
 
 export const InjectedCSSFilePrefix = 'injected-css-file-'
 
@@ -7,6 +9,8 @@ const matchFile: MatchFile = (filename: string) => {
 }
 
 const loadModule: LoadModule = (filename: string, contents: string) => {
+  const canvasScopedCSS = convertCssToUtopia(contents)
+
   const loadedContents = `
     Object.defineProperty(module, 'exports', {
       get() {
@@ -14,7 +18,7 @@ const loadModule: LoadModule = (filename: string, contents: string) => {
         (function() {
           'use strict';
           const filename = ${JSON.stringify(filename)}
-          const content = ${JSON.stringify(contents)}
+          const content = ${JSON.stringify(canvasScopedCSS)}
           const elementId = ${JSON.stringify(InjectedCSSFilePrefix)} + filename;
           const maybeExistingTag = document.getElementById(elementId);
           if (maybeExistingTag != null) {

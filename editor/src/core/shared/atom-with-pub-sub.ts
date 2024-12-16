@@ -1,26 +1,29 @@
 import * as PubSub from 'pubsub-js'
 import React from 'react'
 import { unstable_batchedUpdates } from 'react-dom'
+import { HMR, IS_JEST_ENVIRONMENT } from '../../common/env-vars'
 import { useForceUpdate } from '../../components/editor/hook-utils'
 
 // From https://github.com/dai-shi/use-context-selector/blob/2dd334d727fc3b4cbadf7876b6ce64e0c633fd25/src/index.ts#L25
 const isSSR =
   typeof window === 'undefined' ||
-  /ServerSideRendering/.test(window.navigator && window.navigator.userAgent)
+  // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+  /ServerSideRendering/.test(window.navigator && window.navigator.userAgent) ||
+  IS_JEST_ENVIRONMENT
 
 export const useIsomorphicLayoutEffect = isSSR ? React.useEffect : React.useLayoutEffect
 
 export interface AtomWithPubSub<T> {
   key: string
   currentValue: T
-  Provider: React.FunctionComponent<React.PropsWithChildren<{ value: T }>>
+  Provider: React.FunctionComponent<React.PropsWithChildren<React.PropsWithChildren<{ value: T }>>>
 }
 
 const GlobalAtomMap: { [key: string]: AtomWithPubSub<any> } = {}
 
 export function atomWithPubSub<T>(options: { key: string; defaultValue: T }): AtomWithPubSub<T> {
   const { key, defaultValue } = options
-  if (key in GlobalAtomMap) {
+  if (key in GlobalAtomMap && !HMR) {
     throw new Error(`Tried to create multiple atoms with the same key: ${key}`)
   }
   const newAtom: AtomWithPubSub<T> = {
@@ -63,13 +66,26 @@ export function useSubscribeToPubSubAtom<T>(
   }, [atom.key, pubsubCallback])
 }
 
-export function usePubSubAtomReadOnly<T>(atom: AtomWithPubSub<T>): T {
+export const AlwaysTrue = (): boolean => true
+export const AlwaysFalse = (): boolean => false
+
+export function usePubSubAtomReadOnly<T>(
+  atom: AtomWithPubSub<T>,
+  shouldUpdateCallback: (newValue: T) => boolean,
+): T {
   const forceUpdate = useForceUpdate()
   const previousValueRef = React.useRef(atom.currentValue)
+
+  const shouldUpdateCallbackRef = React.useRef(shouldUpdateCallback)
+  shouldUpdateCallbackRef.current = shouldUpdateCallback
+
   useSubscribeToPubSubAtom(
     atom,
     React.useCallback(() => {
-      if (previousValueRef.current !== atom.currentValue) {
+      if (
+        previousValueRef.current !== atom.currentValue &&
+        shouldUpdateCallbackRef.current(atom.currentValue)
+      ) {
         forceUpdate()
       }
     }, [forceUpdate, atom]),
@@ -112,5 +128,5 @@ export function usePubSubAtomWriteOnly<T>(
 export function usePubSubAtom<T>(
   atom: AtomWithPubSub<T>,
 ): [T, (newValueOrUpdater: T | ((oldValue: T) => T)) => void] {
-  return [usePubSubAtomReadOnly(atom), usePubSubAtomWriteOnly(atom)]
+  return [usePubSubAtomReadOnly(atom, AlwaysTrue), usePubSubAtomWriteOnly(atom)]
 }

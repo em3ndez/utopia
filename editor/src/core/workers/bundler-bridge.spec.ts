@@ -1,7 +1,7 @@
 import { interpret } from 'xstate'
 import { bundlerMachine } from './bundler-bridge'
 import utils from '../../utils/utils'
-import { InitCompleteMessage, BuildResultMessage } from './common/worker-types'
+import type { InitCompleteMessage, BuildResultMessage } from './common/worker-types'
 
 const initEvent = {
   type: 'INITIALIZE',
@@ -52,7 +52,7 @@ describe('Bundler State Machine', () => {
 
     await initReadyPromise
 
-    expect(stateMachine.state.matches('worker.idle'))
+    expect(stateMachine.state.matches('worker.idle')).toBeTruthy()
   })
 
   it('starts the worker when it receives a file to update', async () => {
@@ -259,7 +259,7 @@ describe('Bundler State Machine', () => {
 
     expect(mockInitService.mock.calls.length).toBe(1)
 
-    initReadyPromise.then(() => {
+    void initReadyPromise.then(() => {
       // the worker should be in the Idle state now
 
       const updateFilePromiseWillFail = utils.defer<BuildResultMessage>()

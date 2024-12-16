@@ -1,71 +1,70 @@
+import type { Parser, ParseResult } from '../../utils/value-parser-utils'
 import {
-  Parser,
   parseAlternative,
   parseString,
   parseBoolean,
   parseNumber,
   parseUndefined,
   parseNull,
-  ParseResult,
   descriptionParseError,
   parseAny,
   parseObject,
+  parseArray,
+  parseJsx,
 } from '../../utils/value-parser-utils'
-import {
+import type {
   AllowedEnumType,
   BaseControlDescription,
   ControlDescription,
   UnionControlDescription,
-  isBaseControlDescription,
-} from 'utopia-api'
+  PropertyControls,
+  RegularControlDescription,
+} from '../../components/custom-code/internal-property-controls'
+import type { CSSColor } from '../../components/inspector/common/css-utils'
 import {
   parseColor,
-  CSSColor,
   printColorToJsx,
   isCSSColor,
 } from '../../components/inspector/common/css-utils'
+import type { Either } from '../shared/either'
 import {
-  Either,
   foldEither,
   left,
   right,
   isRight,
   flatMapEither,
   unwrapEither,
-  sequenceEither,
   isLeft,
   reduceWithEither,
-  mapEither,
 } from '../shared/either'
 import { compose } from '../shared/function-utils'
+import type { JSExpression, JSXArrayValue } from '../shared/element-template'
 import {
-  isJSXAttributeOtherJavaScript,
-  JSXAttribute,
+  modifiableAttributeIsAttributeOtherJavaScript,
   jsxArrayValue,
-  jsxAttributeValue,
-  jsxAttributeOtherJavaScript,
-  jsxAttributeNestedArray,
-  jsxAttributeNestedObject,
+  jsExpressionValue,
+  jsExpressionOtherJavaScript,
+  jsExpressionNestedArray,
+  jsExpressionNestedObject,
   jsxPropertyAssignment,
   emptyComments,
+  modifiableAttributeIsAttributeNotFound,
+  jsOpaqueArbitraryStatement,
 } from '../shared/element-template'
-import {
-  ModifiableAttribute,
-  jsxSimpleAttributeToValue,
-  getModifiableJSXAttributeAtPathFromAttribute,
-} from '../shared/jsx-attributes'
-import { PropertyPathPart } from '../shared/project-file-types'
+import type { ModifiableAttribute } from '../shared/jsx-attributes'
+import { getModifiableJSXAttributeAtPathFromAttribute } from '../shared/jsx-attributes'
+import type { PropertyPathPart } from '../shared/project-file-types'
 import * as PP from '../shared/property-path'
-import { fastForEach } from '../shared/utils'
-import { mapToArray } from '../shared/object-utils'
+import { forEachValue, mapToArray, objectValues } from '../shared/object-utils'
+import { jsxSimpleAttributeToValue } from '../shared/jsx-attribute-utils'
 
-type Printer<T> = (value: T) => JSXAttribute
+type Printer<T> = (value: T) => JSExpression
 
 export function parseColorValue(value: unknown): ParseResult<CSSColor> {
   return foldEither(
     (l) => left(descriptionParseError(l)),
     (r) => right(r),
-    parseColor(value),
+    parseColor(value, 'hex-hash-optional'),
   )
 }
 
@@ -93,7 +92,7 @@ function rawAndRealValueAtIndex(
   index: number,
 ): { rawValue: Either<string, ModifiableAttribute>; realValue: unknown } {
   const rawValueAtIndex = flatMapEither(
-    (v) => getModifiableJSXAttributeAtPathFromAttribute(v, PP.create([index])),
+    (v) => getModifiableJSXAttributeAtPathFromAttribute(v, PP.create(index)),
     rawValue,
   )
   const realValueAtIndex = Array.isArray(realValue) ? realValue[index] : undefined
@@ -104,8 +103,13 @@ function rawAndRealValueAtIndex(
   }
 }
 
+const noRawOrRealValue: { rawValue: Either<string, ModifiableAttribute>; realValue: unknown } = {
+  rawValue: left('No value'),
+  realValue: undefined,
+}
+
 function unwrapAndParseArrayValues(
-  propertyControl: ControlDescription,
+  propertyControl: RegularControlDescription,
 ): UnwrapperAndParser<Array<unknown>> {
   return (rawValue: Either<string, ModifiableAttribute>, realValue: unknown) => {
     const unwrapperAndParser = unwrapperAndParserForPropertyControl(propertyControl)
@@ -131,13 +135,44 @@ function unwrapAndParseArrayValues(
   }
 }
 
+function unwrapAndParseTupleValues(
+  propertyControls: Array<RegularControlDescription>,
+): UnwrapperAndParser<Array<unknown>> {
+  return (rawValue: Either<string, ModifiableAttribute>, realValue: unknown) => {
+    const unwrappedValue = defaultUnwrapper(rawValue, realValue)
+    if (Array.isArray(unwrappedValue)) {
+      const length = unwrappedValue.length
+      const controlsLength = propertyControls.length
+
+      let parsedContents: Array<unknown> = []
+      for (let i = 0; i < controlsLength; i++) {
+        // If there aren't enough values, we use undefined for missing values
+        // If there are too many, we just parse up to the last value we care about
+        const unwrapperAndParser = unwrapperAndParserForPropertyControl(propertyControls[i])
+        const valuesForIndex =
+          i < length ? rawAndRealValueAtIndex(rawValue, realValue, i) : noRawOrRealValue
+        const innerResult = unwrapperAndParser(valuesForIndex.rawValue, valuesForIndex.realValue)
+        if (isLeft(innerResult)) {
+          return left(descriptionParseError(`Unable to parse object at index ${i}`))
+        } else {
+          parsedContents.push(innerResult.value)
+        }
+      }
+
+      return right(parsedContents)
+    } else {
+      return left(descriptionParseError(`Value isn't a tuple`))
+    }
+  }
+}
+
 function rawAndRealValueAtKey(
   rawValue: Either<string, ModifiableAttribute>,
   realValue: unknown,
   key: PropertyPathPart,
 ): { rawValue: Either<string, ModifiableAttribute>; realValue: unknown } {
   const rawValueAtPath = flatMapEither(
-    (v) => getModifiableJSXAttributeAtPathFromAttribute(v, PP.create([key])),
+    (v) => getModifiableJSXAttributeAtPathFromAttribute(v, PP.create(key)),
     rawValue,
   )
   const realValueAtPath =
@@ -149,7 +184,7 @@ function rawAndRealValueAtKey(
 }
 
 function unwrapAndParseObjectValues(objectControls: {
-  [prop: string]: ControlDescription
+  [prop: string]: RegularControlDescription
 }): UnwrapperAndParser<{ [prop: string]: unknown }> {
   return (rawValue: Either<string, ModifiableAttribute>, realValue: unknown) => {
     return reduceWithEither(
@@ -157,12 +192,23 @@ function unwrapAndParseObjectValues(objectControls: {
         const control = objectControls[key]
         const unwrapperAndParser = unwrapperAndParserForPropertyControl(control)
         const valuesForKey = rawAndRealValueAtKey(rawValue, realValue, key)
-        const innerResult = unwrapperAndParser(valuesForKey.rawValue, valuesForKey.realValue)
-        if (isLeft(innerResult)) {
-          return left(descriptionParseError(`Unable to parse object at key ${key}`))
-        } else {
-          working[key] = innerResult.value
+        const missingKey = foldEither(
+          (_) => false,
+          (attr) => {
+            return modifiableAttributeIsAttributeNotFound(attr)
+          },
+          valuesForKey.rawValue,
+        )
+        if (missingKey) {
           return right(working)
+        } else {
+          const innerResult = unwrapperAndParser(valuesForKey.rawValue, valuesForKey.realValue)
+          if (isLeft(innerResult)) {
+            return left(descriptionParseError(`Unable to parse object at key ${key}`))
+          } else {
+            working[key] = innerResult.value
+            return right(working)
+          }
         }
       },
       {},
@@ -188,8 +234,8 @@ function jsUnwrapper(
   rawValue: Either<string, ModifiableAttribute>,
   realValue: unknown,
 ): string | null {
-  if (isRight(rawValue) && isJSXAttributeOtherJavaScript(rawValue.value)) {
-    return rawValue.value.javascript
+  if (isRight(rawValue) && modifiableAttributeIsAttributeOtherJavaScript(rawValue.value)) {
+    return rawValue.value.javascriptWithUIDs
   } else {
     return null
   }
@@ -219,7 +265,7 @@ function unwrapAndParseAlternative<T>(
 }
 
 function unwrapAndParseUnionValue(
-  controls: Array<ControlDescription>,
+  controls: Array<RegularControlDescription>,
 ): UnwrapperAndParser<unknown> {
   const unwrappersAndParsers = controls.map(unwrapperAndParserForPropertyControl)
   return unwrapAndParseAlternative(
@@ -231,38 +277,40 @@ function unwrapAndParseUnionValue(
 export function unwrapperAndParserForBaseControl(
   control: BaseControlDescription,
 ): UnwrapperAndParser<unknown> {
-  switch (control.type) {
-    case 'boolean':
+  switch (control.control) {
+    case 'checkbox':
       return defaultUnwrapFirst(parseBoolean)
     case 'color':
       return defaultUnwrapFirst(parseColorValue)
-    case 'componentinstance':
+    case 'expression-input':
       return jsUnwrapFirst(parseAny)
-    case 'enum':
-      return defaultUnwrapFirst(parseAllowedEnum(control.options))
-    case 'expression-enum':
+    case 'expression-popuplist':
       return defaultUnwrapFirst(parseAny)
-    case 'eventhandler':
-      return jsUnwrapFirst(parseAny)
-    case 'ignore':
+    case 'euler':
+      return defaultUnwrapFirst(parseArray(parseAny))
+    case 'matrix3':
+    case 'matrix4':
+      return defaultUnwrapFirst(parseArray(parseNumber))
+    case 'none':
       return defaultUnwrapFirst(parseAny)
-    case 'image':
-      return defaultUnwrapFirst(parseString)
-    case 'number':
+    case 'number-input':
       return defaultUnwrapFirst(parseNumber)
-    case 'options':
-      return defaultUnwrapFirst(parseAny)
     case 'popuplist':
       return defaultUnwrapFirst(parseAny)
-    case 'slider':
-      return defaultUnwrapFirst(parseNumber)
-    case 'string':
-      return defaultUnwrapFirst(parseString)
-    case 'styleobject':
+    case 'radio':
       return defaultUnwrapFirst(parseAny)
+    case 'string-input':
+      return defaultUnwrapFirst(parseString)
+    case 'html-input':
+      return defaultUnwrapFirst(parseString)
+    case 'style-controls':
+      return defaultUnwrapFirst(parseAny)
+    case 'jsx':
+      return parseJsx
     case 'vector2':
     case 'vector3':
-      return defaultUnwrapFirst(parseAny)
+    case 'vector4':
+      return defaultUnwrapFirst(parseArray(parseNumber)) // FIXME Also needs to handle a single number
     default:
       const _exhaustiveCheck: never = control
       throw new Error(`Unhandled control ${JSON.stringify(control)}`)
@@ -270,31 +318,35 @@ export function unwrapperAndParserForBaseControl(
 }
 
 export function unwrapperAndParserForPropertyControl(
-  control: ControlDescription,
+  control: RegularControlDescription,
 ): UnwrapperAndParser<unknown> {
-  switch (control.type) {
-    case 'boolean':
+  switch (control.control) {
+    case 'checkbox':
     case 'color':
-    case 'componentinstance':
-    case 'enum':
-    case 'expression-enum':
-    case 'eventhandler':
-    case 'ignore':
-    case 'image':
-    case 'number':
-    case 'options':
+    case 'expression-input':
+    case 'expression-popuplist':
+    case 'euler':
+    case 'matrix3':
+    case 'matrix4':
+    case 'none':
+    case 'number-input':
     case 'popuplist':
-    case 'slider':
-    case 'string':
-    case 'styleobject':
+    case 'radio':
+    case 'string-input':
+    case 'html-input':
+    case 'style-controls':
     case 'vector2':
     case 'vector3':
+    case 'vector4':
+    case 'jsx':
       return unwrapperAndParserForBaseControl(control)
 
     case 'array':
       return unwrapAndParseArrayValues(control.propertyControl)
     case 'object':
       return unwrapAndParseObjectValues(control.object)
+    case 'tuple':
+      return unwrapAndParseTupleValues(control.propertyControls)
     case 'union':
       return unwrapAndParseUnionValue(control.controls)
     default:
@@ -304,76 +356,100 @@ export function unwrapperAndParserForPropertyControl(
 }
 
 function findFirstSuitableControl(
-  controls: Array<ControlDescription>,
+  controls: Array<RegularControlDescription>,
   rawValue: Either<string, ModifiableAttribute>,
   realValue: unknown,
-): ControlDescription {
+): RegularControlDescription | null {
   // Find the first control that parses the value
-  const foundControl = controls.find((inner) => {
+  for (const inner of controls) {
     const parser = unwrapperAndParserForPropertyControl(inner)
     const parsed = parser(rawValue, realValue)
-    return isRight(parsed)
-  })
-  return foundControl ?? controls[0]
+    if (isRight(parsed)) {
+      return inner
+    }
+  }
+  return null
 }
 
 export function controlToUseForUnion(
   control: UnionControlDescription,
   rawValue: Either<string, ModifiableAttribute>,
   realValue: unknown,
-): ControlDescription {
+): RegularControlDescription | null {
   return findFirstSuitableControl(control.controls, rawValue, realValue)
 }
 
-function printSimple<T>(value: T): JSXAttribute {
-  return jsxAttributeValue(value, emptyComments)
+export function walkRegularControlDescriptions(
+  propertyControls: PropertyControls,
+  walkWith: (propertyName: string, propertyControl: RegularControlDescription) => void,
+): void {
+  forEachValue((propertyControl, propertyName) => {
+    if (typeof propertyName === 'string') {
+      walkWith(propertyName, propertyControl)
+    }
+  }, propertyControls)
 }
 
-function printColor(value: unknown): JSXAttribute {
+export function getPropertyControlNames(propertyControls: PropertyControls): Array<string> {
+  let result: Array<string> = []
+  walkRegularControlDescriptions(propertyControls, (propertyName) => {
+    result.push(propertyName)
+  })
+  return result
+}
+
+function printSimple<T>(value: T): JSExpression {
+  return jsExpressionValue(value, emptyComments)
+}
+
+function printColor(value: unknown): JSExpression {
   if (isCSSColor(value) || value === undefined) {
     return printColorToJsx(value)
   } else {
-    return jsxAttributeValue(`${value}`, emptyComments)
+    return jsExpressionValue(`${value}`, emptyComments)
   }
 }
 
-function printJS<T>(value: T): JSXAttribute {
-  return jsxAttributeOtherJavaScript(`${value}`, `return ${value}`, [], null, {})
+function printJS<T>(value: T): JSExpression {
+  return jsExpressionOtherJavaScript([], `${value}`, `${value}`, ``, [], null, {}, emptyComments)
 }
 
 export function printerForBasePropertyControl(control: BaseControlDescription): Printer<unknown> {
-  switch (control.type) {
-    case 'boolean':
+  switch (control.control) {
+    case 'checkbox':
       return printSimple
     case 'color':
       return printColor
-    case 'componentinstance':
+    case 'expression-input':
       return printJS
-    case 'enum':
-      return printSimple
-    case 'expression-enum':
-      return printSimple
-    case 'eventhandler':
+    case 'expression-popuplist':
       return printJS
-    case 'ignore':
+    case 'euler':
       return printSimple
-    case 'image':
+    case 'matrix3':
+    case 'matrix4':
       return printSimple
-    case 'number':
+    case 'none':
       return printSimple
-    case 'options':
+    case 'number-input':
       return printSimple
     case 'popuplist':
       return printSimple
-    case 'slider':
+    case 'radio':
       return printSimple
-    case 'string':
+    case 'string-input':
       return printSimple
-    case 'styleobject':
+    case 'html-input':
+      return printSimple
+    case 'style-controls':
       return printSimple
     case 'vector2':
       return printSimple
     case 'vector3':
+      return printSimple
+    case 'vector4':
+      return printSimple
+    case 'jsx':
       return printSimple
     default:
       const _exhaustiveCheck: never = control
@@ -381,20 +457,36 @@ export function printerForBasePropertyControl(control: BaseControlDescription): 
   }
 }
 
-function printerForArray<T>(control: ControlDescription): Printer<Array<T>> {
+function printerForArray<T>(control: RegularControlDescription): Printer<Array<T>> {
   const printContentsValue = printerForPropertyControl(control)
-  return (array: Array<T>): JSXAttribute => {
+  return (array: Array<T>): JSExpression => {
     const printedContents = array.map((value) =>
       jsxArrayValue(printContentsValue(value), emptyComments),
     )
-    return jsxAttributeNestedArray(printedContents, emptyComments)
+    return jsExpressionNestedArray(printedContents, emptyComments)
+  }
+}
+
+function printerForTuple(controls: Array<RegularControlDescription>): Printer<Array<unknown>> {
+  return (array: Array<unknown>): JSExpression => {
+    const length = Math.min(array.length, controls.length)
+    let printedContents: Array<JSXArrayValue> = []
+
+    for (let i = 0; i < length; i++) {
+      const value = array[i]
+      const control = controls[i]
+      const printContentsValue = printerForPropertyControl(control)
+      printedContents.push(jsxArrayValue(printContentsValue(value), emptyComments))
+    }
+
+    return jsExpressionNestedArray(printedContents, emptyComments)
   }
 }
 
 function printerForObject(objectControls: {
-  [prop: string]: ControlDescription
+  [prop: string]: RegularControlDescription
 }): Printer<{ [prop: string]: unknown }> {
-  return (objectToPrint: { [prop: string]: unknown }): JSXAttribute => {
+  return (objectToPrint: { [prop: string]: unknown }): JSExpression => {
     const printedContents = mapToArray((value, key) => {
       const valueControl = objectControls[key]
       const valuePrinter =
@@ -402,42 +494,50 @@ function printerForObject(objectControls: {
       return jsxPropertyAssignment(key, valuePrinter(value), emptyComments, emptyComments)
     }, objectToPrint)
 
-    return jsxAttributeNestedObject(printedContents, emptyComments)
+    return jsExpressionNestedObject(printedContents, emptyComments)
   }
 }
 
-function printerForUnion<T>(controls: Array<ControlDescription>): Printer<T> {
-  return (value: T): JSXAttribute => {
+function printerForUnion<T>(controls: Array<RegularControlDescription>): Printer<T> {
+  return (value: T): JSExpression => {
     const controlToUse = findFirstSuitableControl(controls, left('ignore'), value)
-    const printerToUse = printerForPropertyControl(controlToUse)
-    return printerToUse(value)
+    if (controlToUse == null) {
+      return printSimple(value)
+    } else {
+      const printerToUse = printerForPropertyControl(controlToUse)
+      return printerToUse(value)
+    }
   }
 }
 
-export function printerForPropertyControl(control: ControlDescription): Printer<unknown> {
-  switch (control.type) {
-    case 'boolean':
+export function printerForPropertyControl(control: RegularControlDescription): Printer<unknown> {
+  switch (control.control) {
+    case 'checkbox':
     case 'color':
-    case 'componentinstance':
-    case 'enum':
-    case 'expression-enum':
-    case 'eventhandler':
-    case 'ignore':
-    case 'image':
-    case 'number':
-    case 'options':
+    case 'expression-input':
+    case 'expression-popuplist':
+    case 'euler':
+    case 'matrix3':
+    case 'matrix4':
+    case 'none':
+    case 'number-input':
     case 'popuplist':
-    case 'slider':
-    case 'string':
-    case 'styleobject':
+    case 'radio':
+    case 'string-input':
+    case 'html-input':
+    case 'style-controls':
     case 'vector2':
     case 'vector3':
+    case 'vector4':
+    case 'jsx':
       return printerForBasePropertyControl(control)
 
     case 'array':
       return printerForArray(control.propertyControl) as Printer<unknown> // Why???!!
     case 'object':
       return printerForObject(control.object) as Printer<unknown> // Why???!!
+    case 'tuple':
+      return printerForTuple(control.propertyControls) as Printer<unknown> // Why???!!
     case 'union':
       return printerForUnion(control.controls)
     default:

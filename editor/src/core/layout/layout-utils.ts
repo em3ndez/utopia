@@ -1,5 +1,9 @@
-import { AllFramePoints, AllFramePointsExceptSize, LayoutSystem } from 'utopia-api'
-import { transformElementAtPath } from '../../components/editor/store/editor-state'
+import { AllFramePoints, AllFramePointsExceptSize, LayoutSystem } from 'utopia-api/core'
+import type { AllElementProps } from '../../components/editor/store/editor-state'
+import {
+  transformElementAtPath,
+  transformJSXElementAtPath,
+} from '../../components/editor/store/editor-state'
 import * as EP from '../shared/element-path'
 import {
   flatMapEither,
@@ -13,49 +17,45 @@ import {
   left as leftEither,
 } from '../shared/either'
 import Utils from '../../utils/utils'
+import type { CanvasRectangle } from '../shared/math-utils'
 import {
-  CanvasRectangle,
   zeroCanvasRect,
   zeroLocalRect,
   parseNumberOrPercent,
   roundTo,
   printNumberOrPercent,
   numberOrPercent,
+  isInfinityRectangle,
 } from '../shared/math-utils'
 import { findJSXElementAtPath, MetadataUtils } from '../model/element-metadata-utils'
-import {
+import type {
   DetectedLayoutSystem,
-  jsxAttributeValue,
   JSXElement,
   UtopiaJSXComponent,
   JSXAttributes,
   SettableLayoutSystem,
   ElementInstanceMetadataMap,
-  isJSXElement,
   JSXElementChild,
   ElementInstanceMetadata,
-  emptyComments,
 } from '../shared/element-template'
+import { jsExpressionValue, isJSXElement, emptyComments } from '../shared/element-template'
 import { findJSXElementAtStaticPath } from '../model/element-template-utils'
+import type { ValueAtPath } from '../shared/jsx-attributes'
 import {
   setJSXValuesAtPaths,
   unsetJSXValuesAtPaths,
-  ValueAtPath,
-  getJSXAttributeAtPath,
-  setJSXValueAtPath,
   getAllPathsFromAttributes,
 } from '../shared/jsx-attributes'
-import { PropertyPath, ElementPath } from '../shared/project-file-types'
+import { getJSXAttributesAtPath, setJSXValueAtPath } from '../shared/jsx-attribute-utils'
+import type { PropertyPath, ElementPath } from '../shared/project-file-types'
 import { FlexLayoutHelpers } from './layout-helpers'
-import {
-  createLayoutPropertyPath,
-  LayoutProp,
-  pinnedPropForFramePoint,
-  StyleLayoutProp,
-} from './layout-helpers-new'
-import { CSSPosition } from '../../components/inspector/common/css-utils'
+import type { LayoutPinnedProp, StyleLayoutProp } from './layout-helpers-new'
+import { LayoutPinnedProps } from './layout-helpers-new'
+import type { CSSPosition } from '../../components/inspector/common/css-utils'
 import type { Notice } from '../../components/common/notice'
 import { createStylePostActionToast } from './layout-notice'
+import { stylePropPathMappingFn } from '../../components/inspector/common/property-path-hooks'
+import type { ElementPathTrees } from '../shared/element-path-tree'
 
 interface LayoutPropChangeResult {
   components: UtopiaJSXComponent[]
@@ -64,61 +64,15 @@ interface LayoutPropChangeResult {
   toast: Array<Notice>
 }
 
-export function maybeSwitchChildrenLayoutProps(
-  target: ElementPath,
-  targetOriginalContextMetadata: ElementInstanceMetadataMap,
-  currentContextMetadata: ElementInstanceMetadataMap,
-  components: UtopiaJSXComponent[],
-): LayoutPropChangeResult {
-  const children = MetadataUtils.getChildrenHandlingGroups(
-    targetOriginalContextMetadata,
-    target,
-    true,
-  )
-  const result = children.reduce<LayoutPropChangeResult>(
-    (working, next) => {
-      const { components: workingComponents, didSwitch: workingDidSwitch } = working
-      const {
-        components: nextComponents,
-        componentMetadata: nextMetadata,
-        didSwitch: nextDidSwitch,
-        toast: nextToast,
-      } = maybeSwitchLayoutProps(
-        next.elementPath,
-        next.elementPath,
-        target,
-        targetOriginalContextMetadata,
-        currentContextMetadata,
-        workingComponents,
-        null,
-        null,
-        null,
-      )
-      return {
-        components: nextComponents,
-        componentMetadata: nextMetadata,
-        didSwitch: workingDidSwitch || nextDidSwitch,
-        toast: [...working.toast, ...nextToast],
-      }
-    },
-    {
-      components: components,
-      componentMetadata: currentContextMetadata,
-      didSwitch: false,
-      toast: [],
-    },
-  )
-  return result
-}
-
 function getParentAxisFromElement(
   element: ElementInstanceMetadata | null,
+  propertyTarget: ReadonlyArray<string>,
 ): 'horizontal' | 'vertical' | null {
   const jsxElement = element?.element ?? leftEither('no parent provided')
   return eitherToMaybe(
     flatMapEither<string, JSXElementChild, 'horizontal' | 'vertical'>((foundJsxElement) => {
       if (isJSXElement(foundJsxElement)) {
-        return FlexLayoutHelpers.getMainAxis(right(foundJsxElement.props))
+        return FlexLayoutHelpers.getMainAxis(propertyTarget, right(foundJsxElement.props))
       } else {
         return leftEither('parent is not JSXElement')
       }
@@ -126,200 +80,15 @@ function getParentAxisFromElement(
   )
 }
 
-export function maybeSwitchLayoutProps(
-  target: ElementPath,
-  originalPath: ElementPath,
-  newParentPath: ElementPath,
-  targetOriginalContextMetadata: ElementInstanceMetadataMap,
-  currentContextMetadata: ElementInstanceMetadataMap,
-  components: UtopiaJSXComponent[],
-  parentFrame: CanvasRectangle | null,
-  parentLayoutSystem: SettableLayoutSystem | null,
-  newParentMainAxis: 'horizontal' | 'vertical' | null,
-): LayoutPropChangeResult {
-  const originalParentPath = EP.parentPath(originalPath)
-  const originalParent = MetadataUtils.findElementByElementPath(
-    targetOriginalContextMetadata,
-    originalParentPath,
-  )
-  const newParent = MetadataUtils.findElementByElementPath(currentContextMetadata, newParentPath)
+export const PinningAndFlexPoints: Array<LayoutPinnedProp | 'flexBasis'> = [
+  ...LayoutPinnedProps,
+  'flexBasis',
+]
 
-  let wasFlexContainer = MetadataUtils.isFlexLayoutedContainer(originalParent)
-  const oldParentMainAxis: 'horizontal' | 'vertical' | null = getParentAxisFromElement(
-    originalParent,
-  )
-
-  let isFlexContainer =
-    parentLayoutSystem === 'flex' || MetadataUtils.isFlexLayoutedContainer(newParent)
-
-  const parentMainAxis: 'horizontal' | 'vertical' | null =
-    newParentMainAxis ?? getParentAxisFromElement(newParent) // if no newParentMainAxis is provided, let's try to find one
-
-  let wasGroup = MetadataUtils.isGroup(originalParentPath, targetOriginalContextMetadata)
-  let isGroup = MetadataUtils.isGroup(newParentPath, currentContextMetadata)
-
-  // When wrapping elements in view/group the element is not available from the componentMetadata but we know the frame already.
-  // BALAZS I added a clause !isFlexContainer here but I think this whole IF should go to the bin
-  if (!isFlexContainer && newParent == null && parentFrame != null) {
-    // FIXME wrapping in a view now always switches to pinned props. maybe the user wants to keep the parent layoutsystem?
-    const switchLayoutFunction =
-      parentLayoutSystem === LayoutSystem.Group
-        ? switchChildToGroupWithParentFrame
-        : switchChildToPinnedWithParentFrame
-    const { updatedComponents, updatedMetadata } = switchLayoutFunction(
-      target,
-      originalPath,
-      targetOriginalContextMetadata,
-      components,
-      parentFrame,
-    )
-
-    const staticTarget = EP.dynamicPathToStaticPath(target)
-    const originalElement = findJSXElementAtStaticPath(components, staticTarget)
-    const originalPropertyPaths = getAllPathsFromAttributes(originalElement?.props ?? [])
-    const updatedelement = findJSXElementAtStaticPath(updatedComponents, staticTarget)
-    const updatedPropertyPaths = getAllPathsFromAttributes(updatedelement?.props ?? [])
-
-    return {
-      components: updatedComponents,
-      componentMetadata: updatedMetadata,
-      didSwitch: true,
-      toast: createStylePostActionToast(
-        MetadataUtils.getElementLabel(target, targetOriginalContextMetadata),
-        originalPropertyPaths,
-        updatedPropertyPaths,
-      ),
-    }
-  } else {
-    const switchLayoutFunction = getLayoutFunction(
-      wasFlexContainer,
-      oldParentMainAxis,
-      isFlexContainer,
-      parentMainAxis,
-      wasGroup,
-      isGroup,
-    )
-    const { updatedComponents, updatedMetadata } = switchLayoutFunction.layoutFn(
-      target,
-      newParentPath,
-      targetOriginalContextMetadata,
-      currentContextMetadata,
-      components,
-      parentMainAxis,
-    )
-    const staticTarget = EP.dynamicPathToStaticPath(target)
-    const originalElement = findJSXElementAtStaticPath(components, staticTarget)
-    const originalPropertyPaths = getAllPathsFromAttributes(originalElement?.props ?? [])
-    const updatedelement = findJSXElementAtStaticPath(updatedComponents, staticTarget)
-    const updatedPropertyPaths = getAllPathsFromAttributes(updatedelement?.props ?? [])
-
-    return {
-      components: updatedComponents,
-      componentMetadata: updatedMetadata,
-      didSwitch: switchLayoutFunction.didSwitch,
-      toast: switchLayoutFunction.didSwitch
-        ? createStylePostActionToast(
-            MetadataUtils.getElementLabel(target, targetOriginalContextMetadata),
-            originalPropertyPaths,
-            updatedPropertyPaths,
-          )
-        : [],
-    }
-  }
-}
-
-function getLayoutFunction(
-  wasFlexContainer: boolean,
-  oldMainAxis: 'horizontal' | 'vertical' | null,
-  isFlexContainer: boolean,
-  newMainAxis: 'horizontal' | 'vertical' | null,
-  wasGroup: boolean,
-  isGroup: boolean,
-): {
-  layoutFn: (
-    target: ElementPath,
-    newParentPath: ElementPath,
-    targetOriginalContextMetadata: ElementInstanceMetadataMap,
-    currentContextMetadata: ElementInstanceMetadataMap,
-    components: UtopiaJSXComponent[],
-    newParentMainAxis: 'horizontal' | 'vertical' | null,
-  ) => SwitchLayoutTypeResult
-  didSwitch: boolean
-} {
-  if (wasFlexContainer) {
-    if (isGroup) {
-      // From flex to a group
-      return {
-        layoutFn: switchFlexChildToGroup,
-        didSwitch: true,
-      }
-    } else if (isFlexContainer) {
-      // From flex to flex
-      if (oldMainAxis === newMainAxis) {
-        return {
-          layoutFn: keepLayoutProps,
-          didSwitch: false,
-        }
-      } else {
-        return {
-          layoutFn: switchFlexToFlexDifferentAxis,
-          didSwitch: true,
-        }
-      }
-    } else {
-      // From flex to pinned
-      return {
-        layoutFn: switchFlexChildToPinned,
-        didSwitch: true,
-      }
-    }
-  } else if (wasGroup) {
-    if (isFlexContainer) {
-      // From a group to flex
-      return {
-        layoutFn: switchPinnedChildToFlex,
-        didSwitch: true,
-      }
-    } else if (isGroup) {
-      // From group to group
-      return {
-        layoutFn: keepLayoutProps,
-        didSwitch: false,
-      }
-    } else {
-      // From a group to pinned
-      return {
-        layoutFn: keepLayoutProps,
-        didSwitch: false,
-      }
-    }
-  } else {
-    // wasPinned
-    if (isFlexContainer) {
-      // From pinned to flex
-      return {
-        layoutFn: switchPinnedChildToFlex,
-        didSwitch: true,
-      }
-    } else if (isGroup) {
-      // From pinned to a group
-      return {
-        layoutFn: switchPinnedChildToGroup,
-        didSwitch: true,
-      }
-    } else {
-      // From pinned to pinned
-      return {
-        layoutFn: keepLayoutProps,
-        didSwitch: false,
-      }
-    }
-  }
-}
-
-export const PinningAndFlexPoints = [...AllFramePoints, 'flexBasis']
-
-export const PinningAndFlexPointsExceptSize = [...AllFramePointsExceptSize, 'flexBasis']
+export const PinningAndFlexPointsExceptSize: Array<LayoutPinnedProp | 'flexBasis'> = [
+  ...LayoutPinnedProps.filter((p) => p !== 'width' && p !== 'height'),
+  'flexBasis',
+]
 
 function keepLayoutProps(
   target: ElementPath,
@@ -377,19 +146,25 @@ export function switchPinnedChildToFlex(
   currentContextMetadata: ElementInstanceMetadataMap,
   components: UtopiaJSXComponent[],
   newParentMainAxis: 'horizontal' | 'vertical' | null,
+  propertyTarget: ReadonlyArray<string>,
 ): SwitchLayoutTypeResult {
-  const currentFrame = MetadataUtils.getFrame(target, targetOriginalContextMetadata)
+  const currentFrame = MetadataUtils.getLocalFrame(target, targetOriginalContextMetadata, null)
   const newParent = findJSXElementAtPath(newParentPath, components)
   const element = findJSXElementAtPath(target, components)
 
   let propsToAdd: Array<ValueAtPath> = [
     {
-      path: createLayoutPropertyPath('position'),
-      value: jsxAttributeValue('relative', emptyComments),
+      path: stylePropPathMappingFn('position', propertyTarget),
+      value: jsExpressionValue('relative', emptyComments),
     },
   ]
 
-  if (currentFrame != null && newParent != null && element != null) {
+  if (
+    currentFrame != null &&
+    !isInfinityRectangle(currentFrame) &&
+    newParent != null &&
+    element != null
+  ) {
     // When moving pinned to flex, use width and height to set basis values
     const possibleFlexProps = FlexLayoutHelpers.convertWidthHeightToFlex(
       currentFrame.width,
@@ -398,37 +173,42 @@ export function switchPinnedChildToFlex(
       right(newParent.props),
       newParentMainAxis,
       null,
+      propertyTarget,
     )
 
     forEachRight(possibleFlexProps, (flexProps) => {
       const { flexBasis, width, height } = flexProps
       if (flexBasis != null) {
         propsToAdd.push({
-          path: createLayoutPropertyPath('flexBasis'),
-          value: jsxAttributeValue(flexBasis, emptyComments),
+          path: stylePropPathMappingFn('flexBasis', propertyTarget),
+          value: jsExpressionValue(flexBasis, emptyComments),
         })
       }
       if (width != null) {
         propsToAdd.push({
-          path: createLayoutPropertyPath('Width'),
-          value: jsxAttributeValue(width, emptyComments),
+          path: stylePropPathMappingFn('width', propertyTarget),
+          value: jsExpressionValue(width, emptyComments),
         })
       }
       if (height != null) {
         propsToAdd.push({
-          path: createLayoutPropertyPath('Height'),
-          value: jsxAttributeValue(height, emptyComments),
+          path: stylePropPathMappingFn('height', propertyTarget),
+          value: jsExpressionValue(height, emptyComments),
         })
       }
     })
   }
 
-  const updatedComponents = transformElementAtPath(components, target, (e: JSXElement) => {
+  const updatedComponents = transformJSXElementAtPath(components, target, (e: JSXElement) => {
     // Remove the pinning props first...
     const pinnedPropsRemoved = unsetJSXValuesAtPaths(e.props, [
-      ...AllFramePoints.map((p) => createLayoutPropertyPath(pinnedPropForFramePoint(p))),
-      createLayoutPropertyPath('position'),
-      createLayoutPropertyPath('LayoutSystem'),
+      stylePropPathMappingFn('left', propertyTarget),
+      stylePropPathMappingFn('top', propertyTarget),
+      stylePropPathMappingFn('bottom', propertyTarget),
+      stylePropPathMappingFn('right', propertyTarget),
+      stylePropPathMappingFn('width', propertyTarget),
+      stylePropPathMappingFn('height', propertyTarget),
+      stylePropPathMappingFn('position', propertyTarget),
     ])
     // ...Add in the flex properties.
     const flexPropsAdded = flatMapEither(
@@ -466,6 +246,7 @@ export function switchFlexToFlexDifferentAxis(
   currentContextMetadata: ElementInstanceMetadataMap,
   components: UtopiaJSXComponent[],
   newParentMainAxis: 'horizontal' | 'vertical' | null,
+  propertyTarget: ReadonlyArray<string>,
 ): SwitchLayoutTypeResult {
   const element = findJSXElementAtPath(target, components)
 
@@ -473,9 +254,9 @@ export function switchFlexToFlexDifferentAxis(
   if (element != null) {
     const allAttributePaths = getAllPathsFromAttributes(element.props)
     if (
-      !allAttributePaths.includes(createLayoutPropertyPath('Width')) &&
-      !allAttributePaths.includes(createLayoutPropertyPath('Height')) &&
-      !allAttributePaths.includes(createLayoutPropertyPath('flexBasis'))
+      !allAttributePaths.includes(stylePropPathMappingFn('width', propertyTarget)) &&
+      !allAttributePaths.includes(stylePropPathMappingFn('height', propertyTarget)) &&
+      !allAttributePaths.includes(stylePropPathMappingFn('flexBasis', propertyTarget))
     ) {
       // we leave the element alone
       return {
@@ -493,6 +274,7 @@ export function switchFlexToFlexDifferentAxis(
     currentContextMetadata,
     components,
     newParentMainAxis,
+    propertyTarget,
   )
 }
 
@@ -507,27 +289,33 @@ export function switchFlexChildToPinned(
   targetOriginalContextMetadata: ElementInstanceMetadataMap,
   currentContextMetadata: ElementInstanceMetadataMap,
   components: UtopiaJSXComponent[],
+  newParentMainAxis: 'horizontal' | 'vertical' | null,
+  propertyTarget: ReadonlyArray<string>,
+  allElementProps: AllElementProps,
 ): SwitchLayoutTypeResult {
-  const currentFrame = Utils.defaultIfNull(
-    zeroLocalRect,
-    MetadataUtils.getFrame(target, targetOriginalContextMetadata),
-  ) // TODO How should this behave if there is no rendered frame?
-  const element = MetadataUtils.findElementByElementPath(targetOriginalContextMetadata, target)
-  const newParent = MetadataUtils.findElementByElementPath(currentContextMetadata, newParentPath)
+  // TODO How should this behave if there is no rendered frame?
+  const currentFrame = MetadataUtils.getFrameOrZeroRect(target, targetOriginalContextMetadata)
+  const elementProps = allElementProps[EP.toString(target)]
+  const newParentProps = allElementProps[EP.toString(newParentPath)]
 
   // When moving flex to pinned, use fixed values or basis values to set width and height
   // FIXME Right now this isn't taking into account groups
   const unstretched = FlexLayoutHelpers.getUnstretchedWidthHeight(
-    element?.props ?? {},
-    newParent?.props ?? {},
+    elementProps ?? {},
+    newParentProps ?? {},
   )
   const width = Utils.defaultIfNull(currentFrame.width, unstretched.width)
   const height = Utils.defaultIfNull(currentFrame.height, unstretched.height)
-  const oldParentFrame =
-    MetadataUtils.getFrameInCanvasCoords(EP.parentPath(target), targetOriginalContextMetadata) ??
-    zeroCanvasRect
-  const newParentFrame =
-    MetadataUtils.getFrameInCanvasCoords(newParentPath, currentContextMetadata) ?? zeroCanvasRect
+  const oldParentFrame = MetadataUtils.getFrameOrZeroRectInCanvasCoords(
+    EP.parentPath(target),
+    targetOriginalContextMetadata,
+  )
+
+  const newParentFrame = MetadataUtils.getFrameOrZeroRectInCanvasCoords(
+    newParentPath,
+    currentContextMetadata,
+  )
+
   const newOffset = Utils.pointDifference(newParentFrame, oldParentFrame)
 
   const updatedComponents = removeFlexAndAddPinnedPropsToComponent(
@@ -537,6 +325,7 @@ export function switchFlexChildToPinned(
     newOffset.x + currentFrame.x,
     width,
     height,
+    propertyTarget,
   )
 
   const updatedMetadata = switchLayoutMetadata(
@@ -559,26 +348,30 @@ export function switchFlexChildToGroup(
   targetOriginalContextMetadata: ElementInstanceMetadataMap,
   currentContextMetadata: ElementInstanceMetadataMap,
   components: UtopiaJSXComponent[],
+  newParentMainAxis: 'horizontal' | 'vertical' | null,
+  propertyTarget: Array<string>,
+  allElementProps: AllElementProps,
 ): SwitchLayoutTypeResult {
-  const currentFrame = Utils.defaultIfNull(
-    zeroLocalRect,
-    MetadataUtils.getFrame(target, targetOriginalContextMetadata),
-  ) // TODO How should this behave if there is no rendered frame?
-  const element = MetadataUtils.findElementByElementPath(targetOriginalContextMetadata, target)
-  const newParent = MetadataUtils.findElementByElementPath(currentContextMetadata, newParentPath)
+  const currentFrame = MetadataUtils.getFrameOrZeroRect(target, targetOriginalContextMetadata)
+  // TODO How should this behave if there is no rendered frame?
+  const elementProps = allElementProps[EP.toString(target)]
+  const newParentProps = allElementProps[EP.toString(newParentPath)]
 
   // When moving flex to pinned, use fixed values or basis values to set width and height
   const unstretched = FlexLayoutHelpers.getUnstretchedWidthHeight(
-    element?.props ?? {},
-    newParent?.props ?? {},
+    elementProps ?? {},
+    newParentProps ?? {},
   )
   const width = Utils.defaultIfNull(currentFrame.width, unstretched.width)
   const height = Utils.defaultIfNull(currentFrame.height, unstretched.height)
-  const oldParentFrame =
-    MetadataUtils.getFrameInCanvasCoords(EP.parentPath(target), targetOriginalContextMetadata) ??
-    zeroCanvasRect
-  const newParentFrame =
-    MetadataUtils.getFrameInCanvasCoords(newParentPath, currentContextMetadata) ?? zeroCanvasRect
+  const oldParentFrame = MetadataUtils.getFrameOrZeroRectInCanvasCoords(
+    EP.parentPath(target),
+    targetOriginalContextMetadata,
+  )
+  const newParentFrame = MetadataUtils.getFrameOrZeroRectInCanvasCoords(
+    newParentPath,
+    currentContextMetadata,
+  )
   const newOffset = Utils.pointDifference(newParentFrame, oldParentFrame)
 
   const updatedComponents = removeFlexAndNonDefaultPinsAddPinnedPropsToComponent(
@@ -588,6 +381,7 @@ export function switchFlexChildToGroup(
     newOffset.x + currentFrame.x,
     width,
     height,
+    propertyTarget,
   )
 
   const updatedMetadata = switchLayoutMetadata(
@@ -610,26 +404,27 @@ export function switchChildToGroupWithParentFrame(
   componentMetadata: ElementInstanceMetadataMap,
   components: UtopiaJSXComponent[],
   parentFrame: CanvasRectangle,
+  propertyTarget: ReadonlyArray<string>,
+  allElementProps: AllElementProps,
 ): SwitchLayoutTypeResult {
-  const isParentFlexContainer = MetadataUtils.isParentYogaLayoutedContainerAndElementParticipatesInLayout(
-    target,
+  const isParentFlexContainer =
+    MetadataUtils.isParentYogaLayoutedContainerAndElementParticipatesInLayout(
+      target,
+      componentMetadata,
+    )
+  const currentFrame = MetadataUtils.getFrameOrZeroRect(originalPath, componentMetadata)
+  // TODO How should this behave if there is no rendered frame?
+  const elementProps = allElementProps[EP.toString(target)]
+  const oldParentFrame = MetadataUtils.getFrameOrZeroRectInCanvasCoords(
+    EP.parentPath(originalPath),
     componentMetadata,
-  )
-  const currentFrame = Utils.defaultIfNull(
-    zeroLocalRect,
-    MetadataUtils.getFrame(originalPath, componentMetadata),
-  ) // TODO How should this behave if there is no rendered frame?
-  const element = MetadataUtils.findElementByElementPath(componentMetadata, originalPath)
-  const oldParentFrame = Utils.defaultIfNull(
-    zeroCanvasRect,
-    MetadataUtils.getFrameInCanvasCoords(EP.parentPath(originalPath), componentMetadata),
   )
   const newOffset = Utils.pointDifference(parentFrame, oldParentFrame)
 
   if (isParentFlexContainer) {
     // When moving flex to pinned, use fixed values or basis values to set width and height
     // TODO LAYOUT unstretched can be different from other switchTo cases, here we don't have access to props from metadata
-    const unstretched = FlexLayoutHelpers.getUnstretchedWidthHeight(element?.props ?? {}, {})
+    const unstretched = FlexLayoutHelpers.getUnstretchedWidthHeight(elementProps ?? {}, {})
     const width = Utils.defaultIfNull(currentFrame.width, unstretched.width)
     const height = Utils.defaultIfNull(currentFrame.height, unstretched.height)
 
@@ -640,6 +435,7 @@ export function switchChildToGroupWithParentFrame(
       newOffset.x + currentFrame.x,
       width,
       height,
+      propertyTarget,
     )
 
     const updatedMetadata = switchLayoutMetadata(
@@ -665,6 +461,7 @@ export function switchChildToGroupWithParentFrame(
       newOffset.x + currentFrame.x,
       width,
       height,
+      propertyTarget,
     )
 
     const updatedMetadata = switchLayoutMetadata(
@@ -688,16 +485,19 @@ export function switchPinnedChildToGroup(
   targetOriginalContextMetadata: ElementInstanceMetadataMap,
   currentContextMetadata: ElementInstanceMetadataMap,
   components: UtopiaJSXComponent[],
+  newParentMainAxis: 'horizontal' | 'vertical' | null,
+  propertyTarget: Array<string>,
 ): SwitchLayoutTypeResult {
-  const currentFrame = Utils.defaultIfNull(
-    zeroLocalRect,
-    MetadataUtils.getFrame(target, targetOriginalContextMetadata),
-  ) // TODO How should this behave if there is no rendered frame?
-  const oldParentFrame =
-    MetadataUtils.getFrameInCanvasCoords(EP.parentPath(target), currentContextMetadata) ??
-    zeroCanvasRect
-  const newParentFrame =
-    MetadataUtils.getFrameInCanvasCoords(newParentPath, currentContextMetadata) ?? zeroCanvasRect
+  const currentFrame = MetadataUtils.getFrameOrZeroRect(target, targetOriginalContextMetadata)
+  // TODO How should this behave if there is no rendered frame?
+  const oldParentFrame = MetadataUtils.getFrameOrZeroRectInCanvasCoords(
+    EP.parentPath(target),
+    currentContextMetadata,
+  )
+  const newParentFrame = MetadataUtils.getFrameOrZeroRectInCanvasCoords(
+    newParentPath,
+    currentContextMetadata,
+  )
   const newOffset = Utils.pointDifference(newParentFrame, oldParentFrame)
   const width = currentFrame.width
   const height = currentFrame.height
@@ -709,6 +509,7 @@ export function switchPinnedChildToGroup(
     newOffset.x + currentFrame.x,
     width,
     height,
+    propertyTarget,
   )
 
   const updatedMetadata = switchLayoutMetadata(
@@ -731,20 +532,21 @@ export function switchChildToPinnedWithParentFrame(
   componentMetadata: ElementInstanceMetadataMap,
   components: UtopiaJSXComponent[],
   parentFrame: CanvasRectangle,
+  propertyTarget: ReadonlyArray<string>,
+  allElementProps: AllElementProps,
 ): SwitchLayoutTypeResult {
-  const currentFrame = Utils.defaultIfNull(
-    zeroLocalRect,
-    MetadataUtils.getFrame(originalPath, componentMetadata),
-  ) // TODO How should this behave if there is no rendered frame?
-  const element = MetadataUtils.findElementByElementPath(componentMetadata, originalPath)
-  const oldParentFrame =
-    MetadataUtils.getFrameInCanvasCoords(EP.parentPath(originalPath), componentMetadata) ??
-    zeroCanvasRect
+  const currentFrame = MetadataUtils.getFrameOrZeroRect(originalPath, componentMetadata)
+  // TODO How should this behave if there is no rendered frame?
+  const elementProps = allElementProps[EP.toString(originalPath)]
+  const oldParentFrame = MetadataUtils.getFrameOrZeroRectInCanvasCoords(
+    EP.parentPath(originalPath),
+    componentMetadata,
+  )
   const newOffset = Utils.pointDifference(parentFrame, oldParentFrame)
 
   // When moving flex to pinned, use fixed values or basis values to set width and height
   // TODO LAYOUT unstretched can be different from other switchTo cases, here we don't have access to props from metadata
-  const unstretched = FlexLayoutHelpers.getUnstretchedWidthHeight(element?.props ?? {}, {})
+  const unstretched = FlexLayoutHelpers.getUnstretchedWidthHeight(elementProps ?? {}, {})
   const width = Utils.defaultIfNull(currentFrame.width, unstretched.width)
   const height = Utils.defaultIfNull(currentFrame.height, unstretched.height)
 
@@ -755,6 +557,7 @@ export function switchChildToPinnedWithParentFrame(
     newOffset.x + currentFrame.x,
     width,
     height,
+    propertyTarget,
   )
 
   const updatedMetadata = switchLayoutMetadata(
@@ -778,27 +581,33 @@ function removeFlexAndNonDefaultPinsAddPinnedPropsToComponent(
   left: number,
   width: string | number,
   height: string | number,
+  propertyTarget: ReadonlyArray<string>,
 ) {
   const propsToAdd: Array<ValueAtPath> = [
-    { path: createLayoutPropertyPath('PinnedLeft'), value: jsxAttributeValue(left, emptyComments) },
-    { path: createLayoutPropertyPath('PinnedTop'), value: jsxAttributeValue(top, emptyComments) },
-    { path: createLayoutPropertyPath('Width'), value: jsxAttributeValue(width, emptyComments) },
-    { path: createLayoutPropertyPath('Height'), value: jsxAttributeValue(height, emptyComments) },
+    {
+      path: stylePropPathMappingFn('left', propertyTarget),
+      value: jsExpressionValue(left, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('top', propertyTarget),
+      value: jsExpressionValue(top, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('width', propertyTarget),
+      value: jsExpressionValue(width, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('height', propertyTarget),
+      value: jsExpressionValue(height, emptyComments),
+    },
   ]
 
-  const propsToRemove: Array<LayoutProp | StyleLayoutProp> = [
-    'PinnedBottom',
-    'PinnedRight',
-    'PinnedCenterX',
-    'PinnedCenterY',
-    'flexBasis',
-    'FlexCrossBasis',
-  ]
+  const propsToRemove: Array<StyleLayoutProp> = ['bottom', 'right', 'flexBasis']
 
-  return transformElementAtPath(components, target, (e: JSXElement) => {
+  return transformJSXElementAtPath(components, target, (e: JSXElement) => {
     const flexPropsRemoved = unsetJSXValuesAtPaths(
       e.props,
-      propsToRemove.map((p) => createLayoutPropertyPath(p)),
+      propsToRemove.map((p) => stylePropPathMappingFn(p, propertyTarget)),
     )
     const pinnedPropsAdded = flatMapEither(
       (props) => setJSXValuesAtPaths(props, propsToAdd),
@@ -822,23 +631,36 @@ function removeFlexAndAddPinnedPropsToComponent(
   left: number,
   width: string | number,
   height: string | number,
+  propertyTarget: ReadonlyArray<string>,
 ) {
   const propsToAdd: Array<ValueAtPath> = [
-    { path: createLayoutPropertyPath('PinnedLeft'), value: jsxAttributeValue(left, emptyComments) },
-    { path: createLayoutPropertyPath('PinnedTop'), value: jsxAttributeValue(top, emptyComments) },
-    { path: createLayoutPropertyPath('Width'), value: jsxAttributeValue(width, emptyComments) },
-    { path: createLayoutPropertyPath('Height'), value: jsxAttributeValue(height, emptyComments) },
     {
-      path: createLayoutPropertyPath('position'),
-      value: jsxAttributeValue('absolute', emptyComments),
+      path: stylePropPathMappingFn('left', propertyTarget),
+      value: jsExpressionValue(left, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('top', propertyTarget),
+      value: jsExpressionValue(top, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('width', propertyTarget),
+      value: jsExpressionValue(width, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('height', propertyTarget),
+      value: jsExpressionValue(height, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('position', propertyTarget),
+      value: jsExpressionValue('absolute', emptyComments),
     },
   ]
-  const propsToRemove: Array<LayoutProp | StyleLayoutProp> = ['flexBasis', 'FlexCrossBasis']
+  const propsToRemove: Array<StyleLayoutProp> = ['flexBasis']
 
-  return transformElementAtPath(components, target, (e: JSXElement) => {
+  return transformJSXElementAtPath(components, target, (e: JSXElement) => {
     const flexPropsRemoved = unsetJSXValuesAtPaths(
       e.props,
-      propsToRemove.map((p) => createLayoutPropertyPath(p)),
+      propsToRemove.map((p) => stylePropPathMappingFn(p, propertyTarget)),
     )
     const pinnedPropsAdded = flatMapEither(
       (props) => setJSXValuesAtPaths(props, propsToAdd),
@@ -862,23 +684,31 @@ function changePinsToDefaultOnComponent(
   left: number,
   width: string | number,
   height: string | number,
+  propertyTarget: ReadonlyArray<string>,
 ) {
   const propsToAdd: Array<ValueAtPath> = [
-    { path: createLayoutPropertyPath('PinnedLeft'), value: jsxAttributeValue(left, emptyComments) },
-    { path: createLayoutPropertyPath('PinnedTop'), value: jsxAttributeValue(top, emptyComments) },
-    { path: createLayoutPropertyPath('Width'), value: jsxAttributeValue(width, emptyComments) },
-    { path: createLayoutPropertyPath('Height'), value: jsxAttributeValue(height, emptyComments) },
+    {
+      path: stylePropPathMappingFn('left', propertyTarget),
+      value: jsExpressionValue(left, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('top', propertyTarget),
+      value: jsExpressionValue(top, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('width', propertyTarget),
+      value: jsExpressionValue(width, emptyComments),
+    },
+    {
+      path: stylePropPathMappingFn('height', propertyTarget),
+      value: jsExpressionValue(height, emptyComments),
+    },
   ]
-  const propsToRemove: Array<LayoutProp | StyleLayoutProp> = [
-    'PinnedBottom',
-    'PinnedRight',
-    'PinnedCenterX',
-    'PinnedCenterY',
-  ]
-  return transformElementAtPath(components, target, (e: JSXElement) => {
+  const propsToRemove: Array<StyleLayoutProp> = ['bottom', 'right']
+  return transformJSXElementAtPath(components, target, (e: JSXElement) => {
     const pinPropsRemoved = unsetJSXValuesAtPaths(
       e.props,
-      propsToRemove.map((p) => createLayoutPropertyPath(p)),
+      propsToRemove.map((p) => stylePropPathMappingFn(p, propertyTarget)),
     )
     const pinnedPropsAdded = flatMapEither(
       (props) => setJSXValuesAtPaths(props, propsToAdd),
@@ -895,23 +725,25 @@ function changePinsToDefaultOnComponent(
   })
 }
 
-const propertiesToRound: Array<PropertyPath> = [
-  createLayoutPropertyPath('PinnedCenterX'),
-  createLayoutPropertyPath('PinnedCenterY'),
-  createLayoutPropertyPath('flexBasis'),
-  createLayoutPropertyPath('FlexCrossBasis'),
-  createLayoutPropertyPath('PinnedLeft'),
-  createLayoutPropertyPath('PinnedTop'),
-  createLayoutPropertyPath('Width'),
-  createLayoutPropertyPath('Height'),
-  createLayoutPropertyPath('PinnedRight'),
-  createLayoutPropertyPath('PinnedBottom'),
-]
+function propertiesToRound(propertyTarget: Array<string>): Array<PropertyPath> {
+  return [
+    stylePropPathMappingFn('flexBasis', propertyTarget),
+    stylePropPathMappingFn('left', propertyTarget),
+    stylePropPathMappingFn('top', propertyTarget),
+    stylePropPathMappingFn('width', propertyTarget),
+    stylePropPathMappingFn('height', propertyTarget),
+    stylePropPathMappingFn('right', propertyTarget),
+    stylePropPathMappingFn('bottom', propertyTarget),
+  ]
+}
 
-export function roundAttributeLayoutValues(jsxAttributes: JSXAttributes): JSXAttributes {
-  return propertiesToRound.reduce((workingAttributes, propertyToRound) => {
+export function roundAttributeLayoutValues(
+  propertyTarget: Array<string>,
+  jsxAttributes: JSXAttributes,
+): JSXAttributes {
+  return propertiesToRound(propertyTarget).reduce((workingAttributes, propertyToRound) => {
     // Lookup the attribute given the property path.
-    const attributeResult = getJSXAttributeAtPath(workingAttributes, propertyToRound)
+    const attributeResult = getJSXAttributesAtPath(workingAttributes, propertyToRound)
     const value = attributeResult.attribute
     switch (value.type) {
       case 'ATTRIBUTE_VALUE':
@@ -942,7 +774,7 @@ export function roundAttributeLayoutValues(jsxAttributes: JSXAttributes): JSXAtt
               const withValueSet = setJSXValueAtPath(
                 workingAttributes,
                 propertyToRound,
-                jsxAttributeValue(rounded, emptyComments),
+                jsExpressionValue(rounded, emptyComments),
               )
               // Should we (unexpectedly) be unable to set the value, default the result.
               return defaultEither(workingAttributes, withValueSet)
@@ -955,7 +787,12 @@ export function roundAttributeLayoutValues(jsxAttributes: JSXAttributes): JSXAtt
       case 'ATTRIBUTE_NESTED_ARRAY':
       case 'ATTRIBUTE_NESTED_OBJECT':
       case 'ATTRIBUTE_FUNCTION_CALL':
+      case 'JSX_MAP_EXPRESSION':
       case 'ATTRIBUTE_OTHER_JAVASCRIPT':
+      case 'JS_PROPERTY_ACCESS':
+      case 'JS_ELEMENT_ACCESS':
+      case 'JS_IDENTIFIER':
+      case 'JSX_ELEMENT':
         return workingAttributes
       default:
         const _exhaustiveCheck: never = value
@@ -964,9 +801,12 @@ export function roundAttributeLayoutValues(jsxAttributes: JSXAttributes): JSXAtt
   }, jsxAttributes)
 }
 
-export function roundJSXElementLayoutValues(element: JSXElement): JSXElement {
+export function roundJSXElementLayoutValues(
+  propertyTarget: Array<string>,
+  element: JSXElement,
+): JSXElement {
   return {
     ...element,
-    props: roundAttributeLayoutValues(element.props),
+    props: roundAttributeLayoutValues(propertyTarget, element.props),
   }
 }

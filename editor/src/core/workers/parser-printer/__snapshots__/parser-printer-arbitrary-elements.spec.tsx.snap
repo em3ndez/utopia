@@ -5,6 +5,9 @@ Object {
   "combinedTopLevelArbitraryBlock": Object {
     "definedElsewhere": Array [
       "utopiaCanvasJSXLookup",
+      "utopiaCanvasBlockRanToEnd",
+      "utopiaCanvasEarlyReturnResult",
+      "utopiaCanvasEarlyReturnVoid",
     ],
     "definedWithin": Array [
       "a",
@@ -26,10 +29,13 @@ function b(n) {
     return a(n - 1)
   }
 }",
+    "params": Array [],
     "sourceMap": Object {
       "file": "code.tsx",
-      "mappings": "AAICA,SAASC,CAATD,CAAWE,CAAXF,EAAcG;AACZC,MAAIF,CAACG,IAAIC,CAATF,EAAYD;AACVI,WAAOD,CAAPC;AACDF,GAFDD,MAEOD;AACLI,WAAOC,CAACC,CAACP,CAACG,GAAGK,CAALD,CAARF;AACDI;AAWFA;;AAEDX,SAASQ,CAATR,CAAWE,CAAXF,EAAcG;AACZC,MAAIF,CAACG,IAAIC,CAATF,EAAYD;AACVI,WAAOD,CAAPC;AACDF,GAFDD,MAEOD;AACLI,WAAON,CAACQ,CAACP,CAACG,GAAGK,CAALD,CAARF;AACDI;AACHC",
+      "mappings": "AAKoBA,CAAAA,MAAAA;AAEnBC,WAASC,CAATD,CAAWE,CAAXF,EAAcG;AACZC,QAAIF,CAACG,IAAIC,CAATF,EAAYD;AACVI,aAAOD,CAAPC;AACDF,KAFDD,MAEOD;AACLI,aAAOC,CAACC,CAACP,CAACG,GAAGK,CAALD,CAARF;AACDR;AAWFA;;AAEDC,WAASQ,CAATR,CAAWE,CAAXF,EAAcG;AACZC,QAAIF,CAACG,IAAIC,CAATF,EAAYD;AACVI,aAAOD,CAAPC;AACDF,KAFDD,MAEOD;AACLI,aAAON,CAACQ,CAACP,CAACG,GAAGK,CAALD,CAARF;AACDR;AACHY;;AA1BmBZ;AAAAA;AAAAA;AAAAA;AA0BnBY,CA1BmBZ",
       "names": Array [
+        "
+",
         "function",
         "a",
         "n",
@@ -41,8 +47,6 @@ function b(n) {
         "b",
         "(",
         "1",
-        "
-",
         "}",
       ],
       "sources": Array [
@@ -51,7 +55,10 @@ function b(n) {
       "sourcesContent": Array [
         "
 import * as React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 
 function a(n) {
   if (n <= 0) {
@@ -92,24 +99,70 @@ export var storyboard = (
       ],
       "version": 3,
     },
-    "transpiledJavascript": "function a(n) {
+    "statements": Array [
+      Object {
+        "definedElsewhere": Array [
+          "b",
+        ],
+        "definedWithin": Array [
+          "a",
+        ],
+        "originalJavascript": "
+
+function a(n) {
   if (n <= 0) {
-    return 0;
+    return 0
   } else {
-    return b(n - 1);
+    return b(n - 1)
   }
-}
+}",
+        "type": "JS_OPAQUE_ARBITRARY_STATEMENT",
+        "uid": "",
+      },
+      Object {
+        "definedElsewhere": Array [
+          "a",
+        ],
+        "definedWithin": Array [
+          "b",
+        ],
+        "originalJavascript": "
 
 function b(n) {
   if (n <= 0) {
-    return 0;
+    return 0
   } else {
-    return a(n - 1);
+    return a(n - 1)
   }
-}
-return { a: a, b: b };",
+}",
+        "type": "JS_OPAQUE_ARBITRARY_STATEMENT",
+        "uid": "",
+      },
+    ],
+    "transpiledJavascript": "return (() => {
+  function a(n) {
+    if (n <= 0) {
+      return 0;
+    } else {
+      return b(n - 1);
+    }
+  }
+
+  function b(n) {
+    if (n <= 0) {
+      return 0;
+    } else {
+      return a(n - 1);
+    }
+  }
+
+  return utopiaCanvasBlockRanToEnd({
+    a: a,
+    b: b
+  });
+})();",
     "type": "ARBITRARY_JS_BLOCK",
-    "uniqueID": "",
+    "uid": "",
   },
   "exportsDetail": Array [
     Object {
@@ -121,34 +174,239 @@ return { a: a, b: b };",
       "type": "EXPORT_FUNCTION",
     },
   ],
+  "fullHighlightBounds": Object {
+    "05f": Object {
+      "endCol": 20,
+      "endLine": 18,
+      "startCol": 15,
+      "startLine": 18,
+      "uid": "05f",
+    },
+    "0e6": Object {
+      "endCol": 25,
+      "endLine": 39,
+      "startCol": 20,
+      "startLine": 39,
+      "uid": "0e6",
+    },
+    "170": Object {
+      "endCol": 44,
+      "endLine": 19,
+      "startCol": 38,
+      "startLine": 19,
+      "uid": "170",
+    },
+    "190": Object {
+      "endCol": 28,
+      "endLine": 34,
+      "startCol": 23,
+      "startLine": 34,
+      "uid": "190",
+    },
+    "2c3": Object {
+      "endCol": 44,
+      "endLine": 37,
+      "startCol": 43,
+      "startLine": 37,
+      "uid": "2c3",
+    },
+    "339": Object {
+      "endCol": 41,
+      "endLine": 20,
+      "startCol": 30,
+      "startLine": 20,
+      "uid": "339",
+    },
+    "3bd": Object {
+      "endCol": 14,
+      "endLine": 21,
+      "startCol": 12,
+      "startLine": 21,
+      "uid": "3bd",
+    },
+    "417": Object {
+      "endCol": 52,
+      "endLine": 37,
+      "startCol": 51,
+      "startLine": 37,
+      "uid": "417",
+    },
+    "4f5": Object {
+      "endCol": 72,
+      "endLine": 19,
+      "startCol": 63,
+      "startLine": 19,
+      "uid": "4f5",
+    },
+    "637": Object {
+      "endCol": 28,
+      "endLine": 19,
+      "startCol": 22,
+      "startLine": 19,
+      "uid": "637",
+    },
+    "67a": Object {
+      "endCol": 20,
+      "endLine": 36,
+      "startCol": 15,
+      "startLine": 36,
+      "uid": "67a",
+    },
+    "753": Object {
+      "endCol": 35,
+      "endLine": 37,
+      "startCol": 25,
+      "startLine": 37,
+      "uid": "753",
+    },
+    "79f": Object {
+      "endCol": 43,
+      "endLine": 20,
+      "startCol": 14,
+      "startLine": 20,
+      "uid": "79f",
+    },
+    "a53": Object {
+      "endCol": 1,
+      "endLine": 31,
+      "startCol": 0,
+      "startLine": 25,
+      "uid": "a53",
+    },
+    "aa3": Object {
+      "endCol": 64,
+      "endLine": 34,
+      "startCol": 53,
+      "startLine": 34,
+      "uid": "aa3",
+    },
+    "aaa": Object {
+      "endCol": 26,
+      "endLine": 21,
+      "startCol": 4,
+      "startLine": 17,
+      "uid": "aaa",
+    },
+    "ab0": Object {
+      "endCol": 1,
+      "endLine": 13,
+      "startCol": 0,
+      "startLine": 7,
+      "uid": "ab0",
+    },
+    "app": Object {
+      "endCol": 28,
+      "endLine": 39,
+      "startCol": 6,
+      "startLine": 39,
+      "uid": "app",
+    },
+    "b3c": Object {
+      "endCol": 79,
+      "endLine": 37,
+      "startCol": 13,
+      "startLine": 37,
+      "uid": "b3c",
+    },
+    "bbb": Object {
+      "endCol": 15,
+      "endLine": 41,
+      "startCol": 2,
+      "startLine": 34,
+      "uid": "bbb",
+    },
+    "c79": Object {
+      "endCol": 64,
+      "endLine": 37,
+      "startCol": 61,
+      "startLine": 37,
+      "uid": "c79",
+    },
+    "ccc": Object {
+      "endCol": 12,
+      "endLine": 40,
+      "startCol": 4,
+      "startLine": 35,
+      "uid": "ccc",
+    },
+    "d23": Object {
+      "endCol": 77,
+      "endLine": 37,
+      "startCol": 74,
+      "startLine": 37,
+      "uid": "d23",
+    },
+    "dea": Object {
+      "endCol": 66,
+      "endLine": 34,
+      "startCol": 37,
+      "startLine": 34,
+      "uid": "dea",
+    },
+    "e18": Object {
+      "endCol": 19,
+      "endLine": 21,
+      "startCol": 15,
+      "startLine": 21,
+      "uid": "e18",
+    },
+    "f31": Object {
+      "endCol": 74,
+      "endLine": 19,
+      "startCol": 13,
+      "startLine": 19,
+      "uid": "f31",
+    },
+    "f55": Object {
+      "endCol": 10,
+      "endLine": 21,
+      "startCol": 6,
+      "startLine": 21,
+      "uid": "f55",
+    },
+  },
   "highlightBounds": Object {
     "aaa": Object {
       "endCol": 26,
-      "endLine": 18,
+      "endLine": 21,
       "startCol": 4,
-      "startLine": 14,
+      "startLine": 17,
       "uid": "aaa",
     },
     "app": Object {
       "endCol": 28,
-      "endLine": 36,
+      "endLine": 39,
       "startCol": 6,
-      "startLine": 36,
+      "startLine": 39,
       "uid": "app",
     },
     "bbb": Object {
       "endCol": 15,
-      "endLine": 38,
+      "endLine": 41,
       "startCol": 2,
-      "startLine": 31,
+      "startLine": 34,
       "uid": "bbb",
     },
     "ccc": Object {
       "endCol": 12,
-      "endLine": 37,
+      "endLine": 40,
       "startCol": 4,
-      "startLine": 32,
+      "startLine": 35,
       "uid": "ccc",
+    },
+    "e18": Object {
+      "endCol": 19,
+      "endLine": 21,
+      "startCol": 15,
+      "startLine": 21,
+      "uid": "e18",
+    },
+    "f55": Object {
+      "endCol": 10,
+      "endLine": 21,
+      "startCol": 6,
+      "startLine": 21,
+      "uid": "f55",
     },
   },
   "imports": Object {
@@ -169,7 +427,7 @@ return { a: a, b: b };",
           "name": "Storyboard",
         },
       ],
-      "importedWithName": null,
+      "importedWithName": "Utopia",
     },
   },
   "jsxFactoryFunction": null,
@@ -194,13 +452,16 @@ return { a: a, b: b };",
     },
     Object {
       "importStarAs": false,
-      "importWithName": false,
+      "importWithName": true,
       "imports": Array [
         "Scene",
         "Storyboard",
       ],
       "module": "utopia-api",
-      "rawCode": "import { Scene, Storyboard } from 'utopia-api'",
+      "rawCode": "import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'",
       "type": "IMPORT_STATEMENT",
     },
     Object {
@@ -213,6 +474,9 @@ return { a: a, b: b };",
       "definedElsewhere": Array [
         "b",
         "utopiaCanvasJSXLookup",
+        "utopiaCanvasBlockRanToEnd",
+        "utopiaCanvasEarlyReturnResult",
+        "utopiaCanvasEarlyReturnVoid",
       ],
       "definedWithin": Array [
         "a",
@@ -225,23 +489,23 @@ return { a: a, b: b };",
     return b(n - 1)
   }
 }",
+      "params": Array [],
       "sourceMap": Object {
         "file": "code.tsx",
-        "mappings": "AAICA,SAASC,CAATD,CAAWE,CAAXF,EAAcG;AACZC,MAAIF,CAACG,IAAIC,CAATF,EAAYD;AACVI,WAAOD,CAAPC;AACDF,GAFDD,MAEOD;AACLI,WAAOC,CAACC,CAACP,CAACG,GAAGK,CAALD,CAARF;AACDI;AACHC",
+        "mappings": "AAOCA,CAAAA,MAAAA;AAAQC,WAAOC,CAAPD,CAAOC,CAAPD,EAAOC;AACbC,QAAIC,CAACH,IAAII,CAATF,EAAYG;AACVC,aAAOF,CAAPE;AACDN,KAFDE,MAEOG;AACLC,aAAOC,CAACC,CAACL,CAACH,GAAGS,CAALD,CAARF;AACDL;AACHS;;AANAX;AAAAA;AAAAA;AAMAW,CANAX",
         "names": Array [
           "function",
-          "a",
-          "n",
-          "{",
-          "if",
           " ",
+          "
+",
+          "if",
+          "n",
           "0",
+          "{",
           "return",
           "b",
           "(",
           "1",
-          "
-",
           "}",
         ],
         "sources": Array [
@@ -250,7 +514,10 @@ return { a: a, b: b };",
         "sourcesContent": Array [
           "
 import * as React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 
 function a(n) {
   if (n <= 0) {
@@ -291,16 +558,40 @@ export var storyboard = (
         ],
         "version": 3,
       },
-      "transpiledJavascript": "function a(n) {
+      "statements": Array [
+        Object {
+          "definedElsewhere": Array [
+            "b",
+          ],
+          "definedWithin": Array [
+            "a",
+          ],
+          "originalJavascript": "function a(n) {
   if (n <= 0) {
-    return 0;
+    return 0
   } else {
-    return b(n - 1);
+    return b(n - 1)
   }
-}
-return { a: a };",
+}",
+          "type": "JS_OPAQUE_ARBITRARY_STATEMENT",
+          "uid": "",
+        },
+      ],
+      "transpiledJavascript": "return (() => {
+  function a(n) {
+    if (n <= 0) {
+      return 0;
+    } else {
+      return b(n - 1);
+    }
+  }
+
+  return utopiaCanvasBlockRanToEnd({
+    a: a
+  });
+})();",
       "type": "ARBITRARY_JS_BLOCK",
-      "uniqueID": "",
+      "uid": "",
     },
     Object {
       "rawCode": "
@@ -312,17 +603,20 @@ return { a: a };",
       "arbitraryJSBlock": null,
       "blockOrExpression": "block",
       "declarationSyntax": "var",
+      "functionWrapping": Array [],
       "isFunction": true,
       "name": "App",
-      "param": Object {
-        "boundParam": Object {
-          "defaultExpression": null,
-          "paramName": "props",
-          "type": "REGULAR_PARAM",
+      "params": Array [
+        Object {
+          "boundParam": Object {
+            "defaultExpression": null,
+            "paramName": "props",
+            "type": "REGULAR_PARAM",
+          },
+          "dotDotDotToken": false,
+          "type": "PARAM",
         },
-        "dotDotDotToken": false,
-        "type": "PARAM",
-      },
+      ],
       "propsUsed": Array [],
       "returnStatementComments": Object {
         "leadingComments": Array [],
@@ -331,17 +625,25 @@ return { a: a };",
       "rootElement": Object {
         "children": Array [
           Object {
+            "comments": Object {
+              "leadingComments": Array [],
+              "trailingComments": Array [],
+            },
             "definedElsewhere": Array [
               "b",
             ],
             "elementsWithin": Object {},
-            "javascript": "b(5);",
+            "javascriptWithUIDs": "b(5);",
             "originalJavascript": "b(5)",
+            "params": Array [],
             "sourceMap": Object {
               "file": "code.tsx",
-              "mappings": "OAAE,CAAC,CAAH,CAAG,CAAFA",
+              "mappings": "OAqBSA,CAACC,CAAHC,CAAGD,CAAFE",
               "names": Array [
+                "5",
+                ")",
                 "b",
+                "(",
               ],
               "sources": Array [
                 "code.tsx",
@@ -349,7 +651,10 @@ return { a: a };",
               "sourcesContent": Array [
                 "
 import * as React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 
 function a(n) {
   if (n <= 0) {
@@ -391,26 +696,34 @@ export var storyboard = (
               "version": 3,
             },
             "transpiledJavascript": "return b(5);",
-            "type": "JSX_ARBITRARY_BLOCK",
-            "uniqueID": "",
+            "type": "ATTRIBUTE_OTHER_JAVASCRIPT",
+            "uid": "",
           },
           Object {
             "text": " - ",
             "type": "JSX_TEXT_BLOCK",
-            "uniqueID": "",
+            "uid": "",
           },
           Object {
+            "comments": Object {
+              "leadingComments": Array [],
+              "trailingComments": Array [],
+            },
             "definedElsewhere": Array [
               "a",
             ],
             "elementsWithin": Object {},
-            "javascript": "a(5);",
+            "javascriptWithUIDs": "a(5);",
             "originalJavascript": "a(5)",
+            "params": Array [],
             "sourceMap": Object {
               "file": "code.tsx",
-              "mappings": "OAAE,CAAC,CAAH,CAAG,CAAFA",
+              "mappings": "OAqBkBA,CAACC,CAAHC,CAAGD,CAAFE",
               "names": Array [
+                "5",
+                ")",
                 "a",
+                "(",
               ],
               "sources": Array [
                 "code.tsx",
@@ -418,7 +731,10 @@ export var storyboard = (
               "sourcesContent": Array [
                 "
 import * as React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 
 function a(n) {
   if (n <= 0) {
@@ -460,8 +776,8 @@ export var storyboard = (
               "version": 3,
             },
             "transpiledJavascript": "return a(5);",
-            "type": "JSX_ARBITRARY_BLOCK",
-            "uniqueID": "",
+            "type": "ATTRIBUTE_OTHER_JAVASCRIPT",
+            "uid": "",
           },
         ],
         "name": Object {
@@ -484,6 +800,7 @@ export var storyboard = (
                 "trailingComments": Array [],
               },
               "type": "ATTRIBUTE_VALUE",
+              "uid": "",
               "value": "aaa",
             },
           },
@@ -500,6 +817,7 @@ export var storyboard = (
                 "trailingComments": Array [],
               },
               "type": "ATTRIBUTE_VALUE",
+              "uid": "",
               "value": Object {
                 "backgroundColor": "#FFFFFF",
                 "height": "100%",
@@ -520,6 +838,7 @@ export var storyboard = (
                 "trailingComments": Array [],
               },
               "type": "ATTRIBUTE_VALUE",
+              "uid": "",
               "value": Object {
                 "layoutSystem": "pinSystem",
               },
@@ -527,7 +846,7 @@ export var storyboard = (
           },
         ],
         "type": "JSX_ELEMENT",
-        "uid": "aaa",
+        "uid": "",
       },
       "type": "UTOPIA_JSX_COMPONENT",
       "usedInReactDOMRender": false,
@@ -542,6 +861,9 @@ export var storyboard = (
       "definedElsewhere": Array [
         "a",
         "utopiaCanvasJSXLookup",
+        "utopiaCanvasBlockRanToEnd",
+        "utopiaCanvasEarlyReturnResult",
+        "utopiaCanvasEarlyReturnVoid",
       ],
       "definedWithin": Array [
         "b",
@@ -554,23 +876,23 @@ export var storyboard = (
     return a(n - 1)
   }
 }",
+      "params": Array [],
       "sourceMap": Object {
         "file": "code.tsx",
-        "mappings": "AAsBCA,SAASC,CAATD,CAAWE,CAAXF,EAAcG;AACZC,MAAIF,CAACG,IAAIC,CAATF,EAAYD;AACVI,WAAOD,CAAPC;AACDF,GAFDD,MAEOD;AACLI,WAAOC,CAACC,CAACP,CAACG,GAAGK,CAALD,CAARF;AACDI;AACHC",
+        "mappings": "AAyBCA,CAAAA,MAAAA;AAAQC,WAAOC,CAAPD,CAAOC,CAAPD,EAAOC;AACbC,QAAIC,CAACH,IAAII,CAATF,EAAYG;AACVC,aAAOF,CAAPE;AACDN,KAFDE,MAEOG;AACLC,aAAOC,CAACC,CAACL,CAACH,GAAGS,CAALD,CAARF;AACDL;AACHS;;AANAX;AAAAA;AAAAA;AAMAW,CANAX",
         "names": Array [
           "function",
-          "b",
-          "n",
-          "{",
-          "if",
           " ",
+          "
+",
+          "if",
+          "n",
           "0",
+          "{",
           "return",
           "a",
           "(",
           "1",
-          "
-",
           "}",
         ],
         "sources": Array [
@@ -579,7 +901,10 @@ export var storyboard = (
         "sourcesContent": Array [
           "
 import * as React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 
 function a(n) {
   if (n <= 0) {
@@ -620,16 +945,40 @@ export var storyboard = (
         ],
         "version": 3,
       },
-      "transpiledJavascript": "function b(n) {
+      "statements": Array [
+        Object {
+          "definedElsewhere": Array [
+            "a",
+          ],
+          "definedWithin": Array [
+            "b",
+          ],
+          "originalJavascript": "function b(n) {
   if (n <= 0) {
-    return 0;
+    return 0
   } else {
-    return a(n - 1);
+    return a(n - 1)
   }
-}
-return { b: b };",
+}",
+          "type": "JS_OPAQUE_ARBITRARY_STATEMENT",
+          "uid": "",
+        },
+      ],
+      "transpiledJavascript": "return (() => {
+  function b(n) {
+    if (n <= 0) {
+      return 0;
+    } else {
+      return a(n - 1);
+    }
+  }
+
+  return utopiaCanvasBlockRanToEnd({
+    b: b
+  });
+})();",
       "type": "ARBITRARY_JS_BLOCK",
-      "uniqueID": "",
+      "uid": "",
     },
     Object {
       "rawCode": "
@@ -641,9 +990,10 @@ return { b: b };",
       "arbitraryJSBlock": null,
       "blockOrExpression": "parenthesized-expression",
       "declarationSyntax": "var",
+      "functionWrapping": Array [],
       "isFunction": false,
       "name": "storyboard",
-      "param": null,
+      "params": null,
       "propsUsed": Array [],
       "returnStatementComments": Object {
         "leadingComments": Array [],
@@ -675,12 +1025,13 @@ return { b: b };",
                         "trailingComments": Array [],
                       },
                       "type": "ATTRIBUTE_VALUE",
+                      "uid": "",
                       "value": "app",
                     },
                   },
                 ],
                 "type": "JSX_ELEMENT",
-                "uid": "app",
+                "uid": "",
               },
             ],
             "name": Object {
@@ -703,6 +1054,7 @@ return { b: b };",
                     "trailingComments": Array [],
                   },
                   "type": "ATTRIBUTE_VALUE",
+                  "uid": "",
                   "value": "ccc",
                 },
               },
@@ -719,6 +1071,7 @@ return { b: b };",
                     "trailingComments": Array [],
                   },
                   "type": "ATTRIBUTE_VALUE",
+                  "uid": "",
                   "value": Object {
                     "height": 812,
                     "left": 0,
@@ -730,7 +1083,7 @@ return { b: b };",
               },
             ],
             "type": "JSX_ELEMENT",
-            "uid": "ccc",
+            "uid": "",
           },
         ],
         "name": Object {
@@ -753,6 +1106,7 @@ return { b: b };",
                 "trailingComments": Array [],
               },
               "type": "ATTRIBUTE_VALUE",
+              "uid": "",
               "value": "bbb",
             },
           },
@@ -769,6 +1123,7 @@ return { b: b };",
                 "trailingComments": Array [],
               },
               "type": "ATTRIBUTE_VALUE",
+              "uid": "",
               "value": Object {
                 "layoutSystem": "pinSystem",
               },
@@ -776,7 +1131,7 @@ return { b: b };",
           },
         ],
         "type": "JSX_ELEMENT",
-        "uid": "bbb",
+        "uid": "",
       },
       "type": "UTOPIA_JSX_COMPONENT",
       "usedInReactDOMRender": false,

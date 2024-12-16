@@ -1,11 +1,15 @@
 import React from 'react'
 import Utils from '../../../utils/utils'
-import { ControlStatus, ControlStyles, getControlStyles } from '../common/control-status'
-import { FramePoint } from 'utopia-api'
-import { LayoutPinnedProp } from '../../../core/layout/layout-helpers-new'
-import { FramePinsInfo } from '../common/layout-property-path-hooks'
-import { UtopiaTheme, SquareButton } from '../../../uuiui'
-import { betterReactMemo } from '../../../uuiui-deps'
+import type { ControlStyles } from '../common/control-styles'
+import type { ControlStatus } from '../common/control-status'
+import { getControlStyles } from '../common/control-styles'
+import { FramePoint } from 'utopia-api/core'
+import type {
+  LayoutPinnedProp,
+  LayoutPinnedPropIncludingCenter,
+} from '../../../core/layout/layout-helpers-new'
+import type { FramePinsInfo } from '../common/layout-property-path-hooks'
+import { UtopiaTheme, SquareButton, colorTheme } from '../../../uuiui'
 
 interface PinControlProps {
   handlePinMouseDown: (frameProp: LayoutPinnedProp) => void
@@ -42,9 +46,18 @@ function getStrokeColor(
   framePoints: FramePinsInfo,
   mixed: boolean | undefined,
   point: FramePoint,
+  isGroupChild?: 'group-child' | 'frame-child',
 ) {
   const isPrimary = Utils.propOr(false, 'isPrimaryPosition', framePoints[point])
 
+  if (isGroupChild === 'group-child') {
+    // only set width/height is using main color
+    const isRelative = Utils.propOr(false, 'isRelativePosition', framePoints[point])
+
+    return (isPrimary && isRelative) || !isPrimary
+      ? controlStyles.secondaryColor
+      : controlStyles.mainColor
+  }
   if (isPrimary && !mixed) {
     return controlStyles.mainColor
   } else {
@@ -56,7 +69,13 @@ function getStrokeDashArray(
   framePoints: FramePinsInfo,
   mixed: boolean | undefined,
   point: FramePoint,
+  isGroupChild?: 'group-child' | 'frame-child',
 ) {
+  // unset width/height for group children are not using dashed style
+  if (isGroupChild === 'group-child') {
+    return '0'
+  }
+
   const isRelative = Utils.propOr(false, 'isRelativePosition', framePoints[point])
 
   if (isRelative && !mixed) {
@@ -118,7 +137,7 @@ export const PinControl = (props: PinControlProps) => {
             strokeWidth={MouseCatchmentStrokeWidth}
             stroke='transparent'
             strokeLinecap='butt'
-            onMouseDown={handlePinMouseDown('PinnedTop')}
+            onMouseDown={handlePinMouseDown('top')}
           />
           <path
             d={`M${HorizontalMid},${VerticalMid - VerticalLength} l0,${VerticalLength * 2}`}
@@ -151,7 +170,7 @@ export const PinControl = (props: PinControlProps) => {
             strokeWidth={MouseCatchmentStrokeWidth}
             stroke='transparent'
             strokeLinecap='butt'
-            onMouseDown={handlePinMouseDown('PinnedBottom')}
+            onMouseDown={handlePinMouseDown('bottom')}
           />
           <path
             d={`M${HorizontalEnd},${VerticalMid} l${HorizontalLength},0`}
@@ -166,7 +185,7 @@ export const PinControl = (props: PinControlProps) => {
             strokeWidth={MouseCatchmentStrokeWidth}
             stroke='transparent'
             strokeLinecap='butt'
-            onMouseDown={handlePinMouseDown('PinnedRight')}
+            onMouseDown={handlePinMouseDown('right')}
           />
           <path
             d={`M${HorizontalMid - HorizontalLength},${VerticalMid} l${HorizontalLength * 2},0`}
@@ -194,7 +213,7 @@ export const PinControl = (props: PinControlProps) => {
             strokeWidth={MouseCatchmentStrokeWidth}
             stroke='transparent'
             strokeLinecap='butt'
-            onMouseDown={handlePinMouseDown('PinnedLeft')}
+            onMouseDown={handlePinMouseDown('left')}
           />
           <g transform={`translate(${HorizontalDividerStart},${VerticalDividerStart})`}>
             <path
@@ -237,17 +256,98 @@ interface PinWidthControlProps {
   controlStatus: ControlStatus
   framePins: FramePinsInfo
   mixed?: boolean
-  toggleWidth: () => void
+  handlePinMouseDown: (
+    frameProp: LayoutPinnedPropIncludingCenter,
+    event: React.MouseEvent<Element, MouseEvent>,
+  ) => void
+  isGroupChild: 'group-child' | 'frame-child'
 }
 
-export const PinWidthControl = betterReactMemo('PinWidthControl', (props: PinWidthControlProps) => {
-  const controlStyles: ControlStyles = getControlStyles(props.controlStatus)
+export const PinWidthSVG = React.memo(() => {
   return (
-    <SquareButton onClick={props.toggleWidth} outline={true}>
+    <svg width='20' height='20'>
+      <g id='dimensioncontrols-pin-width' stroke={colorTheme.fg1.value}>
+        <path
+          d={`M${DimensionStart},${VerticalDimensionButtStart} l0,${DimensionButt}`}
+          id='dimensioncontrols-pin-width-EdgeEnd-l'
+          strokeLinecap='round'
+        />
+        <path
+          d={`M${HorizontalDimensionEnd},${VerticalDimensionButtStart} l0,${DimensionButt}`}
+          id='dimensioncontrols-pin-width-EdgeEnd-r'
+          strokeLinecap='round'
+        />
+        <path
+          d={`M${DimensionStart},${DimensionVerticalMid} L${HorizontalDimensionEnd},${DimensionVerticalMid}`}
+          id='dimensioncontrols-pin-width-line'
+          strokeLinecap='round'
+        />
+        <path
+          d={`M 0,0 0,${DimensionHeight} ${DimensionWidth},0 ${DimensionWidth},${DimensionHeight} z`}
+          strokeLinecap='butt'
+          id='dimensioncontrols-pin-width-transparent'
+          stroke='transparent'
+          fill='transparent'
+        />
+      </g>
+    </svg>
+  )
+})
+
+export const PinHeightSVG = React.memo(() => {
+  return (
+    <svg width='20' height='20'>
+      <g id='dimensioncontrols-pin-height' stroke={colorTheme.fg1.value}>
+        <path
+          d={`M${HorizontalDimensionButtStart},${DimensionStart} l${DimensionButt},0`}
+          id='dimensioncontrols-pin-height-EdgeEnd-t'
+          strokeLinecap='round'
+        />
+        <path
+          d={`M${HorizontalDimensionButtStart},${VerticalDimensionEnd} l${DimensionButt},0`}
+          id='dimensioncontrols-pin-height-EdgeEnd-b'
+          strokeLinecap='round'
+        />
+        <path
+          d={`M${DimensionHorizontalMid},${DimensionStart} L${DimensionHorizontalMid},${VerticalDimensionEnd}`}
+          id='dimensioncontrols-pin-height-line'
+          strokeLinecap='round'
+        />
+        <path
+          d={`M 0,0 ${DimensionWidth},0 0,${DimensionHeight} ${DimensionWidth},${DimensionHeight} z`}
+          id='dimensioncontrols-pin-width-transparent'
+          stroke='transparent'
+          fill='transparent'
+        />
+      </g>
+    </svg>
+  )
+})
+
+export const PinWidthControl = React.memo((props: PinWidthControlProps) => {
+  const { handlePinMouseDown } = props
+
+  const onClick = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+      handlePinMouseDown('width', event)
+    },
+    [handlePinMouseDown],
+  )
+
+  const controlStyles: ControlStyles = getControlStyles(props.controlStatus)
+
+  return (
+    <SquareButton data-testid={'pin-width-control-button'} onClick={onClick}>
       <svg width='20' height='20'>
         <g
           id='dimensioncontrols-pin-width'
-          stroke={getStrokeColor(controlStyles, props.framePins, props.mixed, FramePoint.Width)}
+          stroke={getStrokeColor(
+            controlStyles,
+            props.framePins,
+            props.mixed,
+            FramePoint.Width,
+            props.isGroupChild,
+          )}
         >
           <path
             d={`M${DimensionStart},${VerticalDimensionButtStart} l0,${DimensionButt}`}
@@ -262,7 +362,12 @@ export const PinWidthControl = betterReactMemo('PinWidthControl', (props: PinWid
           <path
             d={`M${DimensionStart},${DimensionVerticalMid} L${HorizontalDimensionEnd},${DimensionVerticalMid}`}
             id='dimensioncontrols-pin-width-line'
-            strokeDasharray={getStrokeDashArray(props.framePins, props.mixed, FramePoint.Width)}
+            strokeDasharray={getStrokeDashArray(
+              props.framePins,
+              props.mixed,
+              FramePoint.Width,
+              props.isGroupChild,
+            )}
             strokeLinecap='round'
           />
           <path
@@ -282,45 +387,66 @@ interface PinHeightControlProps {
   controlStatus: ControlStatus
   framePins: FramePinsInfo
   mixed?: boolean
-  toggleHeight: () => void
+  handlePinMouseDown: (
+    frameProp: LayoutPinnedPropIncludingCenter,
+    event: React.MouseEvent<Element, MouseEvent>,
+  ) => void
+  isGroupChild: 'group-child' | 'frame-child'
 }
 
-export const PinHeightControl = betterReactMemo(
-  'PinHeightControl',
-  (props: PinHeightControlProps) => {
-    const controlStyles: ControlStyles = getControlStyles(props.controlStatus)
-    return (
-      <SquareButton onClick={props.toggleHeight} outline={true}>
-        <svg width='20' height='20'>
-          <g
-            id='dimensioncontrols-pin-height'
-            stroke={getStrokeColor(controlStyles, props.framePins, props.mixed, FramePoint.Height)}
-          >
-            <path
-              d={`M${HorizontalDimensionButtStart},${DimensionStart} l${DimensionButt},0`}
-              id='dimensioncontrols-pin-height-EdgeEnd-t'
-              strokeLinecap='round'
-            />
-            <path
-              d={`M${HorizontalDimensionButtStart},${VerticalDimensionEnd} l${DimensionButt},0`}
-              id='dimensioncontrols-pin-height-EdgeEnd-b'
-              strokeLinecap='round'
-            />
-            <path
-              d={`M${DimensionHorizontalMid},${DimensionStart} L${DimensionHorizontalMid},${VerticalDimensionEnd}`}
-              id='dimensioncontrols-pin-height-line'
-              strokeDasharray={getStrokeDashArray(props.framePins, props.mixed, FramePoint.Height)}
-              strokeLinecap='round'
-            />
-            <path
-              d={`M 0,0 ${DimensionWidth},0 0,${DimensionHeight} ${DimensionWidth},${DimensionHeight} z`}
-              id='dimensioncontrols-pin-width-transparent'
-              stroke='transparent'
-              fill='transparent'
-            />
-          </g>
-        </svg>
-      </SquareButton>
-    )
-  },
-)
+export const PinHeightControl = React.memo((props: PinHeightControlProps) => {
+  const controlStyles: ControlStyles = getControlStyles(props.controlStatus)
+  const { handlePinMouseDown } = props
+
+  const onClick = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+      handlePinMouseDown('height', event)
+    },
+    [handlePinMouseDown],
+  )
+
+  return (
+    <SquareButton data-testid={'pin-height-control-button'} onClick={onClick}>
+      <svg width='20' height='20'>
+        <g
+          id='dimensioncontrols-pin-height'
+          stroke={getStrokeColor(
+            controlStyles,
+            props.framePins,
+            props.mixed,
+            FramePoint.Height,
+            props.isGroupChild,
+          )}
+        >
+          <path
+            d={`M${HorizontalDimensionButtStart},${DimensionStart} l${DimensionButt},0`}
+            id='dimensioncontrols-pin-height-EdgeEnd-t'
+            strokeLinecap='round'
+          />
+          <path
+            d={`M${HorizontalDimensionButtStart},${VerticalDimensionEnd} l${DimensionButt},0`}
+            id='dimensioncontrols-pin-height-EdgeEnd-b'
+            strokeLinecap='round'
+          />
+          <path
+            d={`M${DimensionHorizontalMid},${DimensionStart} L${DimensionHorizontalMid},${VerticalDimensionEnd}`}
+            id='dimensioncontrols-pin-height-line'
+            strokeDasharray={getStrokeDashArray(
+              props.framePins,
+              props.mixed,
+              FramePoint.Height,
+              props.isGroupChild,
+            )}
+            strokeLinecap='round'
+          />
+          <path
+            d={`M 0,0 ${DimensionWidth},0 0,${DimensionHeight} ${DimensionWidth},${DimensionHeight} z`}
+            id='dimensioncontrols-pin-width-transparent'
+            stroke='transparent'
+            fill='transparent'
+          />
+        </g>
+      </svg>
+    </SquareButton>
+  )
+})

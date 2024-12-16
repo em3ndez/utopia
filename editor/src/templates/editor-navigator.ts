@@ -1,24 +1,20 @@
-import { ElementPath } from '../core/shared/project-file-types'
-import { DerivedState, EditorState } from '../components/editor/store/editor-state'
-import { LocalNavigatorAction } from '../components/navigator/actions'
-import { DragSelection } from '../components/navigator/navigator-item/navigator-item-dnd-container'
+import type { ElementPath } from '../core/shared/project-file-types'
 import * as EP from '../core/shared/element-path'
-import Utils from '../utils/utils'
-import { NavigatorStateKeepDeepEquality } from '../utils/deep-equality-instances'
+import type {
+  DerivedState,
+  EditorState,
+  NavigatorEntry,
+} from '../components/editor/store/editor-state'
+import type { LocalNavigatorAction } from '../components/navigator/actions'
+import { NavigatorStateKeepDeepEquality } from '../components/editor/store/store-deep-equality-instances'
 
-export function createDragSelections(
-  elementPaths: ElementPath[],
-  selectedViews: ElementPath[],
-): Array<DragSelection> {
-  let selections: Array<DragSelection> = []
-  Utils.fastForEach(selectedViews, (selectedView) => {
-    selections.push({
-      elementPath: selectedView,
-      index: elementPaths.findIndex((tp) => EP.pathsEqual(tp, selectedView)),
-    })
-  })
-  selections.sort((a, b) => b.index - a.index)
-  return selections
+export function getSelectedNavigatorEntries(
+  selectedViews: Array<ElementPath>,
+  navigatorEntries: Array<NavigatorEntry>,
+): Array<NavigatorEntry> {
+  return navigatorEntries.filter((v) =>
+    selectedViews.some((selectedView) => EP.pathsEqual(selectedView, v.elementPath)),
+  )
 }
 
 export const runLocalNavigatorAction = function (
@@ -27,15 +23,25 @@ export const runLocalNavigatorAction = function (
   action: LocalNavigatorAction,
 ): EditorState {
   switch (action.action) {
-    case 'DROP_TARGET_HINT':
+    case 'SHOW_DROP_TARGET_HINT':
       return {
         ...model,
         navigator: NavigatorStateKeepDeepEquality(model.navigator, {
           ...model.navigator,
           dropTargetHint: {
-            target: action.target,
             type: action.type,
+            displayAtEntry: action.displayAtEntry,
+            targetParent: action.targetParentEntry,
+            targetIndexPosition: action.indexInTargetParent,
           },
+        }).value,
+      }
+    case 'HIDE_DROP_TARGET_HINT':
+      return {
+        ...model,
+        navigator: NavigatorStateKeepDeepEquality(model.navigator, {
+          ...model.navigator,
+          dropTargetHint: null,
         }).value,
       }
     default:

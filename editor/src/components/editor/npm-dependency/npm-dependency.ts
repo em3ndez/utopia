@@ -1,39 +1,37 @@
 import * as json5 from 'json5'
-import { MapLike } from 'typescript'
+import type { MapLike } from 'typescript'
 import { UTOPIA_BACKEND } from '../../../common/env-vars'
 import { sameTextFile } from '../../../core/model/project-file-utils'
-import {
+import type {
   PossiblyUnversionedNpmDependency,
   PackageStatusMap,
   PackageStatus,
   RequestedNpmDependency,
+} from '../../../core/shared/npm-dependency-types'
+import {
   requestedNpmDependency,
   unversionedNpmDependency,
   resolvedNpmDependency,
 } from '../../../core/shared/npm-dependency-types'
+import type { Imports, ProjectFile, ImportDetails } from '../../../core/shared/project-file-types'
 import {
   isTextFile,
-  Imports,
   ProjectContents,
-  ProjectFile,
   NodeModules,
   esCodeFile,
-  ImportDetails,
 } from '../../../core/shared/project-file-types'
 import Utils from '../../../utils/utils'
-import {
-  EditorState,
-  packageJsonFileFromProjectContents,
-  updatePackageJsonInEditorState,
-} from '../store/editor-state'
+import type { EditorState } from '../store/editor-state'
+import { updatePackageJsonInEditorState } from '../store/editor-state'
 import { pluck } from '../../../core/shared/array-utils'
 import { shallowEqual } from '../../../core/shared/equality-utils'
-import { useEditorState } from '../store/store-hook'
+import { Substores, useEditorState } from '../store/store-hook'
 import React from 'react'
 import { resolvedDependencyVersions } from '../../../core/third-party/third-party-components'
 import { deepFreeze } from '../../../utils/deep-freeze'
 import * as Semver from 'semver'
-import { ProjectContentTreeRoot } from '../../assets'
+import type { ProjectContentTreeRoot } from '../../assets'
+import { packageJsonFileFromProjectContents } from '../../assets'
 import * as npa from 'npm-package-arg'
 import * as GitHost from 'hosted-git-info'
 import { importDefault, importStar } from '../../../core/es-modules/commonjs-interop'
@@ -264,9 +262,10 @@ export async function checkPackageVersionExists(
   }
 }
 
-function allDependenciesFromUnparsedPackageJson(
-  packageJson: string,
-): { dependencies: any; devDependencies: any } {
+function allDependenciesFromUnparsedPackageJson(packageJson: string): {
+  dependencies: any
+  devDependencies: any
+} {
   try {
     const parsedJSON = json5.parse(packageJson)
     if (typeof parsedJSON === 'object') {
@@ -437,12 +436,16 @@ export function immediatelyResolvableDependenciesWithEditorRequirements(
 }
 
 export function usePackageDependencies(): Array<RequestedNpmDependency> {
-  const packageJsonFile = useEditorState((store) => {
-    return packageJsonFileFromProjectContents(store.editor.projectContents)
-  }, 'usePackageDependencies')
+  const packageJsonFile = useEditorState(
+    Substores.projectContents,
+    (store) => {
+      return packageJsonFileFromProjectContents(store.editor.projectContents)
+    },
+    'usePackageDependencies',
+  )
 
   return React.useMemo(() => {
-    if (isTextFile(packageJsonFile)) {
+    if (packageJsonFile != null && isTextFile(packageJsonFile)) {
       return dependenciesFromPackageJsonContents(packageJsonFile.fileContents.code)
     } else {
       return []
@@ -452,12 +455,23 @@ export function usePackageDependencies(): Array<RequestedNpmDependency> {
 
 export function usePossiblyResolvedPackageDependencies(): Array<PossiblyUnversionedNpmDependency> {
   const basePackageDependencies = usePackageDependencies()
-  const files = useEditorState((store) => {
-    return store.editor.nodeModules.files
-  }, 'usePossiblyResolvedPackageDependencies')
+  const { files } = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return { files: store.editor.nodeModules.files }
+    },
+    'usePossiblyResolvedPackageDependencies',
+  )
+  const { builtInDependencies } = useEditorState(
+    Substores.restOfStore,
+    (store) => {
+      return { builtInDependencies: store.builtInDependencies }
+    },
+    'usePossiblyResolvedPackageDependencies',
+  )
   return React.useMemo(() => {
-    return resolvedDependencyVersions(basePackageDependencies, files)
-  }, [basePackageDependencies, files])
+    return resolvedDependencyVersions(basePackageDependencies, files, builtInDependencies)
+  }, [basePackageDependencies, files, builtInDependencies])
 }
 
 export function updateDependenciesInPackageJson(
@@ -522,10 +536,7 @@ export function importResultFromImports(
     if (requireResult == null) {
       console.warn(`Could not find ${importSource} with a require call.`)
     } else {
-      result = {
-        ...result,
-        ...importResultFromModule(imports[importSource], requireResult),
-      }
+      Object.assign(result, importResultFromModule(imports[importSource], requireResult))
     }
   })
   return result

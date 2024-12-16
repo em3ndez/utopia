@@ -1,17 +1,20 @@
-/**@jsx jsx */
+/** @jsxRuntime classic */
+/** @jsx jsx */
 import React from 'react'
 import { css, jsx } from '@emotion/react'
-import { PropertyPath } from '../../../core/shared/project-file-types'
+import type { PropertyPath } from '../../../core/shared/project-file-types'
 import * as PP from '../../../core/shared/property-path'
-import { betterReactMemo, InspectorContextMenuWrapper } from '../../../uuiui-deps'
 import { optionalAddOnUnsetValues } from '../common/context-menu-items'
 import { useInspectorInfoSimpleUntyped } from '../common/property-path-hooks'
+import type { ControlStyles } from '../common/control-styles'
+import { useColorTheme } from '../../../uuiui'
 
 type PropertyLabelProps = {
   target: ReadonlyArray<PropertyPath>
   propNamesToUnset?: string[]
   style?: React.CSSProperties
   children: React.ReactNode
+  controlStyles?: ControlStyles
 }
 
 function useMetadataInfoForDomain(target: ReadonlyArray<PropertyPath>) {
@@ -22,7 +25,8 @@ function useMetadataInfoForDomain(target: ReadonlyArray<PropertyPath>) {
   )
 }
 
-export const PropertyLabel = betterReactMemo('PropertyLabel', (props: PropertyLabelProps) => {
+export const PropertyLabel = React.memo((props: PropertyLabelProps) => {
+  const colorTheme = useColorTheme()
   const metadata = useMetadataInfoForDomain(props.target)
   const propsToUnset = props.propNamesToUnset ?? props.target.map(PP.lastPart)
   const contextMenuItems = optionalAddOnUnsetValues(
@@ -31,20 +35,21 @@ export const PropertyLabel = betterReactMemo('PropertyLabel', (props: PropertyLa
     metadata.onUnsetValues,
   )
 
-  const controlStyles = metadata.controlStyles
+  const controlStyles = props.controlStyles ?? metadata.controlStyles
 
   return (
     <div
       css={{
+        ...(props.style as any), // TODO Emotion and React 18 types don't like each other
         display: 'flex',
         alignItems: 'center',
-        overflowX: 'scroll',
         whiteSpace: 'nowrap',
         textOverflow: 'ellipsis',
-        color: controlStyles.mainColor,
+        color: colorTheme.fg1.value,
       }}
     >
       {props.children}
     </div>
   )
 })
+PropertyLabel.displayName = 'PropertyLabel'

@@ -1,19 +1,14 @@
 import Chroma from 'chroma-js'
 import React from 'react'
+import type { CSSBackgroundLayers, CSSColor, CSSGradientStop } from '../../../common/css-utils'
 import {
-  CSSBackgroundLayers,
-  CSSColor,
   cssColorToChromaColorOrDefault,
-  CSSGradientStop,
   cssNumber,
   orderStops,
   printLinearGradientBackgroundLayer,
 } from '../../../common/css-utils'
-import {
-  checkerboardBackground,
-  OnSubmitValueAndUpdateLocalState,
-} from '../../../common/inspector-utils'
-import { UseSubmitValueFactory } from '../../../common/property-path-hooks'
+import type { OnSubmitValueAndUpdateLocalState } from '../../../common/inspector-utils'
+import type { UseSubmitValueFactory } from '../../../common/property-path-hooks'
 import {
   GradientPickerWidth,
   GradientStopCaratSize,
@@ -22,8 +17,9 @@ import {
 } from '../../../controls/color-picker'
 import { inspectorEdgePadding } from './background-picker'
 import { clampValue } from '../../../../../core/shared/math-utils'
-import { useColorTheme, FlexColumn, UtopiaTheme } from '../../../../../uuiui'
-import { betterReactMemo } from '../../../../../uuiui-deps'
+import { useColorTheme, FlexColumn, UtopiaStyles } from '../../../../../uuiui'
+
+const checkerboardBackground = UtopiaStyles.backgrounds.checkerboardBackground
 
 interface GradientStopProps {
   stop: CSSGradientStop
@@ -31,12 +27,11 @@ interface GradientStopProps {
   setSelectedIndex: (index: number) => void
   unorderedIndex: number
   focusStopEditor: () => void
-  indexedUpdateStop: (newStop: CSSGradientStop, transient: boolean) => void
+  indexedUpdateStop: (newStop: CSSGradientStop, dragState: 'dragStart' | 'drag' | 'dragEnd') => void
   indexedDeleteStop: () => void
 }
 
-const GradientStop = betterReactMemo<GradientStopProps>(
-  'GradientStop',
+const GradientStop = React.memo<GradientStopProps>(
   ({
     stop,
     selected,
@@ -76,7 +71,7 @@ const GradientStop = betterReactMemo<GradientStopProps>(
               dragScreenOrigin.current.x,
               valueAtDragOrigin.current,
             ),
-            true,
+            'drag',
           )
         }
       },
@@ -99,7 +94,7 @@ const GradientStop = betterReactMemo<GradientStopProps>(
                   dragScreenOrigin.current.x,
                   valueAtDragOrigin.current,
                 ),
-                false,
+                'dragEnd',
               )
             }
           }
@@ -303,11 +298,11 @@ function getIndexedUpdateStop(
   index: number,
   oldValue: Array<CSSGradientStop>,
   setStateStops: OnSubmitValueAndUpdateLocalState<Array<CSSGradientStop>>,
-): (newStop: CSSGradientStop, transient: boolean) => void {
-  return function updateStop(newStop, transient) {
+): (newStop: CSSGradientStop, dragState: 'dragStart' | 'drag' | 'dragEnd') => void {
+  return function updateStop(newStop, dragState) {
     const workingValue = [...oldValue]
     workingValue[index] = newStop
-    setStateStops(workingValue, transient)
+    setStateStops(workingValue, dragState)
   }
 }
 
@@ -354,14 +349,13 @@ function deleteStopAndUpdateIndex(
       },
     )
     if (isFinite(lowestDistance) && indexWithLowestDistance >= 0) {
-      setStops(newStops, false)
+      setStops(newStops, 'dragEnd')
       setSelectedStopUnorderedIndex(indexWithLowestDistance)
     }
   }
 }
 
-export const GradientStopsEditor = betterReactMemo<GradientControlProps>(
-  'GradientStopsEditor',
+export const GradientStopsEditor = React.memo<GradientControlProps>(
   ({
     selectedStopUnorderedIndex,
     setSelectedStopUnorderedIndex,
@@ -377,7 +371,7 @@ export const GradientStopsEditor = betterReactMemo<GradientControlProps>(
             Number(((e.nativeEvent.offsetX / GradientPickerWidth) * 100).toFixed(2)),
             stops,
           )
-          setLocalAndEditorStops(newStops, false)
+          setLocalAndEditorStops(newStops, 'dragStart')
           setSelectedStopUnorderedIndex(newStops.length - 1)
         }
       },
@@ -398,14 +392,14 @@ export const GradientStopsEditor = betterReactMemo<GradientControlProps>(
           // TODO: transient actions when holding
           setLocalAndEditorStops(
             incrementSelectedStopPosition(e.shiftKey ? -10 : -1, stops, selectedStopUnorderedIndex),
-            false,
+            'notDragging',
           )
           e.stopPropagation()
         } else if (e.key === 'ArrowRight') {
           // TODO: transient actions when holding
           setLocalAndEditorStops(
             incrementSelectedStopPosition(e.shiftKey ? 10 : 1, stops, selectedStopUnorderedIndex),
-            false,
+            'notDragging',
           )
           e.stopPropagation()
         }

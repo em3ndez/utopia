@@ -1,5 +1,11 @@
+import type {
+  JSExpressionOtherJavaScript,
+  JSXElement,
+  UtopiaJSXComponent,
+} from '../../shared/element-template'
 import { forEachValue } from '../../shared/object-utils'
-import { parseThenPrint } from './parser-printer.test-utils'
+import type { ParseSuccess } from '../../shared/project-file-types'
+import { parseThenPrint, testParseModifyPrint } from './parser-printer.test-utils'
 import { applyPrettier } from 'utopia-vscode-common'
 
 describe('Parsing and printing code with comments', () => {
@@ -45,7 +51,7 @@ describe('Parsing and printing code with comments', () => {
     commentAfterAllAttributes: '/* Comment after all attributes */',
   }
 
-  const notYetSupported: Array<keyof typeof comments> = []
+  const notYetSupported: Array<string> = []
 
   const code = applyPrettier(
     `
@@ -92,7 +98,7 @@ describe('Parsing and printing code with comments', () => {
           >
           {
             ${comments.commentAtStartOfJSXExpression}
-            true ${comments.commentInsideJSXExpression}
+            [].length === 0 ${comments.commentInsideJSXExpression}
             ? <div/>
             : <div/>
             ${comments.commentAtEndOfJSXExpression}
@@ -117,11 +123,12 @@ describe('Parsing and printing code with comments', () => {
   forEachValue((commentText, commentKey) => {
     const testFn = notYetSupported.includes(commentKey) ? xit : it
     testFn(`should retain the comment '${commentText}'`, () => {
+      // eslint-disable-next-line jest/no-standalone-expect
       expect(parsedThenPrinted.includes(commentText)).toBeTruthy()
       const firstIndex = parsedThenPrinted.indexOf(commentText)
       const lastIndex = parsedThenPrinted.lastIndexOf(commentText)
       if (firstIndex !== lastIndex) {
-        fail(`Found more than one instance of ${commentText}`)
+        throw new Error(`Found more than one instance of ${commentText}`)
       }
     })
   }, comments)
@@ -161,20 +168,21 @@ describe('Parsing and printing code with comments', () => {
             }
             someProp2={{
               /* Comment before object key */ someKey /* Comment after object key */:
-                /* Comment before object value */ 'someValue' /* Comment after object separator */ /* Comment after object value */,
+                /* Comment before object value */ 'someValue' /* Comment after object value */ /* Comment after object separator */,
               someKey2: 'someValue2',
             }}
             someProp3={[
-              /* Comment before array value */ 100 /* Comment after array separator */ /* Comment after array value */,
+              /* Comment before array value */ 100 /* Comment after array value */ /* Comment after array separator */,
               200,
             ]} /* Comment after all attributes */
           >
             {
               /* Comment at start of JSX expression */
-              true /* Comment inside JSX expression */ ? (
-                <div data-uid='4cf' />
+              [].length ===
+              0 /* Comment inside JSX expression */ ? (
+                <div data-uid='8eb' />
               ) : (
-                <div data-uid='b93' />
+                <div data-uid='a87' />
               ) /* Comment at end of JSX expression */
             }
             {/* Comment inside an empty JSX expression */}
@@ -190,5 +198,31 @@ describe('Parsing and printing code with comments', () => {
       // Final line comment
       "
     `)
+  })
+
+  it('Correctly supports actually parsing and updating comments in JS Expressions', () => {
+    const startingCode = applyPrettier(
+      `const App = () => <div>{/* ingredients */}</div>`,
+      false,
+    ).formatted
+    testParseModifyPrint(
+      'test.jsx',
+      applyPrettier(`const App = () => <div>{/* ingredients */}</div>`, false).formatted,
+      applyPrettier(`const App = () => <div>{/* cake */}</div>`, false).formatted,
+      (parsed) => {
+        const component = (parsed as ParseSuccess).topLevelElements[0]
+        const rootElement = (component as UtopiaJSXComponent).rootElement
+        const jsxBlock = (rootElement as JSXElement).children[0] as JSExpressionOtherJavaScript
+
+        // Check the comment was parsed
+        expect(jsxBlock.comments.leadingComments[0].comment).toEqual(' ingredients ')
+
+        // Replace it
+        jsxBlock.comments.leadingComments[0].comment = ' cake '
+
+        return parsed
+      },
+      true,
+    )
   })
 })

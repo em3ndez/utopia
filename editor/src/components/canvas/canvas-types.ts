@@ -1,36 +1,44 @@
-import { ReactElement } from 'react'
-import { ElementInstanceMetadataMap } from '../../core/shared/element-template'
-import { PropertyPath, ElementPath } from '../../core/shared/project-file-types'
-import { KeyCharacter, KeysPressed } from '../../utils/keyboard'
-import { Modifiers } from '../../utils/modifiers'
-import { keepDeepReferenceEqualityIfPossible } from '../../utils/react-performance'
-import {
+import type { ReactElement } from 'react'
+import type { JSExpression, PartOfJSXAttributeValue } from '../../core/shared/element-template'
+import type { PropertyPath, ElementPath } from '../../core/shared/project-file-types'
+import type { KeysPressed } from '../../utils/keyboard'
+import type { Modifiers } from '../../utils/modifiers'
+import type {
   CanvasPoint,
   CanvasRectangle,
   CanvasVector,
   CoordinateMarker,
   Rectangle,
-  Size,
   WindowPoint,
 } from '../../core/shared/math-utils'
-import { EditorPanel } from '../common/actions/index'
-import { EditorAction } from '../editor/action-types'
-import { Mode } from '../editor/editor-modes'
-import { EditorState, OriginalCanvasAndLocalFrame } from '../editor/store/editor-state'
-import { isFeatureEnabled } from '../../utils/feature-switches'
-import { xor } from '../../core/shared/utils'
-import {
-  LayoutFlexElementNumericProp,
-  LayoutFlexElementProp,
-  LayoutTargetableProp,
-} from '../../core/layout/layout-helpers-new'
+import type { EditorPanel } from '../common/actions/index'
+import type { Mode } from '../editor/editor-modes'
+import type { EditorState } from '../editor/store/editor-state'
+import { assertNever } from '../../core/shared/utils'
+import type { LayoutTargetableProp } from '../../core/layout/layout-helpers-new'
+import type {
+  DragInteractionData,
+  InteractionSessionWithoutMetadata,
+} from './canvas-strategies/interaction-state'
+import type { CanvasStrategyId } from './canvas-strategies/canvas-strategy-types'
+import type { MouseButtonsPressed } from '../../utils/mouse'
+import type { FlexWrap } from 'utopia-api/core'
+import type {
+  CSSBorderRadius,
+  CSSNumber,
+  CSSOverflow,
+  CSSPadding,
+  FlexDirection,
+  ParsedCSSProperties,
+} from '../inspector/common/css-utils'
+import type { ScreenSize } from './responsive-types'
 
 export const CanvasContainerID = 'canvas-container'
+export const SceneContainerName = 'scene'
 
+// TODO: this should not be an enum but a const object
 export enum CSSCursor {
-  Select = "-webkit-image-set( url( '/editor/cursors/cursor-default.png ') 1x, url( '/editor/cursors/cursor-default@2x.png ') 2x ) 4 4, default",
-  PhysicsDefault = "-webkit-image-set( url( '/editor/cursors/cursor-default.png ') 1x, url( '/editor/cursors/cursor-default@2x.png ') 2x ) 4 4, default",
-  Crosshair = "-webkit-image-set( url( '/editor/cursors/cursor-insert.png ') 1x, url( '/editor/cursors/cursor-insert@2x.png ') 2x ) 8 8, crosshair",
+  Select = "-webkit-image-set( url( '/editor/cursors/cursor-default.png ') 1x, url( '/editor/cursors/cursor-default@2x.png') 2x ) 4 4, default",
   Insert = "-webkit-image-set( url( '/editor/cursors/cursor-insert.png ') 1x, url( '/editor/cursors/cursor-insert@2x.png ') 2x ) 8 8, crosshair",
   ResizeNESW = "-webkit-image-set( url( '/editor/cursors/cursor-nesw-resize.png ') 1x, url( '/editor/cursors/cursor-nesw-resize@2x.png ') 2x ) 7 7, nesw-resize",
   ResizeNWSE = "-webkit-image-set( url( '/editor/cursors/cursor-nwse-resize.png ') 1x, url( '/editor/cursors/cursor-nwse-resize@2x.png ') 2x ) 7 7, nwse-resize",
@@ -39,17 +47,29 @@ export enum CSSCursor {
   Move = "-webkit-image-set( url( '/editor/cursors/cursor-moving.png ') 1x, url( '/editor/cursors/cursor-moving@2x.png ') 2x ) 4 4, default",
   ZoomIn = "-webkit-image-set( url( '/editor/cursors/cursor-zoom-in.png ') 1x, url( '/editor/cursors/cursor-zoom-in@2x.png ') 2x ) 8 8, zoom-in",
   ZoomOut = "-webkit-image-set( url( '/editor/cursors/cursor-zoom-out.png ') 1x, url( '/editor/cursors/cursor-zoom-out@2x.png ') 2x ) 8 8, zoom-out",
-  VectorDefault = "-webkit-image-set( url( '/editor/cursors/cursor-vector-default.png ') 1x, url( '/editor/cursors/cursor-vector-default@2x.png ') 2x ) 4 4, zoom-out",
-  VectorInsert = "-webkit-image-set( url( '/editor/cursors/cursor-vector-default.png ') 1x, url( '/editor/cursors/cursor-vector-default@2x.png ') 2x ) 4 4, zoom-out",
-  VectorDelete = "-webkit-image-set( url( '/editor/cursors/cursor-vector-default.png ') 1x, url( '/editor/cursors/cursor-vector-default@2x.png ') 2x ) 4 4, zoom-out",
-  VectorMove = "-webkit-image-set( url( '/editor/cursors/cursor-vector-default.png ') 1x, url( '/editor/cursors/cursor-vector-default@2x.png ') 2x ) 4 4, zoom-out",
-  VertexDefault = "-webkit-image-set( url( '/editor/cursors/cursor-vertex-default.png ') 1x, url( '/editor/cursors/cursor-vector-default@2x.png ') 2x ) 4 4, zoom-out",
-  VertexInsert = "-webkit-image-set( url( '/editor/cursors/cursor-vertex-default.png ') 1x, url( '/editor/cursors/cursor-vertex-default@2x.png ') 2x ) 4 4, zoom-out",
-  VertexDelete = "-webkit-image-set( url( '/editor/cursors/cursor-vertex-default.png ') 1x, url( '/editor/cursors/cursor-vertex-default@2x.png ') 2x ) 4 4, zoom-out",
-  VertexMove = "-webkit-image-set( url( '/editor/cursors/cursor-vertex-default.png ') 1x, url( '/editor/cursors/cursor-vertex-default@2x.png ') 2x ) 4 4, zoom-out",
-  Text = 'text',
-  TextInsert = 'text',
   BrowserAuto = 'auto',
+  Duplicate = "-webkit-image-set( url( '/editor/cursors/cursor-duplicate.png ') 1x, url( '/editor/cursors/cursor-duplicate@2x.png ') 2x ) 4 4, default",
+  OpenHand = "-webkit-image-set( url( '/editor/cursors/cursor-open-hand.png ') 1x, url( '/editor/cursors/cursor-open-hand@2x.png ') 2x ) 4 4, default",
+  NotPermitted = "-webkit-image-set( url( '/editor/cursors/cursor-no-reparent.png ') 1x, url( '/editor/cursors/cursor-no-reparent@2x.png ') 2x ) 4 4, default",
+  DefaultMagic = "-webkit-image-set( url( '/editor/cursors/cursor-default-magic.png ') 1x, url( '/editor/cursors/cursor-default-magic@2x.png ') 2x ) 4 4, default",
+  DuplicateMagic = "-webkit-image-set( url( '/editor/cursors/cursor-duplicate-magic.png ') 1x, url( '/editor/cursors/cursor-duplicate-magic@2x.png ') 2x ) 4 4, default",
+  ResizeEWMagic = "-webkit-image-set( url( '/editor/cursors/cursor-ew-resize-magic.png ') 1x, url( '/editor/cursors/cursor-ew-resize-magic@2x.png ') 2x ) 4 4, default",
+  MovingMagic = "-webkit-image-set( url( '/editor/cursors/cursor-moving-magic.png ') 1x, url( '/editor/cursors/cursor-moving-magic@2x.png ') 2x ) 4 4, default",
+  Reparent = "-webkit-image-set( url( '/editor/cursors/cursor-moving-reparent.png ') 1x, url( '/editor/cursors/cursor-moving-reparent@2x.png ') 2x ) 4 4, default",
+  NESWResizeMagic = "-webkit-image-set( url( '/editor/cursors/cursor-nesw-resize-magic.png ') 1x, url( '/editor/cursors/cursor-nesw-resize-magic@2x.png ') 2x ) 4 4, default",
+  NSResizeMagic = "-webkit-image-set( url( '/editor/cursors/cursor-ns-resize-magic.png ') 1x, url( '/editor/cursors/cursor-ns-resize-magic@2x.png ') 2x ) 4 4, default",
+  NWSEResizeMagic = "-webkit-image-set( url( '/editor/cursors/cursor-nwse-resize-magic.png ') 1x, url( '/editor/cursors/cursor-nwse-resize-magic@2x.png ') 2x ) 4 4, default",
+  PointerMagic = "-webkit-image-set( url( '/editor/cursors/cursor-pointer-magic.png ') 1x, url( '/editor/cursors/cursor-pointer-magic@2x.png ') 2x ) 4 4, default",
+  ColResize = 'col-resize',
+  RowResize = 'row-resize',
+  Radius = "-webkit-image-set( url( '/editor/cursors/cursor-radius.png ') 1x, url( '/editor/cursors/cursor-radius@2x.png ') 2x ) 4 4, default",
+  PaddingWest = "-webkit-image-set( url( '/editor/cursors/cursor-padding-west.png ') 1x, url( '/editor/cursors/cursor-padding-west@2x.png ') 2x ) 4 9, ew-resize",
+  PaddingEast = "-webkit-image-set( url( '/editor/cursors/cursor-padding-east.png ') 1x, url( '/editor/cursors/cursor-padding-east@2x.png ') 2x ) 4 9, ew-resize",
+  PaddingNorth = "-webkit-image-set( url( '/editor/cursors/cursor-padding-north.png ') 1x, url( '/editor/cursors/cursor-padding-north@2x.png ') 2x ) 9 4, ns-resize",
+  PaddingSouth = "-webkit-image-set( url( '/editor/cursors/cursor-padding-south.png ') 1x, url( '/editor/cursors/cursor-padding-south@2x.png ') 2x ) 9 4, ns-resize",
+  GapNS = "-webkit-image-set( url( '/editor/cursors/cursor-gap-ns.png ') 1x, url( '/editor/cursors/cursor-gap-ns@2x.png ') 2x ) 8 8, ns-resize",
+  GapEW = "-webkit-image-set( url( '/editor/cursors/cursor-gap-ew.png ') 1x, url( '/editor/cursors/cursor-gap-ew@2x.png ') 2x ) 8 8, ew-resize",
+  Comment = "-webkit-image-set( url( '/editor/cursors/cursor-comment.png ') 1x, url( '/editor/cursors/cursor-comment@2x.png ') 2x ) 8 8, default",
 }
 
 export type VerticalRectangles = {
@@ -184,7 +204,7 @@ export type ControlOrHigherOrderControl = SvgFragmentControl | HigherOrderContro
 
 export interface FrameAndTarget<C extends CoordinateMarker> {
   target: ElementPath
-  frame: Rectangle<C> | null
+  frame: Rectangle<C>
 }
 
 export type CanvasFrameAndTarget = FrameAndTarget<CanvasRectangle>
@@ -236,26 +256,26 @@ export type PinOrFlexFrameChange =
 export function pinFrameChange(
   target: ElementPath,
   frame: CanvasRectangle,
-  edgePosition: EdgePosition | null = null,
+  edgePos: EdgePosition | null = null,
 ): PinFrameChange {
   return {
     type: 'PIN_FRAME_CHANGE',
     target: target,
     frame: frame,
-    edgePosition: edgePosition,
+    edgePosition: edgePos,
   }
 }
 
 export function pinSizeChange(
   target: ElementPath,
   frame: CanvasRectangle,
-  edgePosition: EdgePosition | null = null,
+  edgePos: EdgePosition | null = null,
 ): PinSizeChange {
   return {
     type: 'PIN_SIZE_CHANGE',
     target: target,
     frame: frame,
-    edgePosition: edgePosition,
+    edgePosition: edgePos,
   }
 }
 
@@ -290,34 +310,14 @@ export function flexResizeChange(
 
 export function singleResizeChange(
   target: ElementPath,
-  edgePosition: EdgePosition,
+  edgePos: EdgePosition,
   sizeDelta: CanvasVector,
 ): SingleResizeChange {
   return {
     type: 'SINGLE_RESIZE',
     target: target,
-    edgePosition: edgePosition,
+    edgePosition: edgePos,
     sizeDelta: sizeDelta,
-  }
-}
-
-export interface InsertDragState {
-  type: 'INSERT_DRAG_STATE'
-  start: CanvasPoint
-  drag: CanvasVector | null
-  metadata: ElementInstanceMetadataMap
-}
-
-export function insertDragState(
-  start: CanvasPoint,
-  drag: CanvasVector | null,
-  metadata: ElementInstanceMetadataMap,
-): InsertDragState {
-  return {
-    type: 'INSERT_DRAG_STATE',
-    start: start,
-    drag: drag,
-    metadata: metadata,
   }
 }
 
@@ -325,227 +325,6 @@ export interface DuplicateNewUID {
   originalPath: ElementPath
   newUID: string
 }
-
-export interface DragStatePositions {
-  start: CanvasPoint
-  drag: CanvasVector | null
-}
-
-export interface MoveDragState extends DragStatePositions {
-  type: 'MOVE_DRAG_STATE'
-  prevDrag: CanvasVector | null
-  originalFrames: Array<CanvasFrameAndTarget>
-  dragSelectionBoundingBox: CanvasRectangle | null
-  enableSnapping: boolean
-  constrainDragAxis: boolean
-  duplicate: boolean
-  reparent: boolean
-  duplicateNewUIDs: Array<DuplicateNewUID> | null
-  canvasPosition: CanvasPoint
-  metadata: ElementInstanceMetadataMap
-  draggedElements: ElementPath[]
-}
-
-export function moveDragState(
-  start: CanvasPoint,
-  drag: CanvasVector | null,
-  prevDrag: CanvasVector | null,
-  originalFrames: Array<CanvasFrameAndTarget>,
-  dragSelectionBoundingBox: CanvasRectangle | null,
-  enableSnapping: boolean,
-  constrainDragAxis: boolean,
-  duplicate: boolean,
-  reparent: boolean,
-  duplicateNewUIDs: Array<DuplicateNewUID> | null,
-  canvasPosition: CanvasPoint,
-  metadata: ElementInstanceMetadataMap,
-  draggedElements: ElementPath[],
-): MoveDragState {
-  if (duplicate === true && duplicateNewUIDs == null) {
-    throw new Error('duplicateNewUIDs cannot be null when duplicate is true')
-  }
-
-  const invertReparenting = isFeatureEnabled('Dragging Reparents By Default')
-  const actuallyEnableSnapping = xor(invertReparenting, enableSnapping)
-  const actuallyReparent = xor(invertReparenting, reparent)
-  return {
-    type: 'MOVE_DRAG_STATE',
-    start: start,
-    drag: drag,
-    prevDrag: prevDrag,
-    originalFrames: originalFrames,
-    dragSelectionBoundingBox: dragSelectionBoundingBox,
-    enableSnapping: actuallyEnableSnapping,
-    constrainDragAxis: constrainDragAxis,
-    duplicate: duplicate,
-    reparent: actuallyReparent,
-    duplicateNewUIDs: duplicateNewUIDs,
-    canvasPosition: canvasPosition,
-    metadata: metadata,
-    draggedElements: draggedElements,
-  }
-}
-
-export function updateMoveDragState(
-  current: MoveDragState,
-  drag: CanvasVector | null | undefined,
-  prevDrag: CanvasVector | null | undefined,
-  enableSnapping: boolean | undefined,
-  constrainDragAxis: boolean | undefined,
-  duplicate: boolean | undefined,
-  reparent: boolean | undefined,
-  duplicateNewUIDs: Array<DuplicateNewUID> | null | undefined,
-  canvasPosition: CanvasPoint | undefined,
-): MoveDragState {
-  const newEnableSnapping = enableSnapping === undefined ? current.enableSnapping : enableSnapping
-  const newReparent = reparent === undefined ? current.reparent : reparent
-
-  const invertReparenting = isFeatureEnabled('Dragging Reparents By Default')
-  const actuallyEnableSnapping = xor(invertReparenting, newEnableSnapping)
-  const actuallyReparent = xor(invertReparenting, newReparent)
-
-  const updatedState = keepDeepReferenceEqualityIfPossible(current, {
-    ...current,
-    drag: drag === undefined ? current.drag : drag,
-    prevDrag: prevDrag === undefined ? current.prevDrag : prevDrag,
-    enableSnapping: actuallyEnableSnapping,
-    constrainDragAxis:
-      constrainDragAxis === undefined ? current.constrainDragAxis : constrainDragAxis,
-    duplicate: duplicate === undefined ? current.duplicate : duplicate,
-    reparent: actuallyReparent,
-    duplicateNewUIDs: duplicateNewUIDs === undefined ? current.duplicateNewUIDs : duplicateNewUIDs,
-    canvasPosition: canvasPosition === undefined ? current.canvasPosition : canvasPosition,
-  })
-  if (updatedState.duplicate === true && updatedState.duplicateNewUIDs == null) {
-    throw new Error('duplicateNewUIDs cannot be null when duplicate is true')
-  }
-  return updatedState
-}
-
-export interface ResizeDragStatePropertyChange extends DragStatePositions {
-  enableSnapping: boolean
-  centerBasedResize: boolean
-  keepAspectRatio: boolean
-  targetProperty: LayoutTargetableProp | undefined
-}
-
-export function resizeDragStatePropertyChange(
-  start: CanvasPoint,
-  drag: CanvasVector | null,
-  enableSnapping: boolean,
-  centerBasedResize: boolean,
-  keepAspectRatio: boolean,
-  targetProperty: LayoutTargetableProp | undefined,
-): ResizeDragStatePropertyChange {
-  return {
-    start: start,
-    drag: drag,
-    enableSnapping: enableSnapping,
-    centerBasedResize: centerBasedResize,
-    keepAspectRatio: keepAspectRatio,
-    targetProperty: targetProperty,
-  }
-}
-
-export function updateResizeDragStatePropertyChange(
-  current: ResizeDragStatePropertyChange,
-  drag: CanvasVector | null | undefined,
-  targetProperty: LayoutTargetableProp | undefined,
-  enableSnapping: boolean | undefined,
-  centerBasedResize: boolean | undefined,
-  keepAspectRatio: boolean | undefined,
-): ResizeDragStatePropertyChange {
-  return keepDeepReferenceEqualityIfPossible(current, {
-    ...current,
-    drag: drag === undefined ? current.drag : drag,
-    enableSnapping: enableSnapping === undefined ? current.enableSnapping : enableSnapping,
-    centerBasedResize:
-      centerBasedResize === undefined ? current.centerBasedResize : centerBasedResize,
-    keepAspectRatio: keepAspectRatio === undefined ? current.keepAspectRatio : keepAspectRatio,
-    targetProperty: targetProperty,
-  })
-}
-
-export interface ResizeDragState {
-  type: 'RESIZE_DRAG_STATE'
-  originalSize: CanvasRectangle
-  originalFrames: Array<OriginalCanvasAndLocalFrame>
-  edgePosition: EdgePosition
-  enabledDirection: EnabledDirection
-  metadata: ElementInstanceMetadataMap
-  draggedElements: ElementPath[]
-  isMultiSelect: boolean
-  properties: Array<ResizeDragStatePropertyChange>
-}
-
-export function resizeDragState(
-  originalSize: CanvasRectangle,
-  originalFrames: Array<OriginalCanvasAndLocalFrame>,
-  edgePosition: EdgePosition,
-  enabledDirection: EnabledDirection,
-  metadata: ElementInstanceMetadataMap,
-  draggedElements: ElementPath[],
-  isMultiSelect: boolean,
-  properties: Array<ResizeDragStatePropertyChange>,
-): ResizeDragState {
-  return {
-    type: 'RESIZE_DRAG_STATE',
-    originalSize: originalSize,
-    originalFrames: originalFrames,
-    edgePosition: edgePosition,
-    enabledDirection: enabledDirection,
-    metadata: metadata,
-    draggedElements: draggedElements,
-    isMultiSelect: isMultiSelect,
-    properties: properties,
-  }
-}
-
-export function updateResizeDragState(
-  current: ResizeDragState,
-  startForNewProperties: CanvasPoint,
-  drag: CanvasVector | null,
-  targetProperty: LayoutTargetableProp | undefined,
-  enableSnapping: boolean,
-  centerBasedResize: boolean,
-  keepAspectRatio: boolean,
-): ResizeDragState {
-  let propertyAlreadyExists: boolean = false
-  let updatedProperties = current.properties.map((prop) => {
-    if (prop.targetProperty === targetProperty) {
-      propertyAlreadyExists = true
-      return updateResizeDragStatePropertyChange(
-        prop,
-        drag,
-        targetProperty,
-        enableSnapping,
-        centerBasedResize,
-        keepAspectRatio,
-      )
-    } else {
-      return prop
-    }
-  })
-  if (!propertyAlreadyExists) {
-    updatedProperties = [
-      ...current.properties,
-      resizeDragStatePropertyChange(
-        startForNewProperties,
-        drag,
-        enableSnapping,
-        centerBasedResize,
-        keepAspectRatio,
-        targetProperty,
-      ),
-    ]
-  }
-  return keepDeepReferenceEqualityIfPossible(current, {
-    ...current,
-    properties: updatedProperties,
-  })
-}
-
-export type DragState = InsertDragState | MoveDragState | ResizeDragState
 
 export interface CanvasPositions {
   windowPosition: WindowPoint
@@ -569,11 +348,11 @@ type DoubleClick = IMouseEvent & {
 
 type Drag = IMouseEvent & {
   event: 'DRAG'
-  dragState: DragState | null
 }
 
 type Move = IMouseEvent & {
   event: 'MOVE'
+  interactionSession: InteractionSessionWithoutMetadata | null
 }
 
 type Click = IMouseEvent & {
@@ -587,13 +366,11 @@ type ContextMenu = IMouseEvent & {
 
 type MouseUp = IMouseEvent & {
   event: 'MOUSE_UP'
-  dragState: DragState | null
   nativeEvent: MouseEvent
 }
 
 type DragEnd = IMouseEvent & {
   event: 'DRAG_END'
-  dragState: DragState | null
 }
 
 type MouseLeftWindow = IMouseEvent & {
@@ -623,14 +400,29 @@ type ScrollCanvas = {
   delta: CanvasVector
 }
 
-interface ClearDragState {
-  action: 'CLEAR_DRAG_STATE'
+interface PositionCanvas {
+  action: 'POSITION_CANVAS'
+  position: CanvasVector
+}
+
+export interface CreateInteractionSession {
+  action: 'CREATE_INTERACTION_SESSION'
+  interactionSession: InteractionSessionWithoutMetadata
+}
+
+export interface ClearInteractionSession {
+  action: 'CLEAR_INTERACTION_SESSION'
   applyChanges: boolean
 }
 
-type CreateDragState = {
-  action: 'CREATE_DRAG_STATE'
-  dragState: DragState
+export interface UpdateInteractionSession {
+  action: 'UPDATE_INTERACTION_SESSION'
+  interactionSessionUpdate: Partial<InteractionSessionWithoutMetadata>
+}
+
+export interface UpdateDragInteractionData {
+  action: 'UPDATE_DRAG_INTERACTION_DATA'
+  dragInteractionUpdate: Partial<DragInteractionData>
 }
 
 type SetSelectionControlsVisibility = {
@@ -649,18 +441,27 @@ type ZoomUI = {
   zoomIn: boolean
 }
 
+type SetUsersPreferredStrategy = {
+  action: 'SET_USERS_PREFERRED_STRATEGY'
+  strategyId: CanvasStrategyId
+}
+
 export type CanvasAction =
   | ScrollCanvas
-  | ClearDragState
-  | CreateDragState
+  | PositionCanvas
+  | CreateInteractionSession
+  | ClearInteractionSession
+  | UpdateInteractionSession
+  | UpdateDragInteractionData
   | Zoom
   | ZoomUI
   | SetSelectionControlsVisibility
+  | SetUsersPreferredStrategy
 
-export type CanvasModel = {
+export interface CanvasModel {
   controls: Array<HigherOrderControl>
-  dragState: DragState | null
   keysPressed: KeysPressed
+  mouseButtonsPressed: MouseButtonsPressed
   mode: Mode
   scale: number
   highlightedviews: Array<ElementPath>
@@ -673,6 +474,13 @@ export type CanvasModel = {
 export type EdgePositionPart = 0 | 0.5 | 1
 
 export type EdgePosition = { x: EdgePositionPart; y: EdgePositionPart }
+
+export function edgePosition(x: EdgePositionPart, y: EdgePositionPart): EdgePosition {
+  return {
+    x: x,
+    y: y,
+  }
+}
 
 export function oppositeEdgePositionPart(part: EdgePositionPart): EdgePositionPart {
   switch (part) {
@@ -688,10 +496,31 @@ export function oppositeEdgePositionPart(part: EdgePositionPart): EdgePositionPa
   }
 }
 
-export function oppositeEdgePosition(edgePosition: EdgePosition): EdgePosition {
+export function oppositeEdgePosition(edgePos: EdgePosition): EdgePosition {
   return {
-    x: oppositeEdgePositionPart(edgePosition.x),
-    y: oppositeEdgePositionPart(edgePosition.y),
+    x: oppositeEdgePositionPart(edgePos.x),
+    y: oppositeEdgePositionPart(edgePos.y),
+  }
+}
+
+export type EdgePiece = 'top' | 'bottom' | 'left' | 'right'
+
+export function isHorizontalEdgePiece(edgePiece: EdgePiece): boolean {
+  return edgePiece === 'left' || edgePiece === 'right'
+}
+
+export function oppositeEdgePiece(edgePiece: EdgePiece): EdgePiece {
+  switch (edgePiece) {
+    case 'left':
+      return 'right'
+    case 'right':
+      return 'left'
+    case 'top':
+      return 'bottom'
+    case 'bottom':
+      return 'top'
+    default:
+      assertNever(edgePiece)
   }
 }
 
@@ -700,3 +529,166 @@ export type EnabledDirection = EdgePosition
 export const DirectionAll: EnabledDirection = { x: 1, y: 1 }
 export const DirectionHorizontal: EnabledDirection = { x: 1, y: 0 }
 export const DirectionVertical: EnabledDirection = { x: 0, y: 1 }
+
+export const EdgePositionTop: EdgePosition = { x: 0.5, y: 0 }
+export const EdgePositionLeft: EdgePosition = { x: 0, y: 0.5 }
+export const EdgePositionBottom: EdgePosition = { x: 0.5, y: 1 }
+export const EdgePositionRight: EdgePosition = { x: 1, y: 0.5 }
+export const EdgePositionTopLeft: EdgePosition = { x: 0, y: 0 }
+export const EdgePositionBottomLeft: EdgePosition = { x: 0, y: 1 }
+export const EdgePositionBottomRight: EdgePosition = { x: 1, y: 1 }
+export const EdgePositionTopRight: EdgePosition = { x: 1, y: 0 }
+
+export type SelectionLocked = 'locked' | 'locked-hierarchy' | 'selectable'
+
+export type PropertyTag = { type: 'hover' } | { type: 'breakpoint'; name: string }
+
+interface CSSStylePropertyNotFound {
+  type: 'not-found'
+}
+
+interface CSSStylePropertyNotParsable {
+  type: 'not-parsable'
+  originalValue: JSExpression | PartOfJSXAttributeValue
+}
+
+interface ParsedCSSStyleProperty<T> {
+  type: 'property'
+  propertyValue: JSExpression | PartOfJSXAttributeValue
+  currentVariant: CSSVariant<T>
+  variants?: CSSVariant<T>[]
+}
+
+type StyleModifierMetadata = { type: string; modifierOrigin?: StyleModifierOrigin }
+type StyleHoverModifier = StyleModifierMetadata & { type: 'hover' }
+export type StyleMediaSizeModifier = StyleModifierMetadata & {
+  type: 'media-size'
+  size: ScreenSize
+}
+export type StyleModifier = StyleHoverModifier | StyleMediaSizeModifier
+type InlineModifierOrigin = { type: 'inline' }
+type TailwindModifierOrigin = { type: 'tailwind'; variant: string }
+export type StyleModifierOrigin = InlineModifierOrigin | TailwindModifierOrigin
+
+export type ParsedVariant<T extends keyof StyleInfo> = {
+  parsedValue: NonNullable<ParsedCSSProperties[T]>
+  originalValue: string | number | undefined
+  modifiers: StyleModifier[]
+}
+
+export type CSSStyleProperty<T> =
+  | CSSStylePropertyNotFound
+  | CSSStylePropertyNotParsable
+  | ParsedCSSStyleProperty<T>
+
+export function cssStylePropertyNotFound(): CSSStylePropertyNotFound {
+  return { type: 'not-found' }
+}
+
+export function cssStylePropertyNotParsable(
+  originalValue: JSExpression | PartOfJSXAttributeValue,
+): CSSStylePropertyNotParsable {
+  return { type: 'not-parsable', originalValue: originalValue }
+}
+
+export type CSSVariant<T> = {
+  value: T
+  modifiers: StyleModifier[]
+}
+
+export function cssVariant<T>(value: T, modifiers: StyleModifier[]): CSSVariant<T> {
+  return { value: value, modifiers: modifiers }
+}
+
+export function cssStyleProperty<T>(
+  propertyValue: JSExpression | PartOfJSXAttributeValue,
+  currentVariant: CSSVariant<T>,
+  variants: CSSVariant<T>[],
+): ParsedCSSStyleProperty<T> {
+  return {
+    type: 'property',
+    propertyValue: propertyValue,
+    currentVariant: currentVariant,
+    variants: variants,
+  }
+}
+
+export function screenSizeModifier(size: ScreenSize): StyleMediaSizeModifier {
+  return { type: 'media-size', size: size }
+}
+
+export function maybePropertyValue<T>(property: CSSStyleProperty<T>): T | null {
+  if (property.type === 'property') {
+    return property.currentVariant.value
+  }
+  return null
+}
+
+export type FlexGapInfo = CSSStyleProperty<CSSNumber>
+export type FlexDirectionInfo = CSSStyleProperty<FlexDirection>
+export type LeftInfo = CSSStyleProperty<CSSNumber>
+export type RightInfo = CSSStyleProperty<CSSNumber>
+export type TopInfo = CSSStyleProperty<CSSNumber>
+export type BottomInfo = CSSStyleProperty<CSSNumber>
+export type WidthInfo = CSSStyleProperty<CSSNumber>
+export type HeightInfo = CSSStyleProperty<CSSNumber>
+export type FlexBasisInfo = CSSStyleProperty<CSSNumber>
+export type PaddingInfo = CSSStyleProperty<CSSPadding>
+export type PaddingSideInfo = CSSStyleProperty<CSSNumber>
+export type BorderRadiusInfo = CSSStyleProperty<CSSBorderRadius>
+export type BorderRadiusCornerInfo = CSSStyleProperty<CSSNumber>
+export type ZIndexInfo = CSSStyleProperty<CSSNumber>
+export type FlexWrapInfo = CSSStyleProperty<FlexWrap>
+export type OverflowInfo = CSSStyleProperty<CSSOverflow>
+
+export interface StyleInfo {
+  gap: FlexGapInfo | null
+  flexDirection: FlexDirectionInfo | null
+  left: LeftInfo | null
+  right: RightInfo | null
+  top: TopInfo | null
+  bottom: BottomInfo | null
+  width: WidthInfo | null
+  height: HeightInfo | null
+  flexBasis: FlexBasisInfo | null
+  padding: PaddingInfo | null
+  paddingTop: PaddingSideInfo | null
+  paddingRight: PaddingSideInfo | null
+  paddingBottom: PaddingSideInfo | null
+  paddingLeft: PaddingSideInfo | null
+  borderRadius: BorderRadiusInfo | null
+  borderTopLeftRadius: BorderRadiusCornerInfo | null
+  borderTopRightRadius: BorderRadiusCornerInfo | null
+  borderBottomRightRadius: BorderRadiusCornerInfo | null
+  borderBottomLeftRadius: BorderRadiusCornerInfo | null
+  zIndex: ZIndexInfo | null
+  flexWrap: FlexWrapInfo | null
+  overflow: OverflowInfo | null
+}
+
+const emptyStyleInfo: StyleInfo = {
+  gap: null,
+  flexDirection: null,
+  left: null,
+  right: null,
+  top: null,
+  bottom: null,
+  width: null,
+  height: null,
+  flexBasis: null,
+  padding: null,
+  paddingTop: null,
+  paddingRight: null,
+  paddingBottom: null,
+  paddingLeft: null,
+  borderRadius: null,
+  borderTopLeftRadius: null,
+  borderTopRightRadius: null,
+  borderBottomRightRadius: null,
+  borderBottomLeftRadius: null,
+  zIndex: null,
+  flexWrap: null,
+  overflow: null,
+}
+
+export const isStyleInfoKey = (key: string): key is keyof StyleInfo => key in emptyStyleInfo

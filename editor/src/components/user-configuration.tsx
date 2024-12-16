@@ -1,18 +1,21 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import React from 'react'
 import { jsx } from '@emotion/react'
 import { Table, Checkbox } from 'antd'
 import Column from 'antd/lib/table/Column'
 import 'antd/dist/antd.css'
-import { RenderedCell, GetComponentProps } from 'rc-table/lib/interface'
-import { useEditorState } from './editor/store/store-hook'
-import { getShortcutDetails, Shortcut } from './editor/shortcut-definitions'
+import type { RenderedCell, GetComponentProps } from 'rc-table/lib/interface'
+import { Substores, useEditorState } from './editor/store/store-hook'
+import type { Shortcut } from './editor/shortcut-definitions'
+import { getShortcutDetails } from './editor/shortcut-definitions'
 import { comparePrimitive } from '../utils/compare'
 import { mapToArray } from '../core/shared/object-utils'
-import { Key } from '../utils/keyboard'
+import type { Key } from '../utils/keyboard'
 import { capitalize } from '../core/shared/string-utils'
 import Keyboard from '../utils/keyboard'
 import { setShortcut } from './editor/actions/action-creators'
+import { useDispatch } from './editor/store/dispatch-context'
 
 interface ShortcutWithName extends Shortcut {
   name: string
@@ -26,12 +29,12 @@ interface DataSourceEntry {
 }
 
 export function UserConfiguration() {
-  const { dispatch, shortcutConfig } = useEditorState((store) => {
-    return {
-      dispatch: store.dispatch,
-      shortcutConfig: store.userState.shortcutConfig,
-    }
-  }, 'UserConfiguration')
+  const shortcutConfig = useEditorState(
+    Substores.restOfStore,
+    (store) => store.userState.shortcutConfig,
+    'UserConfiguration',
+  )
+  const dispatch = useDispatch()
 
   const [editingIndex, setEditingIndex] = React.useState<number | null>(null)
 

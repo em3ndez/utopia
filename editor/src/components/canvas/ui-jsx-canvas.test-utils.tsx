@@ -2,69 +2,71 @@ const Prettier = jest != null ? require('prettier') : require('prettier/standalo
 import React from 'react'
 import { applyUIDMonkeyPatch } from '../../utils/canvas-react-utils'
 applyUIDMonkeyPatch()
-import * as ReactDOM from 'react-dom'
 import * as ReactDOMServer from 'react-dom/server'
-import * as UtopiaAPI from 'utopia-api'
-import * as UUIUI from '../../uuiui'
-import * as EmotionReact from '@emotion/react'
 
-import { FancyError, processErrorWithSourceMap } from '../../core/shared/code-exec-utils'
-import { Either, isRight, left, right } from '../../core/shared/either'
+import type { FancyError } from '../../core/shared/code-exec-utils'
+import { processErrorWithSourceMap } from '../../core/shared/code-exec-utils'
+import type { Either } from '../../core/shared/either'
+import { isRight, left, mapEither, right } from '../../core/shared/either'
+import type { ElementInstanceMetadata } from '../../core/shared/element-template'
+import { clearJSXElementChildUniqueIDs } from '../../core/shared/element-template'
+import type { ProjectContents } from '../../core/shared/project-file-types'
 import {
-  ElementInstanceMetadata,
-  clearJSXElementUniqueIDs,
-  TopLevelElement,
-  ArbitraryJSBlock,
-} from '../../core/shared/element-template'
-import { canvasPoint } from '../../core/shared/math-utils'
-import { RequireFn } from '../../core/shared/npm-dependency-types'
-import {
-  Imports,
-  foldParsedTextFile,
-  codeFile,
   textFile,
   textFileContents,
   RevisionsState,
-  ProjectContents,
   isParseSuccess,
 } from '../../core/shared/project-file-types'
-import { emptyImports } from '../../core/workers/common/project-file-utils'
-import { testParseCode } from '../../core/workers/parser-printer/parser-printer.test-utils'
+import {
+  simplifyJSXElementChildAttributes,
+  testParseCode,
+} from '../../core/workers/parser-printer/parser-printer.test-utils'
 import { Utils } from '../../uuiui-deps'
 import { normalizeName } from '../custom-code/custom-code-utils'
-import { ConsoleLog, deriveState } from '../editor/store/editor-state'
-import {
+import type { EditorState } from '../editor/store/editor-state'
+import { deriveState } from '../editor/store/editor-state'
+import type {
   UiJsxCanvasProps,
   UiJsxCanvasContextData,
-  emptyUiJsxCanvasContextData,
   CanvasReactErrorCallback,
   UiJsxCanvasPropsWithErrorCallback,
+} from './ui-jsx-canvas'
+import {
+  emptyUiJsxCanvasContextData,
   UiJsxCanvasCtxAtom,
   UiJsxCanvas,
+  emptyInvalidatedCanvasData,
 } from './ui-jsx-canvas'
 import { CanvasErrorBoundary } from './canvas-component-entry'
-import { EditorStateContext } from '../editor/store/store-hook'
+import { EditorStateContext, OriginalMainEditorStateContext } from '../editor/store/store-hook'
 import { getStoreHook } from '../inspector/common/inspector.test-utils'
 import { NO_OP } from '../../core/shared/utils'
-import { directory } from '../../core/model/project-file-utils'
-import { contentsToTree, ProjectContentTreeRoot } from '../assets'
-import { MapLike } from 'typescript'
+import type { ProjectContentTreeRoot } from '../assets'
+import { contentsToTree } from '../assets'
+import type { MapLike } from 'typescript'
 import { getRequireFn } from '../../core/es-modules/package-manager/package-manager'
 import type { ScriptLine } from '../../third-party/react-error-overlay/utils/stack-frame'
 import type { CurriedResolveFn } from '../custom-code/code-file'
 import * as path from 'path'
+import { SampleNodeModules } from '../custom-code/code-file.test-utils'
+import { UPDATE_FNS } from '../editor/actions/actions'
+import { updateNodeModulesContents } from '../editor/actions/action-creators'
+import { unpatchedCreateRemixDerivedDataMemo } from '../editor/store/remix-derived-data'
 
 export interface PartialCanvasProps {
-  offset: UiJsxCanvasProps['offset']
-  scale: UiJsxCanvasProps['scale']
   hiddenInstances: UiJsxCanvasProps['hiddenInstances']
   editedTextElement: UiJsxCanvasProps['editedTextElement']
   mountCount: UiJsxCanvasProps['mountCount']
 }
 
 export const dumbResolveFn = (filenames: Array<string>): CurriedResolveFn => {
-  return (_: ProjectContentTreeRoot) => (importOrigin: string, toImport: string) =>
-    resolveTestFiles(filenames, importOrigin, toImport)
+  return (_: ProjectContentTreeRoot) => (importOrigin: string, toImport: string) => {
+    const result = resolveTestFiles(filenames, importOrigin, toImport)
+    if (!isRight(result)) {
+      console.error(result.value)
+    }
+    return result
+  }
 }
 
 function resolveTestFiles(
@@ -75,7 +77,8 @@ function resolveTestFiles(
   let normalizedName = normalizeName(importOrigin, toImport)
   // Partly restoring what `normalizeName` strips away.
   if (toImport.startsWith('.')) {
-    normalizedName = path.normalize(`${importOrigin}/${normalizedName}`)
+    const parsedOrigin = path.parse(importOrigin)
+    normalizedName = path.normalize(`${parsedOrigin.dir}/${normalizedName}`)
   } else if (toImport.startsWith('/')) {
     normalizedName = `/${normalizedName}`
   }
@@ -95,7 +98,9 @@ function resolveTestFiles(
     case UiFilePath:
       return right(UiFilePath)
     default:
-      return left(`Test error, the dumbResolveFn did not know about this file: ${toImport}`)
+      return left(
+        `Test error, the dumbResolveFn did not know about this file: ${toImport}, got ${normalizedName}`,
+      )
   }
 }
 
@@ -103,7 +108,7 @@ function stripUidsFromMetadata(metadata: ElementInstanceMetadata): ElementInstan
   if (isRight(metadata.element)) {
     return {
       ...metadata,
-      element: right(clearJSXElementUniqueIDs(metadata.element.value)),
+      element: right(clearJSXElementChildUniqueIDs(metadata.element.value)),
     }
   } else {
     return metadata
@@ -111,8 +116,11 @@ function stripUidsFromMetadata(metadata: ElementInstanceMetadata): ElementInstan
 }
 
 function stripUnwantedDataFromMetadata(metadata: ElementInstanceMetadata): ElementInstanceMetadata {
-  delete metadata.props['children']
-  return stripUidsFromMetadata(metadata)
+  const strippedMetadata = stripUidsFromMetadata(metadata)
+  return {
+    ...strippedMetadata,
+    element: mapEither(simplifyJSXElementChildAttributes, strippedMetadata.element),
+  }
 }
 
 interface RuntimeErrorInfo {
@@ -139,22 +147,15 @@ export function renderCanvasReturnResultAndError(
     errorsReported.push({ editedFile: editedFile, error: error, errorInfo: errorInfo })
   }
   const clearErrors: CanvasReactErrorCallback['clearErrors'] = Utils.NO_OP
-  const imports: Imports = foldParsedTextFile(
-    (_) => emptyImports(),
-    (success) => success.imports,
-    (_) => emptyImports(),
-    parsedUIFileCode,
-  )
   let canvasProps: UiJsxCanvasPropsWithErrorCallback
-  let consoleLogs: Array<ConsoleLog> = []
 
-  const storeHookForTest = getStoreHook(NO_OP)
+  const storeHookForTest = getStoreHook()
   let projectContents: ProjectContents = {
     [UiFilePath]: textFile(
       textFileContents(uiFileCode, parsedUIFileCode, RevisionsState.BothMatch),
       null,
       isParseSuccess(parsedUIFileCode) ? parsedUIFileCode : null,
-      1000,
+      0,
     ),
   }
   for (const filename in codeFilesString) {
@@ -163,16 +164,22 @@ export function renderCanvasReturnResultAndError(
       textFileContents(codeFilesString[filename], parsedCode, RevisionsState.BothMatch),
       null,
       isParseSuccess(parsedCode) ? parsedCode : null,
-      1000,
+      0,
     )
   }
   const updatedContents = contentsToTree(projectContents)
 
   const curriedRequireFn = (innerProjectContents: ProjectContentTreeRoot) =>
-    getRequireFn(NO_OP, innerProjectContents, {}, {})
+    getRequireFn(
+      NO_OP,
+      innerProjectContents,
+      SampleNodeModules,
+      {},
+      storeHookForTest.getState().builtInDependencies,
+    )
 
   storeHookForTest.updateStore((store) => {
-    const updatedEditor = {
+    let updatedEditor: EditorState = {
       ...store.editor,
       canvas: {
         ...store.editor.canvas,
@@ -182,44 +189,44 @@ export function renderCanvasReturnResultAndError(
       },
       projectContents: updatedContents,
     }
+    updatedEditor = UPDATE_FNS.UPDATE_NODE_MODULES_CONTENTS(
+      updateNodeModulesContents(SampleNodeModules),
+      updatedEditor,
+      NO_OP,
+      store.builtInDependencies,
+    )
     return {
       ...store,
       editor: updatedEditor,
-      derived: deriveState(updatedEditor, store.derived),
+      derived: deriveState(
+        updatedEditor,
+        store.derived,
+        'unpatched',
+        unpatchedCreateRemixDerivedDataMemo,
+      ),
     }
   })
-
-  function clearConsoleLogs(): void {
-    consoleLogs = []
-  }
-  function addToConsoleLogs(log: ConsoleLog): void {
-    consoleLogs.push(log)
-  }
   if (possibleProps == null) {
     canvasProps = {
       uiFilePath: UiFilePath,
       curriedRequireFn: curriedRequireFn,
       curriedResolveFn: dumbResolveFn(Object.keys(codeFilesString)),
       base64FileBlobs: {},
-      onDomReport: Utils.NO_OP,
       clearErrors: clearErrors,
-      offset: canvasPoint({ x: 0, y: 0 }),
-      scale: 1,
       hiddenInstances: [],
+      displayNoneInstances: [],
       editedTextElement: null,
       mountCount: 0,
       domWalkerInvalidateCount: 0,
-      walkDOM: false,
-      imports_KILLME: imports,
       canvasIsLive: false,
       shouldIncludeCanvasRootInTheSpy: false,
-      clearConsoleLogs: clearConsoleLogs,
-      addToConsoleLogs: addToConsoleLogs,
       linkTags: '',
       focusedElementPath: null,
-      projectContents: storeHookForTest.api.getState().editor.projectContents,
-      transientFilesState: storeHookForTest.api.getState().derived.canvas.transientState.filesState,
-      scrollAnimation: false,
+      projectContents: storeHookForTest.getState().editor.projectContents,
+      domWalkerAdditionalElementsToUpdate: [],
+      editedText: null,
+      autoFocusedPaths: storeHookForTest.getState().derived.autoFocusedPaths,
+      invalidatedCanvasData: emptyInvalidatedCanvasData(),
     }
   } else {
     canvasProps = {
@@ -228,20 +235,18 @@ export function renderCanvasReturnResultAndError(
       curriedRequireFn: curriedRequireFn,
       curriedResolveFn: dumbResolveFn(Object.keys(codeFilesString)),
       base64FileBlobs: {},
-      onDomReport: Utils.NO_OP,
       clearErrors: clearErrors,
+      displayNoneInstances: [],
       domWalkerInvalidateCount: 0,
-      walkDOM: false,
-      imports_KILLME: imports,
       canvasIsLive: false,
       shouldIncludeCanvasRootInTheSpy: false,
-      clearConsoleLogs: clearConsoleLogs,
-      addToConsoleLogs: addToConsoleLogs,
       linkTags: '',
       focusedElementPath: null,
-      projectContents: storeHookForTest.api.getState().editor.projectContents,
-      transientFilesState: storeHookForTest.api.getState().derived.canvas.transientState.filesState,
-      scrollAnimation: false,
+      projectContents: storeHookForTest.getState().editor.projectContents,
+      domWalkerAdditionalElementsToUpdate: [],
+      editedText: null,
+      autoFocusedPaths: storeHookForTest.getState().derived.autoFocusedPaths,
+      invalidatedCanvasData: emptyInvalidatedCanvasData(),
     }
   }
 
@@ -254,25 +259,27 @@ export function renderCanvasReturnResultAndError(
   let errorsReportedSpyEnabled: Array<RuntimeErrorInfo> = []
   try {
     const flatFormat = ReactDOMServer.renderToStaticMarkup(
-      <EditorStateContext.Provider value={storeHookForTest}>
-        <UiJsxCanvasCtxAtom.Provider value={spyCollector}>
-          <CanvasErrorBoundary
-            filePath={UiFilePath}
-            projectContents={canvasProps.projectContents}
-            // eslint-disable-next-line react/jsx-no-bind
-            reportError={reportError}
-            requireFn={canvasProps.curriedRequireFn}
-          >
-            <UiJsxCanvas {...canvasProps} />
-          </CanvasErrorBoundary>
-        </UiJsxCanvasCtxAtom.Provider>
-      </EditorStateContext.Provider>,
+      <OriginalMainEditorStateContext.Provider value={storeHookForTest}>
+        <EditorStateContext.Provider value={storeHookForTest}>
+          <UiJsxCanvasCtxAtom.Provider value={spyCollector}>
+            <CanvasErrorBoundary
+              filePath={UiFilePath}
+              projectContents={canvasProps.projectContents}
+              // eslint-disable-next-line react/jsx-no-bind
+              reportError={reportError}
+              requireFn={canvasProps.curriedRequireFn}
+            >
+              <UiJsxCanvas {...canvasProps} />
+            </CanvasErrorBoundary>
+          </UiJsxCanvasCtxAtom.Provider>
+        </EditorStateContext.Provider>
+      </OriginalMainEditorStateContext.Provider>,
     )
     formattedSpyEnabled = Prettier.format(flatFormat, { parser: 'html' })
     errorsReportedSpyEnabled = errorsReported
-  } catch (e) {
+  } catch (e: any) {
     // TODO instead of relying on this hack here, we should create a new test function that runs the real react render instead of ReactDOMServer.renderToStaticMarkup
-    processErrorWithSourceMap(e, true)
+    processErrorWithSourceMap(UiFilePath, uiFileCode, e, true)
     errorsReportedSpyEnabled = [e]
   }
   errorsReported = []
@@ -282,17 +289,19 @@ export function renderCanvasReturnResultAndError(
 
   try {
     const flatFormatSpyDisabled = ReactDOMServer.renderToStaticMarkup(
-      <EditorStateContext.Provider value={storeHookForTest}>
-        <UiJsxCanvasCtxAtom.Provider value={emptyUiJsxCanvasContextData()}>
-          <UiJsxCanvas {...canvasPropsSpyDisabled} />
-        </UiJsxCanvasCtxAtom.Provider>
-      </EditorStateContext.Provider>,
+      <OriginalMainEditorStateContext.Provider value={storeHookForTest}>
+        <EditorStateContext.Provider value={storeHookForTest}>
+          <UiJsxCanvasCtxAtom.Provider value={emptyUiJsxCanvasContextData()}>
+            <UiJsxCanvas {...canvasPropsSpyDisabled} />
+          </UiJsxCanvasCtxAtom.Provider>
+        </EditorStateContext.Provider>
+      </OriginalMainEditorStateContext.Provider>,
     )
     formattedSpyDisabled = Prettier.format(flatFormatSpyDisabled, { parser: 'html' })
     errorsReportedSpyDisabled = errorsReported
-  } catch (e) {
+  } catch (e: any) {
     // TODO instead of relying on this hack here, we should create a new test function that runs the real react render instead of ReactDOMServer.renderToStaticMarkup
-    processErrorWithSourceMap(e, true)
+    processErrorWithSourceMap(UiFilePath, uiFileCode, e, true)
     errorsReportedSpyDisabled = [e]
   }
 
@@ -413,7 +422,7 @@ export function testCanvasErrorInline(
   expect(errorsReportedSpyEnabled.length).toEqual(errorsReportedSpyDisabled.length)
   expect(errorsReportedSpyEnabled.length).toBeGreaterThan(0)
   const errorsToCheck = errorsReportedSpyEnabled.map((error) => {
-    let realError = error.error != null ? error.error : ((error as unknown) as FancyError) // is this conversion needed?
+    let realError = error.error != null ? error.error : (error as unknown as FancyError) // is this conversion needed?
     return {
       name: realError.name,
       message: realError.message,

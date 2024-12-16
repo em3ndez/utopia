@@ -1,28 +1,57 @@
+import type { NodeModules, ESCodeFile } from '../../shared/project-file-types'
+import { isEsCodeFile, isEsRemoteDependencyPlaceholder } from '../../shared/project-file-types'
+import type { RequireFn, TypeDefinitions } from '../../shared/npm-dependency-types'
 import {
-  NodeModules,
-  isEsCodeFile,
-  ESCodeFile,
-  isEsRemoteDependencyPlaceholder,
-} from '../../shared/project-file-types'
-import { RequireFn, TypeDefinitions } from '../../shared/npm-dependency-types'
-import { isResolveSuccess, resolveModule, resolveModulePath } from './module-resolution'
+  isResolveNotPresent,
+  isResolveSuccess,
+  isResolveSuccessIgnoreModule,
+  resolveModule,
+} from './module-resolution'
 import { evaluator } from '../evaluator/evaluator'
 import { fetchMissingFileDependency } from './fetch-packages'
-import { EditorDispatch } from '../../../components/editor/action-types'
+import type { EditorDispatch } from '../../../components/editor/action-types'
 import { memoize } from '../../shared/memoize'
 import { mapArrayToDictionary } from '../../shared/array-utils'
 import { updateNodeModulesContents } from '../../../components/editor/actions/action-creators'
 import { utopiaApiTypings } from './utopia-api-typings'
 import { resolveBuiltInDependency } from './built-in-dependencies'
-import { ProjectContentTreeRoot } from '../../../components/assets'
+import type { ProjectContentTreeRoot } from '../../../components/assets'
 import { applyLoaders } from '../../webpack-loaders/loaders'
 import { string } from 'prop-types'
 import { Either } from '../../shared/either'
-import { CurriedUtopiaRequireFn } from '../../../components/custom-code/code-file'
+import type { CurriedUtopiaRequireFn } from '../../../components/custom-code/code-file'
+import type { BuiltInDependencies } from './built-in-dependencies-list'
+import type { FrameworkHooks } from '../../frameworks/framework-hooks'
+import { getFrameworkHooks } from '../../frameworks/framework-hooks'
 
-export type FileEvaluationCache = { exports: any }
+export interface FileEvaluationCache {
+  exports: any
+}
 
-export type EvaluationCache = { [path: string]: FileEvaluationCache }
+export function fileEvaluationCache(exports: any): FileEvaluationCache {
+  return {
+    exports: exports,
+  }
+}
+
+export interface EvaluationCacheForPath {
+  module: FileEvaluationCache
+  lastEvaluatedContent: string
+}
+
+export function evaluationCacheForPath(
+  module: FileEvaluationCache,
+  lastEvaluatedContent: string,
+): EvaluationCacheForPath {
+  return {
+    module: module,
+    lastEvaluatedContent: lastEvaluatedContent,
+  }
+}
+
+export type EvaluationCache = {
+  [path: string]: EvaluationCacheForPath
+}
 
 export const DependencyNotFoundErrorName = 'DependencyNotFoundError'
 
@@ -44,14 +73,21 @@ export const getCurriedEditorRequireFn = (
   nodeModules: NodeModules,
   dispatch: EditorDispatch,
   evaluationCache: EvaluationCache,
+  builtInDependencies: BuiltInDependencies,
 ): CurriedUtopiaRequireFn => {
   const onRemoteModuleDownload = (moduleDownload: Promise<NodeModules>) => {
-    moduleDownload.then((modulesToAdd: NodeModules) =>
-      dispatch([updateNodeModulesContents(modulesToAdd, 'incremental')]),
+    void moduleDownload.then((modulesToAdd: NodeModules) =>
+      dispatch([updateNodeModulesContents(modulesToAdd)]),
     )
   }
   return (projectContents: ProjectContentTreeRoot) =>
-    getRequireFn(onRemoteModuleDownload, projectContents, nodeModules, evaluationCache)
+    getRequireFn(
+      onRemoteModuleDownload,
+      projectContents,
+      nodeModules,
+      evaluationCache,
+      builtInDependencies,
+    )
 }
 
 export function getRequireFn(
@@ -59,29 +95,41 @@ export function getRequireFn(
   projectContents: ProjectContentTreeRoot,
   nodeModules: NodeModules,
   evaluationCache: EvaluationCache,
+  builtInDependencies: BuiltInDependencies,
   injectedEvaluator = evaluator,
 ): RequireFn {
+  const frameworkHooks: FrameworkHooks = getFrameworkHooks(projectContents)
   return function require(importOrigin, toImport): unknown {
-    const builtInDependency = resolveBuiltInDependency(toImport)
+    const builtInDependency = resolveBuiltInDependency(builtInDependencies, toImport)
     if (builtInDependency != null) {
       return builtInDependency
     }
 
     const resolveResult = resolveModule(projectContents, nodeModules, importOrigin, toImport)
-    if (isResolveSuccess(resolveResult)) {
+
+    if (isResolveSuccessIgnoreModule(resolveResult)) {
+      // we found an "ignored module" https://github.com/defunctzombie/package-browser-field-spec#ignore-a-module
+      // the return value is an empty object
+      return {}
+    } else if (isResolveSuccess(resolveResult)) {
       const resolvedPath = resolveResult.success.path
       const resolvedFile = resolveResult.success.file
 
       if (isEsCodeFile(resolvedFile)) {
-        const cacheEntryExists = resolvedPath in evaluationCache
-        let fileEvaluationCache: FileEvaluationCache
+        const cacheEntryExists =
+          resolvedPath in evaluationCache &&
+          evaluationCache[resolvedPath].lastEvaluatedContent === resolvedFile.fileContents
+        let fileCache: FileEvaluationCache
         if (cacheEntryExists) {
-          fileEvaluationCache = evaluationCache[resolvedPath]
+          fileCache = evaluationCache[resolvedPath].module
         } else {
-          fileEvaluationCache = {
+          fileCache = {
             exports: {},
           }
-          evaluationCache[resolvedPath] = fileEvaluationCache
+          evaluationCache[resolvedPath] = {
+            module: fileCache,
+            lastEvaluatedContent: resolvedFile.fileContents,
+          }
         }
         if (!cacheEntryExists) {
           try {
@@ -109,7 +157,7 @@ export function getRequireFn(
             injectedEvaluator(
               loadedModuleResult.filename,
               loadedModuleResult.loadedContents,
-              fileEvaluationCache,
+              fileCache,
               partialRequire,
             )
           } catch (e) {
@@ -125,7 +173,7 @@ export function getRequireFn(
             throw e
           }
         }
-        return fileEvaluationCache.exports
+        return fileCache.exports
       } else if (isEsRemoteDependencyPlaceholder(resolvedFile)) {
         if (!resolvedFile.downloadStarted) {
           // return empty exports object, fire off an async job to fetch the dependency from jsdelivr
@@ -135,6 +183,16 @@ export function getRequireFn(
         }
 
         throw createResolvingRemoteDependencyError(toImport)
+      }
+    } else if (isResolveNotPresent(resolveResult)) {
+      const frameworkLookupPath = frameworkHooks.onResolveModuleNotPresent(
+        projectContents,
+        nodeModules,
+        importOrigin,
+        toImport,
+      )
+      if (frameworkLookupPath != null) {
+        return require(importOrigin, frameworkLookupPath)
       }
     }
     throw createDependencyNotFoundError(importOrigin, toImport)
@@ -164,6 +222,6 @@ export const getDependencyTypeDefinitions = memoize(
   },
   {
     maxSize: 1,
-    equals: Object.is, // for an object with thousands of entries, where the values are _large_ strings, even a shallow equals is expensive
+    matchesArg: Object.is, // for an object with thousands of entries, where the values are _large_ strings, even a shallow equals is expensive
   },
 )

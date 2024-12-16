@@ -1,8 +1,9 @@
 import { extractFile, fileTypeFromFileName } from '../../core/model/project-file-utils'
-import { extractImage, FileResult } from '../../core/shared/file-utils'
+import type { FileResult } from '../../core/shared/file-utils'
+import { extractImage } from '../../core/shared/file-utils'
 import { codeFile } from '../../core/shared/project-file-types'
 import { notice } from '../common/notice'
-import { EditorAction, EditorDispatch } from './action-types'
+import type { EditorAction, EditorDispatch } from './action-types'
 import * as EditorActions from './actions/action-creators'
 
 async function fileUploadAction(
@@ -30,6 +31,7 @@ export function fileResultUploadAction(
         fileResult.base64Bytes,
         fileResult.hash,
         EditorActions.saveImageDetails(fileResult.size, afterSave),
+        fileResult.gitBlobSha,
       )
     }
     case 'ASSET_RESULT': {
@@ -44,6 +46,7 @@ export function fileResultUploadAction(
         fileResult.base64Bytes,
         fileResult.hash,
         null,
+        fileResult.gitBlobSha,
       )
     }
     case 'TEXT_RESULT': {
@@ -76,6 +79,7 @@ function handleImageSelected(
             result.base64Bytes,
             result.hash,
             EditorActions.saveImageDetails(result.size, afterSave),
+            result.gitBlobSha,
           )
           dispatch([saveImageAction], 'everyone')
         })
@@ -87,7 +91,7 @@ function handleImageSelected(
         })
     } else {
       // FIXME Support inserting SVGs by adding an import statement
-      fileUploadAction(file, imageFilePath, false).then((saveFileAction) => {
+      void fileUploadAction(file, imageFilePath, false).then((saveFileAction) => {
         const warningMessage = EditorActions.showToast(notice(`File saved to ${imageFilePath}`))
         dispatch([saveFileAction, warningMessage], 'everyone')
       })

@@ -1,8 +1,8 @@
+import type { TextFile } from '../shared/project-file-types'
 import {
   codeFile,
   RevisionsState,
   textFile,
-  TextFile,
   textFileContents,
   unparsed,
 } from '../shared/project-file-types'
@@ -22,29 +22,62 @@ export function appJSFile(): TextFile {
     textFileContents(sampleAppJSCode, unparsed, RevisionsState.CodeAhead),
     null,
     null,
-    Date.now(),
+    0,
   )
 }
 
-export function getDefaultUIJsFile(): TextFile {
+export function getFileWithCssImport(): TextFile {
   return textFile(
-    textFileContents(sampleCode, unparsed, RevisionsState.CodeAhead),
+    textFileContents(sampleCodeWithCss, unparsed, RevisionsState.CodeAhead),
     null,
     null,
-    Date.now(),
+    0,
   )
+}
+
+export function emptyTextFile(): TextFile {
+  return textFile(textFileContents('', unparsed, RevisionsState.CodeAhead), null, null, 0)
+}
+
+export const sampleCodeWithCss = `
+import * as React from 'react'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
+import { App } from '/src/app.js'
+import '/src/app.css'
+export var storyboard = (
+  <Storyboard data-uid='sample-storyboard'>
+    <Scene
+      data-uid='sample-scene'
+      style={{ position: 'absolute', left: 0, top: 0, width: 375, height: 812 }}
+    >
+      <App data-uid='sample-app' />
+    </Scene>
+  </Storyboard>
+)
+
+`
+
+export function getDefaultUIJsFile(): TextFile {
+  return textFile(textFileContents(sampleCode, unparsed, RevisionsState.CodeAhead), null, null, 0)
 }
 
 export const sampleCode = `
 import * as React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 import { App } from '/src/app.js'
 export var storyboard = (
-  <Storyboard>
+  <Storyboard data-uid='sample-storyboard'>
     <Scene
+      data-uid='sample-scene'
       style={{ position: 'absolute', left: 0, top: 0, width: 375, height: 812 }}
     >
-      <App />
+      <App data-uid='sample-app' />
     </Scene>
   </Storyboard>
 )
@@ -61,7 +94,7 @@ import { App } from "../src/app";
 
 const root = document.getElementById("root");
 if (root != null) {
-  ReactDOM.render(<App />, root);
+  ReactDOM.render(<App data-uid='preview-app' />, root);
 }`
 
 export function getSamplePreviewHTMLFile(): TextFile {

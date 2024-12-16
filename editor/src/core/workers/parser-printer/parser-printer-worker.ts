@@ -1,107 +1,121 @@
-import {
-  ParseSuccess,
-  ParsedTextFile,
-  HighlightBoundsForUids,
-} from '../../shared/project-file-types'
-import {
-  printCodeOptions,
-  printCode,
-  lintAndParse,
-  getHighlightBoundsWithUID,
-  getHighlightBoundsWithoutUID,
-} from './parser-printer'
-import { fastForEach } from '../../shared/utils'
-import { emptySet } from '../../shared/set-utils'
-import {
-  PrintCode,
-  PrintCodeResult,
+import { printCodeOptions, printCode, lintAndParse } from './parser-printer'
+import type {
+  ClearParseCacheMessage,
+  ParseAndPrintOptions,
   ParseFile,
   ParseFileResult,
-  ParseOrPrint,
-  ParseOrPrintResult,
-  ParsePrintFailedMessage,
-  ParsePrintFilesResult,
+  ParsePrintFilesRequest,
+  ParsePrintResultMessage,
+  PrintAndReparseFile,
+  PrintAndReparseResult,
+} from '../common/worker-types'
+import {
+  createParseAndPrintOptions,
+  createParseFile,
   createParseFileResult,
   createParsePrintFailedMessage,
   createParsePrintFilesResult,
-  createPrintCodeResult,
-  ParsePrintFilesRequest,
-  ParsePrintResultMessage,
+  createPrintAndReparseResult,
 } from '../common/worker-types'
+import {
+  clearParseCache,
+  getParseResultFromCache,
+  storeParseResultInCache,
+} from './parse-cache-utils.worker'
 
-export function handleMessage(
-  workerMessage: ParsePrintFilesRequest,
+type ParseOrPrintResults = (ParseFileResult | PrintAndReparseResult)[]
+
+export async function handleMessage(
+  workerMessage: ParsePrintFilesRequest | ClearParseCacheMessage,
   sendMessage: (content: ParsePrintResultMessage) => void,
-): void {
+): Promise<void> {
   switch (workerMessage.type) {
     case 'parseprintfiles': {
       try {
-        const alreadyExistingUIDs_MUTABLE: Set<string> = emptySet()
-        const results = workerMessage.files.map((file) => {
+        const alreadyExistingUIDs_MUTABLE: Set<string> = new Set(workerMessage.alreadyExistingUIDs)
+        const parseOptions = createParseAndPrintOptions(
+          workerMessage.filePathMappings,
+          alreadyExistingUIDs_MUTABLE,
+          workerMessage.applySteganography,
+          workerMessage.parsingCacheOptions,
+        )
+        const { useParsingCache } = parseOptions.parsingCacheOptions
+        const fileParseResults = workerMessage.files.map((file) => {
           switch (file.type) {
             case 'parsefile':
-              return getParseFileResult(
-                file.filename,
-                file.content,
-                file.previousParsed,
-                file.lastRevisedTime,
-                alreadyExistingUIDs_MUTABLE,
-              )
-            case 'printcode':
-              return getPrintCodeResult(
-                file.filename,
-                file.parseSuccess,
-                file.stripUIDs,
-                file.lastRevisedTime,
-              )
+              return useParsingCache
+                ? getParseFileResultFromCache(file, parseOptions)
+                : getParseFileResult(file, parseOptions)
+            case 'printandreparsefile':
+              return getPrintAndReparseCodeResult(file, parseOptions)
             default:
               const _exhaustiveCheck: never = file
               throw new Error(`Unhandled file type ${JSON.stringify(file)}`)
           }
         })
-        sendMessage(createParsePrintFilesResult(results))
+
+        // this separation is to make sure that we will Promise.all only if the cache is used
+        const results = useParsingCache
+          ? await Promise.all(fileParseResults)
+          : asSyncResults(fileParseResults)
+
+        sendMessage(createParsePrintFilesResult(results, workerMessage.messageID))
       } catch (e) {
-        sendMessage(createParsePrintFailedMessage())
+        sendMessage(createParsePrintFailedMessage(workerMessage.messageID))
         throw e
       }
+      break
+    }
+    case 'clearparsecache': {
+      await clearParseCache(workerMessage.parsingCacheOptions)
       break
     }
   }
 }
 
-function getParseFileResult(
-  filename: string,
-  content: string,
-  oldParseResultForUIDComparison: ParseSuccess | null,
-  lastRevisedTime: number,
-  alreadyExistingUIDs_MUTABLE: Set<string>,
-): ParseFileResult {
-  const parseResult = lintAndParse(
-    filename,
-    content,
-    oldParseResultForUIDComparison,
-    alreadyExistingUIDs_MUTABLE,
-  )
-  return createParseFileResult(filename, parseResult, lastRevisedTime)
+async function getParseFileResultFromCache(
+  file: ParseFile,
+  parseOptions: ParseAndPrintOptions,
+): Promise<ParseFileResult> {
+  const cachedResult = await getParseResultFromCache(file, parseOptions.parsingCacheOptions)
+  if (cachedResult != null) {
+    return cachedResult
+  }
+  // if not in cache, parse the file as usual
+  return getParseFileResult(file, parseOptions)
 }
 
-function getPrintCodeResult(
-  filename: string,
-  parseSuccess: ParseSuccess,
-  stripUIDs: boolean,
-  lastRevisedTime: number,
-): PrintCodeResult {
-  const withUIDs = printCode(
-    filename,
-    printCodeOptions(false, true, true, false),
-    parseSuccess.imports,
-    parseSuccess.topLevelElements,
-    parseSuccess.jsxFactoryFunction,
-    parseSuccess.exportsDetail,
+export function getParseFileResult(
+  file: ParseFile,
+  parseOptions: ParseAndPrintOptions,
+): ParseFileResult {
+  const parseResult = lintAndParse(
+    file.filename,
+    parseOptions.filePathMappings,
+    file.content,
+    file.previousParsed,
+    parseOptions.alreadyExistingUIDs_MUTABLE,
+    'trim-bounds',
+    parseOptions.applySteganography,
   )
-  const highlightBoundsWithUID = getHighlightBoundsWithUID('with-uids', withUIDs)
+  const result = createParseFileResult(file.filename, parseResult, file.versionNumber)
+  if (
+    result.parseResult.type === 'PARSE_SUCCESS' &&
+    parseOptions.parsingCacheOptions.useParsingCache
+  ) {
+    // non blocking cache write
+    void storeParseResultInCache(file, result.parseResult, parseOptions.parsingCacheOptions)
+  }
 
-  const withoutUIDs = printCode(
+  return result
+}
+
+export function getPrintAndReparseCodeResult(
+  file: PrintAndReparseFile,
+  parseOptions: ParseAndPrintOptions,
+): PrintAndReparseResult {
+  const { filename, parseSuccess, stripUIDs, versionNumber } = file
+  const printedCode = printCode(
     filename,
     printCodeOptions(false, true, true, stripUIDs),
     parseSuccess.imports,
@@ -109,17 +123,16 @@ function getPrintCodeResult(
     parseSuccess.jsxFactoryFunction,
     parseSuccess.exportsDetail,
   )
-  const highlightBoundsWithoutUID = getHighlightBoundsWithoutUID('without-uids', withoutUIDs)
 
-  let newHighlightBounds: HighlightBoundsForUids = {}
-  if (highlightBoundsWithUID.length === highlightBoundsWithoutUID.length) {
-    fastForEach(highlightBoundsWithUID, (withUID, index) => {
-      const withoutUID = highlightBoundsWithoutUID[index]
-      newHighlightBounds[withUID.uid] = {
-        ...withoutUID,
-        uid: withUID.uid,
-      }
-    })
-  }
-  return createPrintCodeResult(filename, withoutUIDs, newHighlightBounds, lastRevisedTime)
+  const parseResult = getParseFileResult(
+    createParseFile(filename, printedCode, parseSuccess, versionNumber),
+    parseOptions,
+  )
+  return createPrintAndReparseResult(filename, parseResult.parseResult, versionNumber, printedCode)
+}
+
+function asSyncResults(
+  results: (ParseFileResult | Promise<ParseFileResult> | PrintAndReparseResult)[],
+): ParseOrPrintResults {
+  return results as ParseOrPrintResults
 }

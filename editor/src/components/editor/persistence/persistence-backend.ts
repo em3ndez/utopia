@@ -1,58 +1,39 @@
 import localforage from 'localforage'
-import { actions } from 'xstate'
 import {
   deleteLocalProject,
   fetchLocalProject as loadLocalProject,
   localProjectKey,
 } from '../../../common/persistence'
 import { checkProjectOwnership } from '../../../common/server'
-import { assetFile, imageFile, isImageFile } from '../../../core/model/project-file-utils'
 import { getFileExtension } from '../../../core/shared/file-utils'
-import { AssetFile, ImageFile, ProjectFile } from '../../../core/shared/project-file-types'
+import type { AssetFile, ImageFile, ProjectFile } from '../../../core/shared/project-file-types'
+import { assetFile, imageFile, isImageFile } from '../../../core/shared/project-file-types'
 import { arrayContains } from '../../../core/shared/utils'
 import { addFileToProjectContents, getAllProjectAssetFiles } from '../../assets'
-import { getPNGBufferOfElementWithID } from '../screenshot-utils'
+import type { AssetToSave } from '../server'
 import {
   assetToSave,
-  AssetToSave,
+  createNewProject,
   createNewProjectID,
   downloadAssetsFromProject,
   loadProject as loadServerProject,
   saveAssets,
-  saveThumbnail,
   updateSavedProject,
 } from '../server'
-import {
+import type {
   FileWithFileName,
-  fileWithFileName,
   PersistenceBackendAPI,
   ProjectLoadResult,
   ProjectModel,
   ProjectWithFileChanges,
-  projectWithFileChanges,
   LocalProject,
+  ProjectOwnership,
+  ProjectCreationResult,
 } from './generic/persistence-types'
-import { PersistentModel } from '../store/editor-state'
-
-let _lastThumbnailGenerated: number = 0
-const THUMBNAIL_THROTTLE = 300000
-
-async function generateThumbnail(force: boolean): Promise<Buffer | null> {
-  const now = Date.now()
-  if (now - _lastThumbnailGenerated > THUMBNAIL_THROTTLE || force) {
-    _lastThumbnailGenerated = now
-    return getPNGBufferOfElementWithID('canvas-root', { width: 1152, height: 720 })
-  } else {
-    return Promise.resolve(null)
-  }
-}
-
-export async function updateRemoteThumbnail(projectId: string, force: boolean): Promise<void> {
-  const buffer = await generateThumbnail(force)
-  if (buffer != null) {
-    await saveThumbnail(buffer, projectId)
-  }
-}
+import { fileWithFileName, projectWithFileChanges } from './generic/persistence-types'
+import type { PersistentModel } from '../store/editor-state'
+import { IS_TEST_ENVIRONMENT } from '../../../common/env-vars'
+import { readParamFromUrl } from '../url-utils'
 
 export async function projectIsStoredLocally(projectId: string): Promise<boolean> {
   const keys = await localforage.keys().catch(() => [])
@@ -64,13 +45,31 @@ async function getNewProjectId(): Promise<string> {
   return createNewProjectID()
 }
 
-export async function checkProjectOwned(projectId: string): Promise<boolean> {
+export async function checkProjectOwned(
+  loggedIn: boolean,
+  projectId: string,
+): Promise<ProjectOwnership> {
   const existsLocally = await projectIsStoredLocally(projectId)
   if (existsLocally) {
-    return true
-  } else {
+    return {
+      ownerId: null,
+      isOwner: true,
+    }
+  } else if (loggedIn) {
     const ownerState = await checkProjectOwnership(projectId)
-    return ownerState === 'unowned' || ownerState.isOwner
+    return ownerState === 'unowned'
+      ? { ownerId: null, isOwner: true }
+      : { ownerId: ownerState.ownerId, isOwner: ownerState.isOwner }
+  } else if (IS_TEST_ENVIRONMENT) {
+    return {
+      ownerId: null,
+      isOwner: true,
+    }
+  } else {
+    return {
+      ownerId: null,
+      isOwner: false,
+    }
   }
 }
 
@@ -94,6 +93,13 @@ async function loadProject(projectId: string): Promise<ProjectLoadResult<Persist
       case 'ProjectNotFound':
         return {
           type: 'PROJECT_NOT_FOUND',
+          projectId: projectId,
+        }
+
+      case 'ProjectNotAuthorized':
+        return {
+          type: 'PROJECT_NOT_AUTHORIZED',
+          projectId: projectId,
         }
 
       default:
@@ -111,6 +117,26 @@ async function loadProject(projectId: string): Promise<ProjectLoadResult<Persist
   }
 }
 
+export const AccessLevelParamKey = 'accessLevel'
+export const CloneParamKey = 'clone'
+export const GithubBranchParamKey = 'github_branch'
+
+async function createNewProjectInServer(
+  projectModel: ProjectModel<PersistentModel>,
+): Promise<ProjectCreationResult<PersistentModel, ProjectFile>> {
+  const { projectWithChanges } = prepareAssetsForUploading(projectModel)
+
+  const accessLevel = readParamFromUrl(AccessLevelParamKey)
+
+  const { id } = await createNewProject(
+    projectWithChanges.projectModel.content,
+    projectWithChanges.projectModel.name,
+    accessLevel,
+  )
+
+  return { projectId: id, projectWithChanges: projectWithChanges }
+}
+
 async function saveProjectToServer(
   projectId: string,
   projectModel: ProjectModel<PersistentModel>,
@@ -126,8 +152,7 @@ async function saveProjectToServer(
     await saveAssets(projectId, assetsToUpload)
   }
 
-  updateRemoteThumbnail(projectId, false)
-  deleteLocalProject(projectId)
+  void deleteLocalProject(projectId)
 
   return projectWithChanges
 }
@@ -182,9 +207,9 @@ async function downloadAssets(
 
 function scrubBase64FromFile(file: ImageFile | AssetFile): ImageFile | AssetFile {
   if (isImageFile(file)) {
-    return imageFile(undefined, undefined, file.width, file.height, file.hash)
+    return imageFile(undefined, undefined, file.width, file.height, file.hash, file.gitBlobSha)
   } else {
-    return assetFile(undefined)
+    return assetFile(undefined, file.gitBlobSha)
   }
 }
 
@@ -232,6 +257,7 @@ export const PersistenceBackend: PersistenceBackendAPI<PersistentModel, ProjectF
   checkProjectOwned: checkProjectOwned,
   loadProject: loadProject,
   saveProjectToServer: saveProjectToServer,
+  createNewProjectInServer: createNewProjectInServer,
   saveProjectLocally: saveProjectLocally,
   downloadAssets: downloadAssets,
 }

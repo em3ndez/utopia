@@ -1,14 +1,11 @@
 import React from 'react'
 import * as PP from '../../../core/shared/property-path'
-import {
-  CSSURLFunctionBackgroundLayer,
-  isCSSImageURLBackgroundLayer,
-  CSSBackgroundLayers,
-} from '../common/css-utils'
-import { getControlStyles } from '../common/control-status'
+import type { CSSURLFunctionBackgroundLayer, CSSBackgroundLayers } from '../common/css-utils'
+import { isCSSImageURLBackgroundLayer } from '../common/css-utils'
+import { getControlStyles } from '../common/control-styles'
 import { UIGridRow } from '../widgets/ui-grid-row'
 import { PropertyLabel } from '../widgets/property-label'
-import { BackgroundLayerControlsProps } from '../sections/style-section/background-subsection/background-picker'
+import type { BackgroundLayerControlsProps } from '../sections/style-section/background-subsection/background-picker'
 import { StringControl } from './string-control'
 
 export function getIndexedUpdateCSSBackgroundLayerURLImageValue(index: number) {
@@ -32,17 +29,21 @@ interface URLBackgroundLayerMetadataControlsProps extends BackgroundLayerControl
   value: CSSURLFunctionBackgroundLayer
 }
 
-const backgroundImagePropertyPath = [PP.create(['style', 'backgroundImage'])]
+const backgroundImagePropertyPath = [PP.create('style', 'backgroundImage')]
 
-export const URLBackgroundLayerMetadataControls: React.FunctionComponent<URLBackgroundLayerMetadataControlsProps> = (
-  props,
-) => {
+export const URLBackgroundLayerMetadataControls: React.FunctionComponent<
+  React.PropsWithChildren<URLBackgroundLayerMetadataControlsProps>
+> = (props) => {
   const [onSubmitValue] = props.useSubmitValueFactory(
     getIndexedUpdateCSSBackgroundLayerURLImageValue(props.index),
   )
 
   return (
-    <UIGridRow padded variant='<-auto-><----------1fr--------->'>
+    <UIGridRow
+      padded
+      variant='<-auto-><----------1fr--------->'
+      style={{ padding: '0 8px 0 12px' }}
+    >
       <PropertyLabel target={backgroundImagePropertyPath}>URL</PropertyLabel>
       <StringControl
         id='metadata-editor-modal-background-url-value'

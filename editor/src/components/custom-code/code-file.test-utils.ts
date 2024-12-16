@@ -1,20 +1,19 @@
+import type { NodeModules, ProjectContents, TextFile } from '../../core/shared/project-file-types'
 import {
   esCodeFile,
-  isTextFile,
-  NodeModules,
-  ProjectContents,
+  isParseSuccess,
   RevisionsState,
-  TextFile,
   textFile,
   textFileContents,
 } from '../../core/shared/project-file-types'
-import { lintAndParse } from '../../core/workers/parser-printer/parser-printer'
 import {
-  ProjectContentTreeRoot,
-  contentsToTree,
-  getContentsTreeFileFromString,
-  treeToContents,
-} from '../assets'
+  lintAndParse,
+  printCode,
+  printCodeOptions,
+} from '../../core/workers/parser-printer/parser-printer'
+import type { ProjectContentTreeRoot } from '../assets'
+import { contentsToTree, getTextFileByPath, treeToContents } from '../assets'
+import type { EditorState } from '../editor/store/editor-state'
 import { StoryboardFilePath } from '../editor/store/editor-state'
 import { createComplexDefaultProjectContents } from '../../sample-projects/sample-project-utils'
 import { replaceAll } from '../../core/shared/string-utils'
@@ -22,56 +21,42 @@ import { emptySet } from '../../core/shared/set-utils'
 import { parseProjectContents } from '../../sample-projects/sample-project-utils.test-utils'
 
 export const SampleNodeModules: NodeModules = {
-  '/node_modules/utopia-api/index.js': esCodeFile(
-    `export {}`,
+  '/node_modules/non-existant-dummy-library/index.js': esCodeFile(
+    `import * as React from 'react'
+export const Spring = (props) => {
+  return <div {...props} />
+}`,
     'NODE_MODULES',
-    '/node_modules/utopia-api/index.js',
+    '/node_modules/non-existant-dummy-library/index.js',
   ),
-  '/node_modules/utopia-api/package.json': esCodeFile(
+  '/node_modules/non-existant-dummy-library/package.json': esCodeFile(
     JSON.stringify({ main: './index.js' }),
     'NODE_MODULES',
-    '/node_modules/utopia-api/package.json',
+    '/node_modules/non-existant-dummy-library/package.json',
   ),
-  '/node_modules/uuiui/index.js': esCodeFile(
+  '/node_modules/@emotion/react/index.js': esCodeFile(
     `export {}`,
     'NODE_MODULES',
-    '/node_modules/uuiui/index.js',
+    '/node_modules/@emotion/react/index.js',
   ),
-  '/node_modules/uuiui/package.json': esCodeFile(
+  '/node_modules/@emotion/react/package.json': esCodeFile(
     JSON.stringify({ main: './index.js' }),
     'NODE_MODULES',
-    '/node_modules/uuiui/package.json',
-  ),
-  '/node_modules/react/index.js': esCodeFile(
-    `export {}`,
-    'NODE_MODULES',
-    '/node_modules/react/index.js',
-  ),
-  '/node_modules/react/package.json': esCodeFile(
-    JSON.stringify({ main: './index.js' }),
-    'NODE_MODULES',
-    '/node_modules/react/package.json',
-  ),
-  '/node_modules/react-dom/index.js': esCodeFile(
-    `export {}`,
-    'NODE_MODULES',
-    '/node_modules/react-dom/index.js',
-  ),
-  '/node_modules/react-dom/package.json': esCodeFile(
-    JSON.stringify({ main: './index.js' }),
-    'NODE_MODULES',
-    '/node_modules/react-dom/package.json',
+    '/node_modules/@emotion/react/package.json',
   ),
 }
 
 export function createCodeFile(path: string, contents: string): TextFile {
-  const result = lintAndParse(path, contents, null, emptySet())
-  return textFile(
-    textFileContents(contents, result, RevisionsState.BothMatch),
+  const result = lintAndParse(
+    path,
+    [],
+    contents,
     null,
-    null,
-    Date.now(),
+    emptySet(),
+    'trim-bounds',
+    'do-not-apply-steganography',
   )
+  return textFile(textFileContents(contents, result, RevisionsState.BothMatch), null, null, 0)
 }
 
 export function defaultProjectContentsForNormalising(): ProjectContentTreeRoot {
@@ -93,11 +78,23 @@ export function defaultProjectContentsForNormalising(): ProjectContentTreeRoot {
   return contentsToTree(projectContents)
 }
 
-export function getTextFileByPath(projectContents: ProjectContentTreeRoot, path: string): TextFile {
-  const possibleResult = getContentsTreeFileFromString(projectContents, path)
-  if (isTextFile(possibleResult)) {
-    return possibleResult
+export function printParsedCodeForFile(
+  actualResult: EditorState,
+  filename: string,
+  stripUIDs: boolean = true,
+): string {
+  const codeFile = getTextFileByPath(actualResult.projectContents, filename)
+  const parsed = codeFile.fileContents.parsed
+  if (isParseSuccess(parsed)) {
+    return printCode(
+      filename,
+      printCodeOptions(false, true, false, stripUIDs),
+      parsed.imports,
+      parsed.topLevelElements,
+      parsed.jsxFactoryFunction,
+      parsed.exportsDetail,
+    )
   } else {
-    throw new Error(`Unable to find a text file at path ${path}.`)
+    throw new Error('No parsed version of the file.')
   }
 }

@@ -1,5 +1,8 @@
+import { memoize } from './memoize'
+import { sha1 } from 'sha.js'
 import stringHash from 'string-hash'
-import { size, Size } from './math-utils'
+import type { Size } from './math-utils'
+import { size } from './math-utils'
 
 export interface ImageResult {
   type: 'IMAGE_RESULT'
@@ -8,6 +11,26 @@ export interface ImageResult {
   size: Size
   fileType: string
   hash: number
+  gitBlobSha: string
+}
+
+export function imageResult(
+  filename: string,
+  base64Bytes: string,
+  imageSize: Size,
+  fileType: string,
+  hash: number,
+  gitBlobSha: string,
+): ImageResult {
+  return {
+    type: 'IMAGE_RESULT',
+    filename: filename,
+    base64Bytes: base64Bytes,
+    size: imageSize,
+    fileType: fileType,
+    hash: hash,
+    gitBlobSha: gitBlobSha,
+  }
 }
 
 export interface AssetResult {
@@ -15,12 +38,36 @@ export interface AssetResult {
   filename: string
   base64Bytes: string
   hash: number
+  gitBlobSha: string
+}
+
+export function assetResult(
+  filename: string,
+  base64Bytes: string,
+  hash: number,
+  gitBlobSha: string,
+): AssetResult {
+  return {
+    type: 'ASSET_RESULT',
+    filename: filename,
+    base64Bytes: base64Bytes,
+    hash: hash,
+    gitBlobSha: gitBlobSha,
+  }
 }
 
 export interface TextResult {
   type: 'TEXT_RESULT'
   filename: string
   content: string
+}
+
+export function textResult(filename: string, content: string): TextResult {
+  return {
+    type: 'TEXT_RESULT',
+    filename: filename,
+    content: content,
+  }
 }
 
 export type FileResult = ImageResult | AssetResult | TextResult
@@ -43,41 +90,81 @@ export function extractText(file: File): Promise<TextResult> {
   })
 }
 
-export function extractAsset(file: File): Promise<AssetResult> {
-  return new Promise((resolve, reject) => {
+export async function extractAsset(file: File): Promise<AssetResult> {
+  const base64ContentPromise: Promise<string> = new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = async () => {
-      const result = assetResultForBase64(file.name, reader.result as string)
-      resolve(result)
+      resolve(reader.result as string)
     }
     reader.onerror = (error) => {
       reject(error)
     }
     reader.readAsDataURL(file)
   })
+
+  return base64ContentPromise.then((base64String) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = async () => {
+        const result = assetResultForBase64(
+          file.name,
+          base64String,
+          gitBlobChecksumFromBuffer(Buffer.from(reader.result as ArrayBuffer)),
+        )
+        resolve(result)
+      }
+      reader.onerror = (error) => {
+        reject(error)
+      }
+      reader.readAsArrayBuffer(file)
+    })
+  })
 }
 
-export function assetResultForBase64(filename: string, base64: string): AssetResult {
+export function assetResultForBase64(
+  filename: string,
+  base64: string,
+  gitBlobSha: string,
+): AssetResult {
   const hash = stringHash(base64)
   return {
     type: 'ASSET_RESULT',
     filename: filename,
     base64Bytes: base64,
     hash: hash,
+    gitBlobSha: gitBlobSha,
   }
 }
 
-export function extractImage(file: File): Promise<ImageResult> {
-  return new Promise((resolve, reject) => {
+export async function extractImage(file: File): Promise<ImageResult> {
+  const base64ContentPromise: Promise<string> = new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = async () => {
-      const result = await imageResultForBase64(file.name, file.type, reader.result as string)
-      resolve(result)
+      resolve(reader.result as string)
     }
     reader.onerror = (error) => {
       reject(error)
     }
     reader.readAsDataURL(file)
+  })
+
+  return base64ContentPromise.then((base64String) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = async () => {
+        const result = await imageResultForBase64(
+          file.name,
+          file.type,
+          base64String,
+          Buffer.from(reader.result as ArrayBuffer),
+        )
+        resolve(result)
+      }
+      reader.onerror = (error) => {
+        reject(error)
+      }
+      reader.readAsArrayBuffer(file)
+    })
   })
 }
 
@@ -85,6 +172,7 @@ export async function imageResultForBase64(
   filename: string,
   fileType: string,
   base64: string,
+  buffer: Buffer,
 ): Promise<ImageResult> {
   const hash = stringHash(base64)
   const imageDataUrl: string = base64
@@ -103,6 +191,7 @@ export async function imageResultForBase64(
     size: imageSize,
     fileType: fileType,
     hash: hash,
+    gitBlobSha: gitBlobChecksumFromBuffer(buffer),
   }
 }
 
@@ -156,7 +245,12 @@ export function isTsFile(filename: string): boolean {
 }
 
 export function isJsFile(filename: string): boolean {
-  return filename.endsWith('.js') || filename.endsWith('.jsx')
+  return (
+    filename.endsWith('.js') ||
+    filename.endsWith('.jsx') ||
+    filename.endsWith('.mjs') ||
+    filename.endsWith('.cjs')
+  )
 }
 
 export function isCssFile(filename: string): boolean {
@@ -166,3 +260,29 @@ export function isCssFile(filename: string): boolean {
 export function isJsOrTsFile(filename: string): boolean {
   return isJsFile(filename) || isTsFile(filename)
 }
+
+export function isParseableFile(filename: string): boolean {
+  return isJsOrTsFile(filename)
+}
+
+export function gitBlobChecksumFromBuffer(buffer: Buffer): string {
+  // This function returns the same SHA1 checksum string that git would return for the same contents.
+  // Given the contents in the buffer variable, the final checksum is calculated by hashing
+  // a string built as "<prefix><contents>". The prefix looks like "blob <contents_length_in_bytes><null_character>".
+  // Ref: https://git-scm.com/book/en/v2/Git-Internals-Git-Objects
+  const prefix = Buffer.from(`blob ${buffer.byteLength}\0`)
+  const wrapped = Buffer.concat([prefix, buffer])
+  return getSHA1Checksum(wrapped)
+}
+
+function getSHA1ChecksumInner(contents: string | Buffer): string {
+  return new sha1().update(contents).digest('hex')
+}
+
+// Memoized because it can be called for the same piece of code more than once before the
+// checksum gets cached. For example in the canvas strategies and the regular dispatch flow, which don't share
+// those cached checksum objects.
+export const getSHA1Checksum = memoize(getSHA1ChecksumInner, {
+  maxSize: 10,
+  matchesArg: (first, second) => first === second,
+})

@@ -1,92 +1,114 @@
 import Utils from '../../../utils/utils'
-import { CanvasPoint, CanvasRectangle } from '../../../core/shared/math-utils'
-import { ElementPath } from '../../../core/shared/project-file-types'
-import * as EP from '../../../core/shared/element-path'
+import type { CanvasPoint, CanvasRectangle } from '../../../core/shared/math-utils'
 import {
+  getRoundedRectPointsAlongAxes,
+  isFiniteRectangle,
+  offsetPoint,
+  offsetRect,
+  roundPointToNearestWhole,
+  zeroRectangle,
+} from '../../../core/shared/math-utils'
+import type { ElementPath } from '../../../core/shared/project-file-types'
+import * as EP from '../../../core/shared/element-path'
+import type {
   ConstrainedDragAxis,
   Guideline,
-  Guidelines,
-  GuidelineWithSnappingVector,
+  GuidelineWithRelevantPoints,
+  GuidelineWithSnappingVectorAndPointsOfRelevance,
 } from '../guideline'
-import { ElementInstanceMetadataMap } from '../../../core/shared/element-template'
+import { Guidelines } from '../guideline'
+import type { ElementInstanceMetadataMap } from '../../../core/shared/element-template'
 import { MetadataUtils } from '../../../core/model/element-metadata-utils'
-import { EdgePosition } from '../canvas-types'
+import type { EdgePosition } from '../canvas-types'
+import { defaultIfNull } from '../../../core/shared/optional-utils'
+import type { AllElementProps } from '../../editor/store/editor-state'
+import {
+  replaceFragmentLikePathsWithTheirChildrenRecursive,
+  treatElementAsFragmentLike,
+} from '../canvas-strategies/strategies/fragment-like-helpers'
+import { fastForEach } from '../../../core/shared/utils'
+import type { ElementPathTrees } from '../../../core/shared/element-path-tree'
+import { treatElementAsGroupLike } from '../canvas-strategies/strategies/group-helpers'
 
 export const SnappingThreshold = 5
 
-export function collectParentAndSiblingGuidelines(
+function getSnapTargetsForElementPath(
   componentMetadata: ElementInstanceMetadataMap,
+  allElementProps: AllElementProps,
+  pathTrees: ElementPathTrees,
+  elementPath: ElementPath,
+): Array<ElementPath> {
+  const parent = getFirstNonFragmentLikeParent(
+    componentMetadata,
+    allElementProps,
+    pathTrees,
+    elementPath,
+  )
+
+  const siblings = replaceFragmentLikePathsWithTheirChildrenRecursive(
+    componentMetadata,
+    allElementProps,
+    pathTrees,
+    MetadataUtils.getChildrenPathsOrdered(pathTrees, parent),
+  ).filter((path) => !EP.isDescendantOfOrEqualTo(path, elementPath))
+
+  const parentIsGroupLike = treatElementAsGroupLike(componentMetadata, EP.parentPath(elementPath))
+  if (parentIsGroupLike) {
+    // if parent is Group, only include siblings in the snaplines
+    return siblings
+  }
+
+  return [parent, ...siblings]
+}
+
+export function gatherParentAndSiblingTargets(
+  componentMetadata: ElementInstanceMetadataMap,
+  allElementProps: AllElementProps,
+  pathTrees: ElementPathTrees,
   targets: Array<ElementPath>,
-): Array<Guideline> {
-  const allPaths = MetadataUtils.getAllPaths(componentMetadata)
-  const result: Array<Guideline> = []
-  Utils.fastForEach(targets, (target) => {
-    const pinnedAndNotAbsolutePositioned = MetadataUtils.isPinnedAndNotAbsolutePositioned(
-      componentMetadata,
-      target,
-    )
-    if (!pinnedAndNotAbsolutePositioned) {
-      const parent = EP.parentPath(target)
-      Utils.fastForEach(allPaths, (maybeTarget) => {
-        // for now we only snap to parents and sibligns and not us or our descendants
-        const isSibling = EP.isSiblingOf(maybeTarget, target)
-        const isParent = EP.pathsEqual(parent, maybeTarget)
-        const notSelectedOrDescendantOfSelected = targets.every(
-          (view) => !EP.isDescendantOfOrEqualTo(maybeTarget, view),
-        )
-        const isGroup = MetadataUtils.isAutoSizingViewFromComponents(componentMetadata, parent)
-        if ((isSibling || (isParent && !isGroup)) && notSelectedOrDescendantOfSelected) {
-          const frame = MetadataUtils.getFrameInCanvasCoords(maybeTarget, componentMetadata)
-          if (frame != null) {
-            result.push(...Guidelines.guidelinesForFrame(frame, true))
-          }
-        }
-      })
+) {
+  return targets.flatMap((target) =>
+    getSnapTargetsForElementPath(componentMetadata, allElementProps, pathTrees, target).filter(
+      (snapTarget) => targets.every((t) => !EP.pathsEqual(snapTarget, t)),
+    ),
+  )
+}
+
+export function collectParentAndSiblingGuidelines(
+  snapTargets: Array<ElementPath>,
+  componentMetadata: ElementInstanceMetadataMap,
+): Array<GuidelineWithRelevantPoints> {
+  const result: Array<GuidelineWithRelevantPoints> = []
+  fastForEach(snapTargets, (snapTarget) => {
+    const frame = MetadataUtils.getFrameInCanvasCoords(snapTarget, componentMetadata)
+    if (frame != null && isFiniteRectangle(frame)) {
+      result.push(...Guidelines.guidelinesWithRelevantPointsForFrame(frame, 'include'))
     }
   })
   return result
 }
 
-export function collectSelfAndChildrenGuidelines(
+function getFirstNonFragmentLikeParent(
   componentMetadata: ElementInstanceMetadataMap,
-  targets: Array<ElementPath>,
-  insertingElementId: string,
-): Array<Guideline> {
-  const allPaths = MetadataUtils.getAllPaths(componentMetadata)
-  const result: Array<Guideline> = []
-  Utils.fastForEach(targets, (target) => {
-    const pinnedAndNotAbsolutePositioned = MetadataUtils.isPinnedAndNotAbsolutePositioned(
-      componentMetadata,
-      target,
-    )
-    if (!pinnedAndNotAbsolutePositioned) {
-      if (EP.toUid(target) !== insertingElementId) {
-        const frame = MetadataUtils.getFrameInCanvasCoords(target, componentMetadata)
-        if (frame != null) {
-          result.push(...Guidelines.guidelinesForFrame(frame, true))
-        }
-      }
-
-      Utils.fastForEach(allPaths, (maybeTarget) => {
-        if (EP.isChildOf(maybeTarget, target) && EP.toUid(maybeTarget) !== insertingElementId) {
-          const frame = MetadataUtils.getFrameInCanvasCoords(maybeTarget, componentMetadata)
-          if (frame != null) {
-            result.push(...Guidelines.guidelinesForFrame(frame, true))
-          }
-        }
-      })
-    }
-  })
-  return result
+  allElementProps: AllElementProps,
+  pathTrees: ElementPathTrees,
+  elementPath: ElementPath,
+): ElementPath {
+  const parentPath = EP.parentPath(elementPath)
+  if (!treatElementAsFragmentLike(componentMetadata, allElementProps, pathTrees, parentPath)) {
+    return parentPath
+  }
+  return getFirstNonFragmentLikeParent(componentMetadata, allElementProps, pathTrees, parentPath)
 }
 
 export function getSnappedGuidelines(
-  guidelines: Array<Guideline>,
+  guidelines: Array<GuidelineWithRelevantPoints>,
   constrainedDragAxis: ConstrainedDragAxis | null,
   draggedFrame: CanvasRectangle,
   scale: number,
-) {
-  const { horizontalPoints, verticalPoints } = Utils.getRectPointsAlongAxes(draggedFrame)
+): Array<GuidelineWithSnappingVectorAndPointsOfRelevance> {
+  const { horizontalPoints, verticalPoints } = getRoundedRectPointsAlongAxes(draggedFrame)
+
   // TODO constrained drag axis
   return Guidelines.getClosestGuidelinesAndOffsets(
     horizontalPoints,
@@ -99,28 +121,11 @@ export function getSnappedGuidelines(
   )
 }
 
-export function getSnappedGuidelinesForPoint(
-  guidelines: Array<Guideline>,
-  constrainedDragAxis: ConstrainedDragAxis | null,
-  point: CanvasPoint,
-  scale: number,
-) {
-  return Guidelines.getClosestGuidelinesAndOffsets(
-    [point.x],
-    [point.y],
-    [point],
-    guidelines,
-    constrainedDragAxis,
-    SnappingThreshold,
-    scale,
-  )
-}
-
 export function oneGuidelinePerDimension(
-  guidelines: Array<GuidelineWithSnappingVector>,
-): Array<GuidelineWithSnappingVector> {
-  let xAxisGuideline: GuidelineWithSnappingVector | null = null
-  let yAxisGuideline: GuidelineWithSnappingVector | null = null
+  guidelines: Array<GuidelineWithSnappingVectorAndPointsOfRelevance>,
+): Array<GuidelineWithSnappingVectorAndPointsOfRelevance> {
+  let xAxisGuideline: GuidelineWithSnappingVectorAndPointsOfRelevance | null = null
+  let yAxisGuideline: GuidelineWithSnappingVectorAndPointsOfRelevance | null = null
 
   for (const guideline of guidelines) {
     if (guideline.guideline.type === 'CornerGuideline') {
@@ -132,53 +137,119 @@ export function oneGuidelinePerDimension(
     }
   }
 
-  return Utils.stripNulls<GuidelineWithSnappingVector>([xAxisGuideline, yAxisGuideline])
+  return Utils.stripNulls<GuidelineWithSnappingVectorAndPointsOfRelevance>([
+    xAxisGuideline,
+    yAxisGuideline,
+  ])
 }
 
 export function getSnapDelta(
-  guidelines: Array<Guideline>,
+  guidelines: Array<GuidelineWithRelevantPoints>,
   constrainedDragAxis: ConstrainedDragAxis | null,
   draggedFrame: CanvasRectangle,
   scale: number,
-): CanvasPoint {
+): {
+  delta: CanvasPoint
+  guidelinesWithSnappingVector: Array<GuidelineWithSnappingVectorAndPointsOfRelevance>
+} {
   const closestGuideLines = getSnappedGuidelines(
     guidelines,
     constrainedDragAxis,
     draggedFrame,
     scale,
   )
-  const delta = oneGuidelinePerDimension(closestGuideLines).reduce((working, guideline) => {
-    if (guideline.activateSnap) {
-      return Utils.offsetPoint(working, guideline.snappingVector)
-    } else {
-      return working
-    }
+  const winningGuidelines = oneGuidelinePerDimension(closestGuideLines)
+  const delta = winningGuidelines.reduce((working, guideline) => {
+    return Utils.offsetPoint(working, guideline.snappingVector)
   }, Utils.zeroPoint as CanvasPoint)
-  return Utils.roundPointTo(delta, 0)
+  return {
+    delta: roundPointToNearestWhole(delta),
+    guidelinesWithSnappingVector: winningGuidelines,
+  }
 }
 
-export function filterGuidelinesStaticAxis(
-  guidelines: Array<Guideline>,
-  resizingFromPosition: EdgePosition,
-) {
-  // when resizing on vertical side horizontal guidelines are not visible
-  return guidelines.filter((guideline) => {
-    return !(
-      (resizingFromPosition.x === 0.5 && guideline.type === 'XAxisGuideline') ||
-      (resizingFromPosition.y === 0.5 && guideline.type === 'YAxisGuideline')
-    )
+export function pointGuidelineToBoundsEdge(
+  guidelinesWithSnappingVector: Array<GuidelineWithSnappingVectorAndPointsOfRelevance>,
+  multiselectBounds: CanvasRectangle,
+): Array<GuidelineWithSnappingVectorAndPointsOfRelevance> {
+  return guidelinesWithSnappingVector.map((guidelineWithSnappingVector) => {
+    const guideline = guidelineWithSnappingVector.guideline
+    switch (guideline.type) {
+      case 'XAxisGuideline':
+        return {
+          ...guidelineWithSnappingVector,
+          guideline: {
+            ...guideline,
+            yTop: Math.min(guideline.yTop, multiselectBounds.y),
+            yBottom: Math.max(guideline.yBottom, multiselectBounds.y + multiselectBounds.height),
+          },
+        }
+      case 'YAxisGuideline':
+        return {
+          ...guidelineWithSnappingVector,
+          guideline: {
+            ...guideline,
+            xLeft: Math.min(guideline.xLeft, multiselectBounds.x),
+            xRight: Math.max(guideline.xRight, multiselectBounds.x + multiselectBounds.width),
+          },
+        }
+      case 'CornerGuideline':
+        throw new Error('CornerGuidelines are not updated to frame length')
+      default:
+        const _exhaustiveCheck: never = guideline
+        throw 'Unexpected value for guideline: ' + guideline
+    }
   })
 }
 
-export function applySnappingToPoint(
-  point: CanvasPoint,
-  guidelines: Array<GuidelineWithSnappingVector>,
-): CanvasPoint {
-  return oneGuidelinePerDimension(guidelines).reduce((p, guidelineResult) => {
-    if (guidelineResult.activateSnap) {
-      return Utils.offsetPoint(p, guidelineResult.snappingVector)
-    } else {
-      return p
+export function runLegacyAbsoluteMoveSnapping(
+  drag: CanvasPoint,
+  constrainedDragAxis: ConstrainedDragAxis | null,
+  moveGuidelines: Array<GuidelineWithRelevantPoints>,
+  canvasScale: number,
+  multiselectBounds: CanvasRectangle | null,
+): {
+  snappedDragVector: CanvasPoint
+  guidelinesWithSnappingVector: Array<GuidelineWithSnappingVectorAndPointsOfRelevance>
+} {
+  const { delta, guidelinesWithSnappingVector } = getSnapDelta(
+    moveGuidelines,
+    constrainedDragAxis,
+    offsetRect(defaultIfNull(zeroRectangle as CanvasRectangle, multiselectBounds), drag),
+    canvasScale,
+  )
+
+  const snappedDragVector = offsetPoint(drag, delta)
+  const directionConstrainedDragVector = Guidelines.applyDirectionConstraint(
+    constrainedDragAxis,
+    snappedDragVector,
+  )
+
+  if (multiselectBounds != null) {
+    const draggedBounds = offsetRect(multiselectBounds, directionConstrainedDragVector)
+    const updatedGuidelinesWithSnapping = pointGuidelineToBoundsEdge(
+      guidelinesWithSnappingVector,
+      draggedBounds,
+    )
+    return {
+      snappedDragVector: directionConstrainedDragVector,
+      guidelinesWithSnappingVector: updatedGuidelinesWithSnapping,
     }
-  }, point)
+  } else {
+    return { snappedDragVector: directionConstrainedDragVector, guidelinesWithSnappingVector }
+  }
+}
+
+export function filterGuidelinesStaticAxis<T>(
+  fn: (t: T) => Guideline,
+  guidelineLikes: Array<T>,
+  resizingFromPosition: EdgePosition,
+): Array<T> {
+  // when resizing on vertical side horizontal guidelines are not visible
+  return guidelineLikes.filter((guideline) => {
+    return !(
+      (resizingFromPosition.x === 0.5 && fn(guideline).type === 'XAxisGuideline') ||
+      (resizingFromPosition.y === 0.5 && fn(guideline).type === 'YAxisGuideline')
+    )
+  })
 }

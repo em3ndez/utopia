@@ -1,7 +1,11 @@
-import Slider, { Marks } from 'rc-slider'
+import type { Marks } from 'rc-slider'
+import Slider from 'rc-slider'
 import React from 'react'
+import ReactDOM from 'react-dom'
 import { FlexRow, UtopiaTheme } from '../../../uuiui'
-import { DEPRECATEDControlProps, DEPRECATEDGenericControlOptions } from './control'
+import type { DEPRECATEDControlProps, DEPRECATEDGenericControlOptions } from './control'
+import { useIsMyProject } from '../../editor/store/collaborative-editing'
+import { useControlsDisabledInSubtree } from '../../../uuiui/utilities/disable-subtree'
 
 export interface DEPRECATEDSliderControlOptions extends DEPRECATEDGenericControlOptions {
   minimum: number
@@ -20,21 +24,49 @@ export type SliderControlProps = DEPRECATEDControlProps<number> & {
   DEPRECATED_controlOptions: DEPRECATEDSliderControlOptions
 }
 
-export const SliderControl: React.FunctionComponent<SliderControlProps> = (props) => {
+export const SliderControl: React.FunctionComponent<React.PropsWithChildren<SliderControlProps>> = (
+  props,
+) => {
+  const { onTransientSubmitValue, value, onDragStart, onDragEnd, onDrag } = props
   const [isSliding, setIsSliding] = React.useState(false)
+  const [slidingValue, setSlidingValue] = React.useState(0)
 
+  const withinChange = React.useRef(false)
   const handleBeforeChange = React.useCallback(() => {
+    withinChange.current = true
     setIsSliding(true)
-  }, [])
+    if (onDragStart != null) {
+      onDragStart()
+    }
+  }, [onDragStart])
 
+  const handleDragging = React.useCallback(
+    (newValue: number) => {
+      ReactDOM.flushSync(() => {
+        setSlidingValue(newValue)
+      })
+      onTransientSubmitValue!(newValue, true)
+      if (onDrag != null) {
+        onDrag(newValue)
+      }
+    },
+    [onTransientSubmitValue, onDrag],
+  )
   const onChangeFn = props.onForcedSubmitValue ?? props.onSubmitValue
-
   const handleOnAfterChange = React.useCallback(
     (n: number) => {
-      onChangeFn(n)
-      setIsSliding(false)
+      // Prevents any additional triggered onAfterChange calls without a matching
+      // onBeforeChange from being actioned.
+      if (withinChange.current) {
+        withinChange.current = false
+        onChangeFn(n)
+        setIsSliding(false)
+        if (onDragEnd != null) {
+          onDragEnd()
+        }
+      }
     },
-    [onChangeFn],
+    [onChangeFn, onDragEnd],
   )
 
   const controlOptions = React.useMemo(() => {
@@ -73,6 +105,10 @@ export const SliderControl: React.FunctionComponent<SliderControlProps> = (props
       label: String(controlOptions.origin),
     }
   }
+
+  const controlsDisabled = useControlsDisabledInSubtree()
+  const disabled = !props.controlStyles.interactive || controlsDisabled
+
   return (
     <FlexRow
       style={{
@@ -87,10 +123,10 @@ export const SliderControl: React.FunctionComponent<SliderControlProps> = (props
       onContextMenu={props.onContextMenu}
     >
       <Slider
-        disabled={!props.controlStyles.interactive}
-        value={props.value}
+        disabled={disabled}
+        value={isSliding ? slidingValue : value}
         onBeforeChange={handleBeforeChange}
-        onChange={props.onTransientSubmitValue}
+        onChange={handleDragging}
         onAfterChange={handleOnAfterChange}
         min={controlOptions.minimum}
         max={controlOptions.maximum}

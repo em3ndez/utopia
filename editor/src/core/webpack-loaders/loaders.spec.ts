@@ -1,8 +1,7 @@
 import { CSSLoader } from './css-loader'
 import { DefaultLoader } from './default-loader'
 import { FileLoader } from './file-loader'
-import { SVGLoader } from './svg-loader'
-import { ModuleLoader } from './loader-types'
+import type { ModuleLoader } from './loader-types'
 import { applyLoaders } from './loaders'
 import { JSONLoader } from './json-loader'
 
@@ -15,10 +14,8 @@ function nameForModuleLoader(moduleLoader: ModuleLoader): string {
     return 'File Loader'
   } else if (moduleLoader === JSONLoader) {
     return 'JSON Loader'
-  } else if (moduleLoader === SVGLoader) {
-    return 'SVG Loader'
   } else {
-    fail('Invalid loader')
+    throw new Error('Invalid loader')
   }
 }
 
@@ -48,8 +45,7 @@ describe('Applying loaders', () => {
   verifyCorrectLoaderUsed(JSONLoader, ['.json'], '{}')
   verifyCorrectLoaderUsed(
     FileLoader,
-    ['.avif', '.bmp', '.gif', '.jpg', '.jpeg', '.png', '.glb', '.data', '.cica'],
+    ['.avif', '.bmp', '.gif', '.jpg', '.jpeg', '.png', '.glb', '.data', '.cica', '.svg'],
     '',
   )
-  verifyCorrectLoaderUsed(SVGLoader, ['.svg'], '<svg/>')
 })

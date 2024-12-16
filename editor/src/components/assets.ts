@@ -1,4 +1,4 @@
-import {
+import type {
   ProjectContents,
   ImageFile,
   ProjectFile,
@@ -6,21 +6,42 @@ import {
   TextFile,
   AssetFile,
   ParseSuccess,
-  isParsedTextFile,
-  isTextFile,
-  isParseSuccess,
-  isAssetFile,
 } from '../core/shared/project-file-types'
-import { isDirectory, directory, isImageFile } from '../core/model/project-file-utils'
+import {
+  directory,
+  isDirectory,
+  isImageFile,
+  RevisionsState,
+} from '../core/shared/project-file-types'
+import { isTextFile, isParseSuccess, isAssetFile } from '../core/shared/project-file-types'
 import Utils from '../utils/utils'
 import { dropLeadingSlash } from './filebrowser/filepath-utils'
-import { fastForEach } from '../core/shared/utils'
+import { assertNever, fastForEach } from '../core/shared/utils'
 import { mapValues, propOrNull } from '../core/shared/object-utils'
 import { emptySet } from '../core/shared/set-utils'
+import type { GithubFileChanges, TreeConflicts } from '../core/shared/github/helpers'
+import type { FileChecksumsWithFile } from './editor/store/editor-state'
+import { memoize, valueDependentCache } from '../core/shared/memoize'
+import { makeOptic, type Optic } from '../core/shared/optics/optics'
+import type {
+  AssetFileWithFileName,
+  ProjectContentTreeRoot,
+  ProjectContentDirectory,
+  ProjectContentFile,
+  ProjectContentsTree,
+  PathAndFileEntry,
+} from 'utopia-shared/src/types/assets'
+import { filtered, fromField, fromTypeGuard } from '../core/shared/optics/optic-creators'
+import { anyBy, toArrayOf } from '../core/shared/optics/optic-utilities'
+import { gitBlobChecksumFromBuffer } from '../core/shared/file-utils'
 
-export interface AssetFileWithFileName {
-  fileName: string
-  file: ImageFile | AssetFile
+export type {
+  AssetFileWithFileName,
+  ProjectContentTreeRoot,
+  ProjectContentDirectory,
+  ProjectContentFile,
+  ProjectContentsTree,
+  PathAndFileEntry,
 }
 
 export function getAllProjectAssetFiles(
@@ -40,13 +61,131 @@ export function getAllProjectAssetFiles(
   return allProjectAssets
 }
 
-export type ProjectContentTreeRoot = { [key: string]: ProjectContentsTree }
+export function gitBlobChecksumFromBase64(base64: string): string {
+  return gitBlobChecksumFromBuffer(Buffer.from(base64, 'base64'))
+}
 
-export interface ProjectContentDirectory {
-  type: 'PROJECT_CONTENT_DIRECTORY'
-  fullPath: string
-  directory: Directory
-  children: ProjectContentTreeRoot
+export function gitBlobChecksumFromText(text: string): string {
+  return gitBlobChecksumFromBuffer(Buffer.from(text, 'utf8'))
+}
+
+export function checkFilesHaveSameContent(first: ProjectFile, second: ProjectFile): boolean {
+  switch (first.type) {
+    case 'DIRECTORY':
+      return first.type === second.type
+    case 'TEXT_FILE':
+      if (first.type === second.type) {
+        return first.fileContents.code === second.fileContents.code
+      } else {
+        return false
+      }
+    case 'IMAGE_FILE':
+    case 'ASSET_FILE':
+      if (first.type === second.type) {
+        if (first.gitBlobSha != null && second.gitBlobSha != null) {
+          return first.gitBlobSha === second.gitBlobSha
+        } else if (first.base64 != null && second.base64 != null) {
+          return first.base64 === second.base64
+        } else {
+          return false
+        }
+      } else {
+        return false
+      }
+    default:
+      assertNever(first)
+  }
+}
+
+export function getProjectContentsChecksums(
+  tree: ProjectContentTreeRoot,
+  previousChecksums: FileChecksumsWithFile,
+): FileChecksumsWithFile {
+  const updatedChecksums: FileChecksumsWithFile = {}
+  walkContentsTree(tree, (filename, file) => {
+    if (file.type !== 'DIRECTORY') {
+      let usedPreviousChecksum: boolean = false
+      if (filename in previousChecksums) {
+        const previousChecksum = previousChecksums[filename]
+        if (checkFilesHaveSameContent(previousChecksum.file, file)) {
+          updatedChecksums[filename] = previousChecksum
+          usedPreviousChecksum = true
+        }
+      }
+      if (!usedPreviousChecksum) {
+        switch (file.type) {
+          case 'TEXT_FILE':
+            updatedChecksums[filename] = {
+              file: file,
+              checksum: gitBlobChecksumFromText(file.fileContents.code),
+            }
+            break
+          case 'ASSET_FILE':
+          case 'IMAGE_FILE':
+            if (file.gitBlobSha != null) {
+              updatedChecksums[filename] = {
+                file: file,
+                checksum: file.gitBlobSha,
+              }
+            } else if (file.base64 != undefined) {
+              updatedChecksums[filename] = {
+                file: file,
+                checksum: gitBlobChecksumFromBase64(file.base64),
+              }
+            }
+            break
+          default:
+            assertNever(file)
+        }
+      }
+    }
+  })
+
+  return updatedChecksums
+}
+
+export function deriveGithubFileChanges(
+  previousChecksums: FileChecksumsWithFile | null,
+  currentChecksums: FileChecksumsWithFile,
+  treeConflicts: TreeConflicts,
+): GithubFileChanges | null {
+  if (previousChecksums == null || currentChecksums == null) {
+    return null
+  }
+
+  const previousFiles = new Set(Object.keys(previousChecksums))
+  const currentFiles = new Set(Object.keys(currentChecksums))
+
+  let untracked: Array<string> = []
+  let modified: Array<string> = []
+  let deleted: Array<string> = []
+  const conflicted: Array<string> = Object.keys(treeConflicts)
+  const conflictedSet = new Set(conflicted)
+
+  previousFiles.forEach((f) => {
+    if (!conflictedSet.has(f)) {
+      if (!currentFiles.has(f)) {
+        deleted.push(f)
+      } else if (currentChecksums[f].checksum !== previousChecksums[f].checksum) {
+        modified.push(f)
+      }
+    }
+  })
+
+  currentFiles.forEach((f) => {
+    if (!conflictedSet.has(f)) {
+      if (!previousFiles.has(f)) {
+        untracked.push(f)
+      }
+    }
+  })
+
+  return {
+    untracked,
+    modified,
+    deleted,
+    conflicted,
+  }
 }
 
 export function projectContentDirectory(
@@ -62,12 +201,6 @@ export function projectContentDirectory(
   }
 }
 
-export interface ProjectContentFile {
-  type: 'PROJECT_CONTENT_FILE'
-  fullPath: string
-  content: TextFile | ImageFile | AssetFile
-}
-
 export function projectContentFile(
   fullPath: string,
   content: TextFile | ImageFile | AssetFile,
@@ -78,8 +211,6 @@ export function projectContentFile(
     content: content,
   }
 }
-
-export type ProjectContentsTree = ProjectContentDirectory | ProjectContentFile
 
 export function isProjectContentDirectory(
   projectContentsTree: ProjectContentsTree | null,
@@ -180,7 +311,7 @@ export function contentsToTree(projectContents: ProjectContents): ProjectContent
   return treeRoot
 }
 
-export function treeToContents(tree: ProjectContentTreeRoot): ProjectContents {
+function treeToContentsInner(tree: ProjectContentTreeRoot): ProjectContents {
   const treeKeys = Object.keys(tree)
   return treeKeys.reduce((working, treeKey) => {
     const treePart = tree[treeKey]
@@ -194,7 +325,7 @@ export function treeToContents(tree: ProjectContentTreeRoot): ProjectContents {
         return {
           ...working,
           [treePart.fullPath]: treePart.directory,
-          ...treeToContents(treePart.children),
+          ...treeToContentsInner(treePart.children),
         }
       default:
         const _exhaustiveCheck: never = treePart
@@ -202,6 +333,7 @@ export function treeToContents(tree: ProjectContentTreeRoot): ProjectContents {
     }
   }, {})
 }
+export const treeToContents = memoize(treeToContentsInner)
 
 export function walkContentsTree(
   tree: ProjectContentTreeRoot,
@@ -224,6 +356,48 @@ export function walkContentsTree(
         throw new Error(`Unhandled tree element ${JSON.stringify(treeElement)}`)
     }
   })
+}
+
+export const contentsTreeOptic: Optic<ProjectContentTreeRoot, PathAndFileEntry> = makeOptic(
+  (tree, callback) => {
+    walkContentsTree(tree, (fullPath, file) => {
+      callback({ fullPath: fullPath, file: file })
+    })
+  },
+  (tree: ProjectContentTreeRoot, modify: (entry: PathAndFileEntry) => PathAndFileEntry) => {
+    let result: ProjectContentTreeRoot = {}
+    walkContentsTree(tree, (fullPath, file) => {
+      const modified: PathAndFileEntry = modify({ fullPath: fullPath, file: file })
+      result = addFileToProjectContents(result, modified.fullPath, modified.file)
+    })
+    return result
+  },
+)
+
+export function anyCodeAhead(tree: ProjectContentTreeRoot): boolean {
+  const revisionsStateOptic = contentsTreeOptic
+    .compose(fromField('file'))
+    .compose(fromTypeGuard(isTextFile))
+    .compose(fromField('fileContents'))
+    .compose(filtered((f) => f.parsed.type === 'PARSE_SUCCESS'))
+    .compose(fromField('revisionsState'))
+
+  return anyBy(
+    revisionsStateOptic,
+    (revisionsState) => {
+      switch (revisionsState) {
+        case 'BOTH_MATCH':
+        case 'PARSED_AHEAD':
+          return false
+        case 'CODE_AHEAD':
+        case 'CODE_AHEAD_BUT_PLEASE_TELL_VSCODE_ABOUT_IT':
+          return true
+        default:
+          assertNever(revisionsState)
+      }
+    },
+    tree,
+  )
 }
 
 export function walkContentsTreeForParseSuccess(
@@ -336,38 +510,74 @@ export function getContentsTreeFileFromElements(
   tree: ProjectContentTreeRoot,
   pathElements: ReadonlyArray<string>,
 ): ProjectFile | null {
+  const projectContentsTree = getContentsTreeFromElements(tree, pathElements)
+  if (projectContentsTree == null) {
+    return null
+  }
+  return getProjectFileFromTree(projectContentsTree)
+}
+
+export function getContentsTreeFromElements(
+  tree: ProjectContentTreeRoot,
+  pathElements: ReadonlyArray<string>,
+): ProjectContentsTree | null {
   if (pathElements.length === 0) {
     throw new Error(`Invalid pathElements.`)
   } else {
-    function getFileWithIndex(
-      currentTree: ProjectContentTreeRoot,
-      index: number,
-    ): ProjectFile | null {
+    let workingTree: ProjectContentTreeRoot = tree
+    for (let index = 0; index < pathElements.length; index++) {
       const pathPart = pathElements[index]
-      const treePart = currentTree[pathPart]
+      const treePart = workingTree[pathPart]
       if (treePart == null) {
         return null
       } else {
         if (index === pathElements.length - 1) {
-          return getProjectFileFromTree(treePart)
+          return treePart
         } else {
           if (treePart.type === 'PROJECT_CONTENT_DIRECTORY') {
-            return getFileWithIndex(treePart.children, index + 1)
+            workingTree = treePart.children
           } else {
             return null
           }
         }
       }
     }
-    return getFileWithIndex(tree, 0)
+    return null
   }
 }
 
-export function getContentsTreeFileFromString(
+export const getProjectFileByFilePath = valueDependentCache(
+  getProjectFileByFilePathUncached,
+  (path) => path,
+)
+
+export function getProjectFileByFilePathUncached(
   tree: ProjectContentTreeRoot,
   path: string,
 ): ProjectFile | null {
   return getContentsTreeFileFromElements(tree, getProjectContentKeyPathElements(path))
+}
+
+export function getTextFileByPath(projectContents: ProjectContentTreeRoot, path: string): TextFile {
+  const possibleResult = getProjectFileByFilePath(projectContents, path)
+  if (possibleResult != null && isTextFile(possibleResult)) {
+    return possibleResult
+  } else {
+    throw new Error(`Unable to find a text file at path ${path}.`)
+  }
+}
+
+export function packageJsonFileFromProjectContents(
+  projectContents: ProjectContentTreeRoot,
+): ProjectFile | null {
+  return getProjectFileByFilePath(projectContents, '/package.json')
+}
+
+export function getContentsTreeFromPath(
+  tree: ProjectContentTreeRoot,
+  path: string,
+): ProjectContentsTree | null {
+  return getContentsTreeFromElements(tree, getProjectContentKeyPathElements(path))
 }
 
 export function addFileToProjectContents(
@@ -434,6 +644,18 @@ export function addFileToProjectContents(
   }
 
   return addAtCurrentIndex(tree, 0)
+}
+
+export function getProjectFileFromContents(contents: ProjectContentsTree): ProjectFile {
+  switch (contents.type) {
+    case 'PROJECT_CONTENT_FILE':
+      return contents.content
+    case 'PROJECT_CONTENT_DIRECTORY':
+      return contents.directory
+    default:
+      const _exhaustiveCheck: never = contents
+      throw new Error(`Unhandled contents ${JSON.stringify(contents)}`)
+  }
 }
 
 export function removeFromProjectContents(
@@ -538,4 +760,37 @@ export function ensureDirectoriesExist(projectContents: ProjectContents): Projec
     })
     return result
   }
+}
+
+function getFileAsJson<T>(projectContents: ProjectContentTreeRoot, fileName: string): T | null {
+  const file = getProjectFileByFilePath(projectContents, fileName)
+  if (file != null && isTextFile(file)) {
+    return JSON.parse(file.fileContents.code) as T
+  }
+  return null
+}
+
+type PackageJson = { utopia?: Record<string, string>; dependencies?: Record<string, string> }
+export function getPackageJson(projectContents: ProjectContentTreeRoot): PackageJson | null {
+  return getFileAsJson<PackageJson>(projectContents, '/package.json')
+}
+
+type PackageLockJson = { dependencies?: Record<string, { version?: string }> }
+export function getPackageLockJson(
+  projectContents: ProjectContentTreeRoot,
+): PackageLockJson | null {
+  return getFileAsJson<PackageLockJson>(projectContents, '/package-lock.json')
+}
+
+export function getProjectDependencies(
+  projectContents: ProjectContentTreeRoot,
+): Record<string, string> | null {
+  const packageJsonDependencies = getPackageJson(projectContents)?.dependencies ?? {}
+  const packageLockJsonDependencies = getPackageLockJson(projectContents)?.dependencies ?? {}
+  for (const packageName of Object.keys(packageJsonDependencies)) {
+    if (packageLockJsonDependencies[packageName]?.version != null) {
+      packageJsonDependencies[packageName] = packageLockJsonDependencies[packageName].version
+    }
+  }
+  return packageJsonDependencies
 }

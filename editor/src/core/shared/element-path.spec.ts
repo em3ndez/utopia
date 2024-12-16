@@ -1,7 +1,11 @@
 import * as Chai from 'chai'
 import * as EP from './element-path'
 import { BakedInStoryboardUID } from '../model/scene-utils'
+import type { ElementPath } from './project-file-types'
 const chaiExpect = Chai.expect
+
+const TestSceneUID = 'scene-aaa'
+const TestAppUID = 'app-entity'
 
 describe('serialization', () => {
   it('path survives serialization', () => {
@@ -119,8 +123,8 @@ describe('appending to a path', () => {
       ['C', 'D'],
     ])
     const singleElementAdded = EP.appendToPath(start, 'E')
-    const singleElementAddedViaArray = EP.appendToPath(start, ['E'])
-    const multipleElementsAdded = EP.appendToPath(start, ['E', 'F'])
+    const singleElementAddedViaArray = EP.appendPartToPath(start, ['E'])
+    const multipleElementsAdded = EP.appendPartToPath(start, ['E', 'F'])
 
     expect(singleElementAdded).toEqual(
       EP.elementPath([
@@ -145,8 +149,8 @@ describe('appending to a path', () => {
   it('appendToPath works with an empty path', () => {
     const start = EP.emptyElementPath
     const singleElementAdded = EP.appendToPath(start, 'E')
-    const singleElementAddedViaArray = EP.appendToPath(start, ['E'])
-    const multipleElementsAdded = EP.appendToPath(start, ['E', 'F'])
+    const singleElementAddedViaArray = EP.appendPartToPath(start, ['E'])
+    const multipleElementsAdded = EP.appendPartToPath(start, ['E', 'F'])
 
     expect(singleElementAdded).toEqual(EP.elementPath([['E']]))
     expect(singleElementAddedViaArray).toEqual(EP.elementPath([['E']]))
@@ -286,6 +290,14 @@ describe('isDescendantOf', () => {
     )
     chaiExpect(result).to.be.false
   })
+
+  it('returns false if they are siblings but one uid is a prefix of the other', () => {
+    const result = EP.isDescendantOf(
+      EP.elementPath([[BakedInStoryboardUID, 'scene-aaa'], ['X1']]),
+      EP.elementPath([[BakedInStoryboardUID, 'scene-aaa'], ['X']]),
+    )
+    chaiExpect(result).to.be.false
+  })
 })
 
 describe('replaceIfAncestor', () => {
@@ -416,6 +428,10 @@ describe('replaceIfAncestor', () => {
 })
 
 describe('fromString', () => {
+  beforeEach(() => {
+    EP.removePathsWithDeadUIDs(new Set())
+  })
+
   it('parses a simple path correctly', () => {
     const expectedResult = EP.elementPath([
       [BakedInStoryboardUID, 'scene-aaa'],
@@ -423,6 +439,39 @@ describe('fromString', () => {
     ])
     const actualResult = EP.fromString(EP.toComponentId(expectedResult))
     chaiExpect(actualResult).to.deep.equal(expectedResult)
+  })
+  it('Handles an empty path part prefix', () => {
+    const withEmptyPart = EP.elementPath([[], ['one', 'two'], ['three']])
+    const withEmptyPartAsString = EP.toString(withEmptyPart)
+    expect(withEmptyPartAsString).toEqual(':one/two:three')
+    expect(EP.fromString(withEmptyPartAsString)).toEqual(withEmptyPart)
+
+    const withoutEmptyPart = EP.elementPath([['one', 'two'], ['three']])
+    const withoutEmptyPartAsString = EP.toString(withoutEmptyPart)
+    expect(withoutEmptyPartAsString).toEqual('one/two:three')
+    expect(EP.fromString(withoutEmptyPartAsString)).toEqual(withoutEmptyPart)
+  })
+  it('Handles an empty path part in the middle', () => {
+    const withEmptyPart = EP.elementPath([['one', 'two'], [], ['three']])
+    const withEmptyPartAsString = EP.toString(withEmptyPart)
+    expect(withEmptyPartAsString).toEqual('one/two::three')
+    expect(EP.fromString(withEmptyPartAsString)).toEqual(withEmptyPart)
+
+    const withoutEmptyPart = EP.elementPath([['one', 'two'], ['three']])
+    const withoutEmptyPartAsString = EP.toString(withoutEmptyPart)
+    expect(withoutEmptyPartAsString).toEqual('one/two:three')
+    expect(EP.fromString(withoutEmptyPartAsString)).toEqual(withoutEmptyPart)
+  })
+  it('Handles an empty path part suffix', () => {
+    const withEmptyPart = EP.elementPath([['one', 'two'], ['three'], []])
+    const withEmptyPartAsString = EP.toString(withEmptyPart)
+    expect(withEmptyPartAsString).toEqual('one/two:three:')
+    expect(EP.fromString(withEmptyPartAsString)).toEqual(withEmptyPart)
+
+    const withoutEmptyPart = EP.elementPath([['one', 'two'], ['three']])
+    const withoutEmptyPartAsString = EP.toString(withoutEmptyPart)
+    expect(withoutEmptyPartAsString).toEqual('one/two:three')
+    expect(EP.fromString(withoutEmptyPartAsString)).toEqual(withoutEmptyPart)
   })
 })
 
@@ -616,5 +665,177 @@ describe('getCommonParent', () => {
     ])
     const expectedResult = EP.elementPath([[BakedInStoryboardUID, 'scene-aaa'], ['a']])
     expect(actualResult).toEqual(expectedResult)
+  })
+})
+
+describe('isParentOf', () => {
+  it('returns true for a child with a single array element lower down.', () => {
+    const parentPath: ElementPath = EP.elementPath([
+      [BakedInStoryboardUID, TestSceneUID, TestAppUID],
+      ['aaa', 'eee'],
+    ])
+    const childPath: ElementPath = EP.elementPath([
+      [BakedInStoryboardUID, TestSceneUID, TestAppUID],
+      ['aaa', 'eee'],
+      ['zzz'],
+    ])
+    expect(EP.isParentOf(parentPath, childPath)).toBe(true)
+  })
+  it('returns true for a child with a final array element with one less path part.', () => {
+    const parentPath: ElementPath = EP.elementPath([
+      [BakedInStoryboardUID, TestSceneUID, TestAppUID],
+      ['aaa', 'eee'],
+      ['zzz'],
+    ])
+    const childPath: ElementPath = EP.elementPath([
+      [BakedInStoryboardUID, TestSceneUID, TestAppUID],
+      ['aaa', 'eee'],
+      ['zzz', 'yyy'],
+    ])
+    expect(EP.isParentOf(parentPath, childPath)).toBe(true)
+  })
+  it('returns false for paths that differ by a full array element.', () => {
+    const parentPath: ElementPath = EP.elementPath([
+      [BakedInStoryboardUID, TestSceneUID, TestAppUID],
+      ['aaa', 'eee'],
+    ])
+    const childPath: ElementPath = EP.elementPath([
+      [BakedInStoryboardUID, TestSceneUID, TestAppUID],
+      ['aaa', 'eee'],
+      ['zzz', 'yyy'],
+    ])
+    expect(EP.isParentOf(parentPath, childPath)).toBe(false)
+  })
+})
+
+describe('removePathsWithDeadUIDs', () => {
+  const uidsToKeep = ['aaa', 'bbb', 'ccc']
+
+  const cachedPathParts1 = [['aaa', 'bbb'], ['ccc']]
+  const cachedPathParts2 = [['aaa'], ['bbb', 'ccc']]
+  const clearedPathParts1 = [
+    ['aaa', 'bbb'],
+    ['ccc', 'ddd'],
+  ]
+  const clearedPathParts2 = [
+    ['aaa', 'ddd'],
+    ['bbb', 'ccc'],
+  ]
+
+  it('removes paths from the cache', () => {
+    // Create all of the paths, which will add them to the cache
+    const cachedPath1 = EP.elementPath(cachedPathParts1)
+    const cachedPath2 = EP.elementPath(cachedPathParts2)
+    const clearedPath1 = EP.elementPath(clearedPathParts1)
+    const clearedPath2 = EP.elementPath(clearedPathParts2)
+
+    // Check that the paths have indeed been added to the cache
+    expect(EP.elementPath(cachedPathParts1)).toBe(cachedPath1)
+    expect(EP.elementPath(cachedPathParts2)).toBe(cachedPath2)
+    expect(EP.elementPath(clearedPathParts1)).toBe(clearedPath1)
+    expect(EP.elementPath(clearedPathParts2)).toBe(clearedPath2)
+
+    // Cull the cache
+    EP.removePathsWithDeadUIDs(new Set(uidsToKeep))
+
+    // Ensure that only the expected paths have been removed from the cache
+    expect(EP.elementPath(cachedPathParts1)).toBe(cachedPath1)
+    expect(EP.elementPath(cachedPathParts2)).toBe(cachedPath2)
+    expect(EP.elementPath(clearedPathParts1)).not.toBe(clearedPath1)
+    expect(EP.elementPath(clearedPathParts2)).not.toBe(clearedPath2)
+  })
+
+  it('removes the cached string to path values', () => {
+    const cachedPath1AsString = cachedPathParts1
+      .map((parts) => parts.join(EP.ElementSeparator))
+      .join(EP.SceneSeparator)
+    const cachedPath2AsString = cachedPathParts2
+      .map((parts) => parts.join(EP.ElementSeparator))
+      .join(EP.SceneSeparator)
+    const clearedPath1AsString = clearedPathParts1
+      .map((parts) => parts.join(EP.ElementSeparator))
+      .join(EP.SceneSeparator)
+    const clearedPath2AsString = clearedPathParts2
+      .map((parts) => parts.join(EP.ElementSeparator))
+      .join(EP.SceneSeparator)
+
+    // Create all of the paths, which will add them to the cache
+    const cachedPath1 = EP.fromString(cachedPath1AsString)
+    const cachedPath2 = EP.fromString(cachedPath2AsString)
+    const clearedPath1 = EP.fromString(clearedPath1AsString)
+    const clearedPath2 = EP.fromString(clearedPath2AsString)
+
+    // Check that the paths have indeed been added to the cache
+    expect(EP.fromString(cachedPath1AsString)).toBe(cachedPath1)
+    expect(EP.fromString(cachedPath2AsString)).toBe(cachedPath2)
+    expect(EP.fromString(clearedPath1AsString)).toBe(clearedPath1)
+    expect(EP.fromString(clearedPath2AsString)).toBe(clearedPath2)
+
+    // Cull the cache
+    EP.removePathsWithDeadUIDs(new Set(uidsToKeep))
+
+    // Ensure that only the expected paths have been removed from the cache
+    expect(EP.fromString(cachedPath1AsString)).toBe(cachedPath1)
+    expect(EP.fromString(cachedPath2AsString)).toBe(cachedPath2)
+    expect(EP.fromString(clearedPath1AsString)).not.toBe(clearedPath1)
+    expect(EP.fromString(clearedPath2AsString)).not.toBe(clearedPath2)
+  })
+
+  it('removes paths from the dynamic to static cache', () => {
+    // Create all of the paths and add them to the cache
+    const cachedPath1 = EP.dynamicPathToStaticPath(EP.elementPath(cachedPathParts1))
+    const cachedPath2 = EP.dynamicPathToStaticPath(EP.elementPath(cachedPathParts2))
+    const clearedPath1 = EP.dynamicPathToStaticPath(EP.elementPath(clearedPathParts1))
+    const clearedPath2 = EP.dynamicPathToStaticPath(EP.elementPath(clearedPathParts2))
+
+    // Check that the paths have indeed been added to the cache
+    expect(EP.dynamicPathToStaticPath(EP.elementPath(cachedPathParts1))).toBe(cachedPath1)
+    expect(EP.dynamicPathToStaticPath(EP.elementPath(cachedPathParts2))).toBe(cachedPath2)
+    expect(EP.dynamicPathToStaticPath(EP.elementPath(clearedPathParts1))).toBe(clearedPath1)
+    expect(EP.dynamicPathToStaticPath(EP.elementPath(clearedPathParts2))).toBe(clearedPath2)
+
+    // Cull the cache
+    EP.removePathsWithDeadUIDs(new Set(uidsToKeep))
+
+    // Ensure that only the expected paths have been removed from the cache
+    expect(EP.dynamicPathToStaticPath(EP.elementPath(cachedPathParts1))).toBe(cachedPath1)
+    expect(EP.dynamicPathToStaticPath(EP.elementPath(cachedPathParts2))).toBe(cachedPath2)
+    expect(EP.dynamicPathToStaticPath(EP.elementPath(clearedPathParts1))).not.toBe(clearedPath1)
+    expect(EP.dynamicPathToStaticPath(EP.elementPath(clearedPathParts2))).not.toBe(clearedPath2)
+  })
+})
+
+describe('getOrderedPathsByDepth', () => {
+  it('sorts elements, the result is from the longest to shortest', () => {
+    const unsortedElementPaths = [
+      EP.elementPath([['A', '1', '0', 'Z', 'X', 'Y']]),
+      EP.elementPath([['A', '1']]),
+      EP.elementPath([['A', '1'], ['B', '2'], ['C']]),
+      EP.elementPath([
+        ['A', '1'],
+        ['B', '2'],
+      ]),
+      EP.elementPath([
+        ['A', '1'],
+        ['B', '2'],
+        ['D', 'E'],
+      ]),
+    ]
+    const expectedSortedElementPaths = [
+      EP.elementPath([
+        ['A', '1'],
+        ['B', '2'],
+        ['D', 'E'],
+      ]),
+      EP.elementPath([['A', '1'], ['B', '2'], ['C']]),
+      EP.elementPath([
+        ['A', '1'],
+        ['B', '2'],
+      ]),
+      EP.elementPath([['A', '1', '0', 'Z', 'X', 'Y']]),
+      EP.elementPath([['A', '1']]),
+    ]
+    const result = EP.getOrderedPathsByDepth(unsortedElementPaths)
+    expect(result).toEqual(expectedSortedElementPaths)
   })
 })

@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "export": "next build && next export",
+    "dev": "NODE_OPTIONS=$NODE_OPENSSL_OPTION next dev",
+    "export": "NODE_OPTIONS=$NODE_OPENSSL_OPTION next build && next export",
     "preinstall": "npx only-allow pnpm"
   },
   "dependencies": {
@@ -29,6 +29,7 @@
     "@types/facepaint": "1.2.1",
     "@types/react": "^17.0.11",
     "@types/react-select": "3.0.15",
+    "@types/url-join": "4.0.1",
     "autoprefixer": "^10.2.6",
     "postcss": "^8.3.0",
     "tailwindcss": "^2.1.4",

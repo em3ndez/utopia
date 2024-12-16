@@ -1,61 +1,92 @@
+import type { KeepDeepEqualityCall, KeepDeepEqualityResult } from './deep-equality'
 import {
   arrayDeepEquality,
   combine2EqualityCalls,
+  combine3EqualityCalls,
   combine4EqualityCalls,
   combine5EqualityCalls,
+  combine6EqualityCalls,
   createCallFromEqualsFunction,
   createCallWithShallowEquals,
   createCallWithTripleEquals,
-  KeepDeepEqualityCall,
-  KeepDeepEqualityResult,
   keepDeepEqualityResult,
   mapKeepDeepEqualityResult,
   nullableDeepEquality,
+  StringKeepDeepEquality,
+  unionDeepEquality,
 } from './deep-equality'
 import * as EP from '../core/shared/element-path'
 import * as PP from '../core/shared/property-path'
-import { HigherOrderControl } from '../components/canvas/canvas-types'
-import { JSXElementName } from '../core/shared/element-template'
-import { ElementPath, PropertyPath } from '../core/shared/project-file-types'
-import { createCallFromIntrospectiveKeepDeep } from './react-performance'
-import { Either, foldEither, isLeft, left, right } from '../core/shared/either'
-import { NameAndIconResult } from '../components/inspector/common/name-and-icon-hook'
-import { DropTargetHint, NavigatorState } from '../components/editor/store/editor-state'
-import { LayoutTargetableProp } from '../core/layout/layout-helpers-new'
+import type { HigherOrderControl } from '../components/canvas/canvas-types'
+import type { JSXElementName } from '../core/shared/element-template'
+import type {
+  ElementPath,
+  PropertyPath,
+  StaticElementPath,
+} from '../core/shared/project-file-types'
+import {
+  createCallFromIntrospectiveKeepDeep,
+  getIntrospectiveKeepDeepResult,
+} from './react-performance'
+import type { Either } from '../core/shared/either'
+import { foldEither, isLeft, left, right } from '../core/shared/either'
+import type { NameAndIconResult } from '../components/inspector/common/name-and-icon-hook'
+import type { ElementsToRerender, ElementWarnings } from '../components/editor/store/editor-state'
+import {
+  DropTargetHint,
+  elementWarnings,
+  NavigatorState,
+} from '../components/editor/store/editor-state'
+import type { LayoutTargetableProp } from '../core/layout/layout-helpers-new'
+import type { CanvasPoint, WindowPoint } from '../core/shared/math-utils'
+import { canvasPoint, windowPoint } from '../core/shared/math-utils'
 
-export const ElementPathKeepDeepEquality: KeepDeepEqualityCall<ElementPath> = createCallFromEqualsFunction(
-  (oldPath: ElementPath, newPath: ElementPath) => {
+export const ElementPathKeepDeepEquality: KeepDeepEqualityCall<ElementPath> =
+  createCallFromEqualsFunction((oldPath: ElementPath, newPath: ElementPath) => {
     return EP.pathsEqual(oldPath, newPath)
-  },
-)
+  })
 
-export const ElementPathArrayKeepDeepEquality: KeepDeepEqualityCall<Array<
-  ElementPath
->> = arrayDeepEquality(ElementPathKeepDeepEquality)
+export const StaticElementPathKeepDeepEquality: KeepDeepEqualityCall<StaticElementPath> =
+  createCallFromEqualsFunction((oldPath: StaticElementPath, newPath: StaticElementPath) => {
+    return EP.pathsEqual(oldPath, newPath)
+  })
 
-export const PropertyPathKeepDeepEquality: KeepDeepEqualityCall<PropertyPath> = createCallFromEqualsFunction(
-  (oldPath: PropertyPath, newPath: PropertyPath) => {
+export const ElementPathArrayKeepDeepEquality: KeepDeepEqualityCall<Array<ElementPath>> =
+  arrayDeepEquality(ElementPathKeepDeepEquality)
+
+export function PropertyPathKeepDeepEquality(): KeepDeepEqualityCall<PropertyPath> {
+  return createCallFromEqualsFunction((oldPath: PropertyPath, newPath: PropertyPath) => {
     return PP.pathsEqual(oldPath, newPath)
-  },
-)
+  })
+}
 
-export const HigherOrderControlArrayKeepDeepEquality: KeepDeepEqualityCall<Array<
-  HigherOrderControl
->> = arrayDeepEquality(createCallFromIntrospectiveKeepDeep())
+export function HigherOrderControlKeepDeepEquality(
+  oldValue: HigherOrderControl,
+  newValue: HigherOrderControl,
+): KeepDeepEqualityResult<HigherOrderControl> {
+  return getIntrospectiveKeepDeepResult<HigherOrderControl>(oldValue, newValue)
+}
 
-export function JSXElementNameKeepDeepEqualityCall(): KeepDeepEqualityCall<JSXElementName> {
+export const HigherOrderControlArrayKeepDeepEquality: KeepDeepEqualityCall<
+  Array<HigherOrderControl>
+> = arrayDeepEquality(HigherOrderControlKeepDeepEquality)
+
+export function JSXElementNameKeepDeepEqualityCall(
+  oldValue: JSXElementName,
+  newValue: JSXElementName,
+): KeepDeepEqualityResult<JSXElementName> {
   return combine2EqualityCalls(
-    (name) => name.baseVariable,
-    createCallWithTripleEquals(),
-    (name) => name.propertyPath,
-    PropertyPathKeepDeepEquality,
+    (name: JSXElementName) => name.baseVariable,
+    StringKeepDeepEquality,
+    (name: JSXElementName) => name.propertyPath,
+    PropertyPathKeepDeepEquality(),
     (baseVariable, propertyPath) => {
       return {
         baseVariable: baseVariable,
         propertyPath: propertyPath,
       }
     },
-  )
+  )(oldValue, newValue)
 }
 
 export function EitherKeepDeepEquality<L, R>(
@@ -64,7 +95,7 @@ export function EitherKeepDeepEquality<L, R>(
 ): KeepDeepEqualityCall<Either<L, R>> {
   type Result = KeepDeepEqualityResult<Either<L, R>>
   return (oldEither: Either<L, R>, newEither: Either<L, R>) => {
-    return foldEither<L, R, Result>(
+    const result = foldEither<L, R, Result>(
       (oldLeftValue) => {
         return foldEither<L, R, Result>(
           (newLeftValue) => {
@@ -91,64 +122,74 @@ export function EitherKeepDeepEquality<L, R>(
       },
       oldEither,
     )
+
+    return result.areEqual ? keepDeepEqualityResult(oldEither, true) : result
   }
 }
 
-export const NameAndIconResultKeepDeepEquality: KeepDeepEqualityCall<NameAndIconResult> = combine4EqualityCalls(
-  (result) => result.path,
-  ElementPathKeepDeepEquality,
-  (result) => result.name,
+export const NameAndIconResultKeepDeepEquality: KeepDeepEqualityCall<NameAndIconResult> =
+  combine4EqualityCalls(
+    (result) => result.path,
+    ElementPathKeepDeepEquality,
+    (result) => result.name,
+    nullableDeepEquality(JSXElementNameKeepDeepEqualityCall),
+    (result) => result.label,
+    createCallWithTripleEquals(),
+    (result) => result.iconProps,
+    createCallWithShallowEquals(),
+    (path, name, label, iconProps) => {
+      return {
+        path: path,
+        name: name,
+        label: label,
+        iconProps: iconProps,
+      }
+    },
+  )
+
+export const NameAndIconResultArrayKeepDeepEquality: KeepDeepEqualityCall<
+  Array<NameAndIconResult>
+> = arrayDeepEquality(NameAndIconResultKeepDeepEquality)
+
+export const LayoutTargetablePropArrayKeepDeepEquality: KeepDeepEqualityCall<
+  Array<LayoutTargetableProp>
+> = arrayDeepEquality(createCallWithTripleEquals())
+
+export const ElementWarningsKeepDeepEquality: KeepDeepEqualityCall<ElementWarnings> =
+  combine5EqualityCalls(
+    (warnings) => warnings.widthOrHeightZero,
+    createCallWithTripleEquals(),
+    (warnings) => warnings.absoluteWithUnpositionedParent,
+    createCallWithTripleEquals(),
+    (warnings) => warnings.dynamicSceneChildWidthHeightPercentage,
+    createCallWithTripleEquals(),
+    (warnings) => warnings.invalidGroup,
+    createCallWithTripleEquals(),
+    (warnings) => warnings.invalidGroupChild,
+    createCallWithTripleEquals(),
+    elementWarnings,
+  )
+
+export const WindowPointKeepDeepEquality: KeepDeepEqualityCall<WindowPoint> = combine2EqualityCalls(
+  (point) => point.x,
   createCallWithTripleEquals(),
-  (result) => result.label,
+  (point) => point.y,
   createCallWithTripleEquals(),
-  (result) => result.iconProps,
-  createCallWithShallowEquals(),
-  (path, name, label, iconProps) => {
-    return {
-      path: path,
-      name: name,
-      label: label,
-      iconProps: iconProps,
-    }
-  },
+  (x, y) => windowPoint({ x: x, y: y }),
 )
 
-export const NameAndIconResultArrayKeepDeepEquality: KeepDeepEqualityCall<Array<
-  NameAndIconResult
->> = arrayDeepEquality(NameAndIconResultKeepDeepEquality)
-
-export const DropTargetHintKeepDeepEquality: KeepDeepEqualityCall<DropTargetHint> = combine2EqualityCalls(
-  (hint) => hint.target,
-  nullableDeepEquality(ElementPathKeepDeepEquality),
-  (hint) => hint.type,
+export const CanvasPointKeepDeepEquality: KeepDeepEqualityCall<CanvasPoint> = combine2EqualityCalls(
+  (point) => point.x,
   createCallWithTripleEquals(),
-  (target, type) => {
-    return {
-      target: target,
-      type: type,
-    }
-  },
+  (point) => point.y,
+  createCallWithTripleEquals(),
+  (x, y) => canvasPoint({ x: x, y: y }),
 )
 
-export const NavigatorStateKeepDeepEquality: KeepDeepEqualityCall<NavigatorState> = combine4EqualityCalls(
-  (state) => state.minimised,
-  createCallWithTripleEquals(),
-  (state) => state.dropTargetHint,
-  DropTargetHintKeepDeepEquality,
-  (state) => state.collapsedViews,
-  ElementPathArrayKeepDeepEquality,
-  (state) => state.renamingTarget,
-  nullableDeepEquality(ElementPathKeepDeepEquality),
-  (minimised, dropTargetHint, collapsedViews, renamingTarget) => {
-    return {
-      minimised: minimised,
-      dropTargetHint: dropTargetHint,
-      collapsedViews: collapsedViews,
-      renamingTarget: renamingTarget,
-    }
-  },
-)
-
-export const LayoutTargetablePropArrayKeepDeepEquality: KeepDeepEqualityCall<Array<
-  LayoutTargetableProp
->> = arrayDeepEquality(createCallWithTripleEquals())
+export const ElementsToRerenderKeepDeepEquality: KeepDeepEqualityCall<ElementsToRerender> =
+  unionDeepEquality(
+    createCallWithTripleEquals<'rerender-all-elements'>(),
+    ElementPathArrayKeepDeepEquality,
+    (p): p is 'rerender-all-elements' => p === 'rerender-all-elements',
+    (p): p is Array<ElementPath> => Array.isArray(p),
+  )

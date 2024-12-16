@@ -1,16 +1,17 @@
+/** @jsxRuntime classic */
+/** @jsx jsx */
+import { jsx } from '@emotion/react'
 import React from 'react'
 import { usePopper } from 'react-popper'
 import { identity } from '../../../../../core/shared/utils'
 import utils from '../../../../../utils/utils'
-import { FlexRow, UtopiaTheme, Icons } from '../../../../../uuiui'
-import { betterReactMemo } from '../../../../../uuiui-deps'
+import { FlexRow, UtopiaTheme, colorTheme, SmallerIcons } from '../../../../../uuiui'
 import { InspectorContextMenuWrapper } from '../../../../context-menu-wrapper'
 import { addOnUnsetValues } from '../../../common/context-menu-items'
 import { stylePropPathMappingFn, useInspectorInfo } from '../../../common/property-path-hooks'
-import { PropertyRow } from '../../../widgets/property-row'
 import { FontFamilySelectPopup } from './font-family-select-popup'
 
-export const FontFamilySelect = betterReactMemo('FontFamilySelect', () => {
+export const FontFamilySelect = React.memo(() => {
   const [referenceElement, setReferenceElement] = React.useState<HTMLDivElement | null>(null)
   const [popperElement, setPopperElement] = React.useState<HTMLDivElement | null>(null)
   const { styles, attributes } = usePopper(referenceElement, popperElement, {
@@ -48,12 +49,17 @@ export const FontFamilySelect = betterReactMemo('FontFamilySelect', () => {
   ])
 
   return (
-    <PropertyRow>
+    <FlexRow
+      style={{
+        padding: '0 8px 0 4px',
+        minHeight: UtopiaTheme.layout.rowHeight.normal,
+        alignItems: 'center',
+      }}
+    >
       <InspectorContextMenuWrapper
         id='fontFamily-context-menu'
         items={fontFamilyContextMenuItems}
         data={null}
-        style={{ marginBottom: 8, gridColumn: '1 / span 6' }}
       >
         {popupIsOpen ? (
           <FontFamilySelectPopup
@@ -71,19 +77,27 @@ export const FontFamilySelect = betterReactMemo('FontFamilySelect', () => {
           ref={setReferenceElement}
           onMouseDown={onMouseDown}
           style={{
-            background: controlStyles.backgroundColor,
             color: controlStyles.mainColor,
-            boxShadow: `0 0 0 1px ${controlStyles.borderColor} inset`,
-            padding: 4,
-            fontSize: 14,
-            height: 30,
+            padding: '0 8px',
+            height: 22,
             borderRadius: UtopiaTheme.inputBorderRadius,
+            gap: 5,
+          }}
+          css={{
+            '&:hover': {
+              boxShadow: `inset 0px 0px 0px 1px ${colorTheme.fg7.value}`,
+              justifyContent: 'space-between',
+            },
+            '&:focus-within': {
+              boxShadow: `inset 0px 0px 0px 1px ${colorTheme.dynamicBlue.value}`,
+              justifyContent: 'space-between',
+            },
           }}
         >
-          <div style={{ flexGrow: 1 }}>{value.fontFamily[0]}</div>
-          <Icons.ExpansionArrowDown />
+          <div>{value.fontFamily[0]}</div>
+          <SmallerIcons.ExpansionArrowDown />
         </FlexRow>
       </InspectorContextMenuWrapper>
-    </PropertyRow>
+    </FlexRow>
   )
 })

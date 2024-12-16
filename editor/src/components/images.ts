@@ -1,19 +1,24 @@
 import { BASE_URL } from '../common/env-vars'
+import type { ElementInstanceMetadata, JSXElement } from '../core/shared/element-template'
 import {
-  ElementInstanceMetadata,
   emptyComments,
   jsxAttributesFromMap,
-  jsxAttributeValue,
+  jsExpressionValue,
   jsxElement,
   jsxElementName,
+  setJSXAttributesAttribute,
 } from '../core/shared/element-template'
-import { isImageFile } from '../core/model/project-file-utils'
-import { ProjectContents, ElementPath } from '../core/shared/project-file-types'
+import type { ProjectContents, ElementPath } from '../core/shared/project-file-types'
+import { isImageFile } from '../core/shared/project-file-types'
 import Utils from '../utils/utils'
-import { Size, CanvasRectangle, CanvasPoint, canvasRectangle } from '../core/shared/math-utils'
-import { EditorAction } from './editor/action-types'
-import { insertJSXElement } from './editor/actions/action-creators'
-import { forceNotNull } from '../core/shared/optional-utils'
+import type { Size, CanvasRectangle, CanvasPoint } from '../core/shared/math-utils'
+import { canvasRectangle } from '../core/shared/math-utils'
+import type { EditorAction } from './editor/action-types'
+import { insertAsChildTarget, insertJSXElement } from './editor/actions/action-creators'
+import { forceNotNull, optionalMap } from '../core/shared/optional-utils'
+import type { AllElementProps } from './editor/store/editor-state'
+import * as EP from '../core/shared/element-path'
+import { identity } from '../core/shared/utils'
 
 export function getImageSrc(
   projectId: string | null,
@@ -43,14 +48,94 @@ export function getImageSrc(
   }
 }
 
-export function parseImageMultiplier(imagePath: string): number {
-  const imageMultiplierRegex = /.*@(\d*)x\..*/
-  const imageMultiplierResult = imageMultiplierRegex.exec(imagePath)
-  let multiplier: number = 1
-  if (imageMultiplierResult != null && imageMultiplierResult.length === 2) {
-    multiplier = Number.parseInt(imageMultiplierResult[1])
+export interface FilenameParts {
+  filename: string
+  extension: string
+  multiplier?: number
+  deduplicationSeqNumber?: number
+}
+
+export function filenameFromParts(parts: FilenameParts): string {
+  const { filename, multiplier, extension, deduplicationSeqNumber } = parts
+  const multiplierString = optionalMap((m) => `@${m}x`, multiplier) ?? ''
+  const dedupeString = optionalMap((n) => `_${n}`, deduplicationSeqNumber) ?? ''
+  return `${filename}${dedupeString}${multiplierString}.${extension}`
+}
+
+export interface LastPartSeparatedByResult<T> {
+  part: T
+  rest: string
+}
+
+interface LastPartSeparatedByParams<T> {
+  separator: string
+  raw: string
+  make: (_: string) => T | null
+}
+
+function lastPartSeparatedBy<T>(
+  params: LastPartSeparatedByParams<T>,
+): LastPartSeparatedByResult<T> | null {
+  const { separator, make, raw } = params
+  const parts = raw.split(separator)
+  if (raw.length < 2) {
+    return null
   }
-  return multiplier
+
+  const made = make(parts[parts.length - 1])
+  if (made == null) {
+    return null
+  }
+
+  return {
+    rest: parts.slice(0, -1).join(separator),
+    part: made,
+  }
+}
+
+const parseNumber =
+  (re: RegExp) =>
+  (raw: string): number | null => {
+    const match = re.exec(raw)
+    if (match == null || match.length < 2) {
+      return null
+    }
+    return Utils.safeParseInt(match[1])
+  }
+
+export const parseMultiplier = parseNumber(/^(\d+)x$/)
+export const parseDedupeId = parseNumber(/^(\d+)$/)
+
+export function getFilenameParts(filename: string): FilenameParts | null {
+  const extensionResult = lastPartSeparatedBy<string>({
+    separator: '.',
+    make: identity,
+    raw: filename,
+  })
+  if (extensionResult == null) {
+    return null
+  }
+
+  const { part: extension, rest: restFromExtension } = extensionResult
+
+  const { part: multiplier, rest: restFromMultiplier } = lastPartSeparatedBy<number | undefined>({
+    separator: '@',
+    make: parseMultiplier,
+    raw: restFromExtension,
+  }) ?? { rest: restFromExtension }
+
+  const { part: dedupSeqNumber, rest: restFromDedupe } = lastPartSeparatedBy<number | undefined>({
+    separator: '_',
+    make: parseDedupeId,
+    raw: restFromMultiplier,
+  }) ?? { rest: restFromMultiplier }
+
+  return {
+    extension: extension,
+    multiplier: multiplier,
+    deduplicationSeqNumber: dedupSeqNumber,
+    filename: restFromDedupe,
+  }
 }
 
 interface FrameAndMultiplier {
@@ -65,7 +150,9 @@ export function getFrameAndMultiplier(
   overrideDefaultMultiplier: number | null,
 ): FrameAndMultiplier {
   const multiplier =
-    overrideDefaultMultiplier == null ? parseImageMultiplier(filename) : overrideDefaultMultiplier
+    overrideDefaultMultiplier == null
+      ? getFilenameParts(filename)?.multiplier ?? 1
+      : overrideDefaultMultiplier
   const scaledSize = scaleImageDimensions(size, multiplier)
   const frame: CanvasRectangle = canvasRectangle({
     x: centerPoint.x - scaledSize.width / 2,
@@ -92,7 +179,7 @@ export function createInsertImageAction(
     projectContents[imagePath],
   )
   if (imageDetails.type === 'IMAGE_FILE') {
-    const srcAttribute = jsxAttributeValue(`.${imagePath}`, emptyComments)
+    const srcAttribute = jsExpressionValue(`.${imagePath}`, emptyComments)
     const width = imageDetails.width ?? 100
     const height = imageDetails.height ?? 100
     const { frame } = getFrameAndMultiplier(
@@ -106,9 +193,9 @@ export function createInsertImageAction(
       jsxElementName('img', []),
       newUID,
       jsxAttributesFromMap({
-        alt: jsxAttributeValue('', emptyComments),
+        alt: jsExpressionValue('', emptyComments),
         src: srcAttribute,
-        style: jsxAttributeValue(
+        style: jsExpressionValue(
           {
             left: frame.x,
             top: frame.y,
@@ -117,7 +204,7 @@ export function createInsertImageAction(
           },
           emptyComments,
         ),
-        'data-uid': jsxAttributeValue(newUID, emptyComments),
+        'data-uid': jsExpressionValue(newUID, emptyComments),
       }),
       [],
     )
@@ -136,12 +223,18 @@ export function getImageSizeFromProps(props: any): Size {
   }
 }
 
-export function getImageSize(component: ElementInstanceMetadata): Size {
-  return getImageSizeFromProps(component.props)
+export function getImageSize(
+  allElementProps: AllElementProps,
+  component: ElementInstanceMetadata,
+): Size {
+  return getImageSizeFromProps(allElementProps[EP.toString(component.elementPath)])
 }
 
-export function getImageSizeFromMetadata(instance: ElementInstanceMetadata): Size {
-  return getImageSizeFromProps(instance.props)
+export function getImageSizeFromMetadata(
+  allElementProps: AllElementProps,
+  instance: ElementInstanceMetadata,
+): Size {
+  return getImageSizeFromProps(allElementProps[EP.toString(instance.elementPath)])
 }
 
 export function getImageSizeMultiplierFromProps(props: any): number {
@@ -159,6 +252,39 @@ export function getScaledImageDimensionsFromProps(props: any): Size {
   const imageSizeMultiplier = getImageSizeMultiplierFromProps(props)
   const imageSize = getImageSizeFromProps(props)
   return scaleImageDimensions(imageSize, imageSizeMultiplier)
+}
+
+export interface JSXImageOptions {
+  opacity: number
+  width: number
+  height: number
+  top: number
+  left: number
+  src: string
+}
+
+export function createJsxImage(uid: string, options: Partial<JSXImageOptions>): JSXElement {
+  const propsForElement = jsxAttributesFromMap({
+    'data-aspect-ratio-locked': jsExpressionValue(true, emptyComments),
+    src: jsExpressionValue(options.src, emptyComments),
+    style: jsExpressionValue(
+      {
+        position: 'absolute',
+        width: options.width,
+        height: options.height,
+        top: options.top,
+        left: options.left,
+      },
+      emptyComments,
+    ),
+  })
+
+  return jsxElement(
+    'img',
+    uid,
+    setJSXAttributesAttribute(propsForElement, 'data-uid', jsExpressionValue(uid, emptyComments)),
+    [],
+  )
 }
 
 export const MultipliersForImages: Array<number> = [1, 2]

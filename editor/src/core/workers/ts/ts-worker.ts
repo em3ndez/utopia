@@ -1,18 +1,14 @@
 import * as Babel from '@babel/standalone'
 import * as ReactSyntaxPlugin from 'babel-plugin-syntax-jsx'
-import * as TS from 'typescript'
+import * as TS from 'typescript-for-the-editor'
 import * as BrowserFS from 'browserfs'
-import { TypeDefinitions } from '../../shared/npm-dependency-types'
-import {
-  isTextFile,
-  TextFile,
-  ProjectContents,
-  ProjectFile,
-  isParseSuccess,
-} from '../../shared/project-file-types'
-import { RawSourceMap } from './ts-typings/RawSourceMap'
+import type { TypeDefinitions } from '../../shared/npm-dependency-types'
+import type { TextFile, ProjectFile } from '../../shared/project-file-types'
+import { isDirectory } from '../../shared/project-file-types'
+import { isTextFile, ProjectContents, isParseSuccess } from '../../shared/project-file-types'
+import type { RawSourceMap } from './ts-typings/RawSourceMap'
 import { libfile } from './libfile'
-import { FSModule } from 'browserfs/dist/node/core/FS'
+import type { FSModule } from 'browserfs/dist/node/core/FS'
 import { es6dts } from './ts-typings/es6'
 import { libdomIterable, libdom } from './ts-typings/dom'
 import {
@@ -32,18 +28,14 @@ import { libScripthost } from './ts-typings/scripthost'
 import { libImportScripts } from './ts-typings/webworker.importscripts'
 import { diagnosticToErrorMessage } from './ts-utils'
 import { MapLike } from 'typescript'
-import { ErrorMessage } from '../../shared/error-messages'
+import type { ErrorMessage } from '../../shared/error-messages'
 import { fastForEach } from '../../shared/utils'
 import infiniteLoopPrevention from '../parser-printer/transform-prevent-infinite-loops'
-import { ProjectContentTreeRoot, walkContentsTree } from '../../../components/assets'
-import { isDirectory } from '../../model/project-file-utils'
-import {
-  applyLoaders,
-  filenameWithoutJSSuffix,
-  loaderExistsForFile,
-} from '../../webpack-loaders/loaders'
+import type { ProjectContentTreeRoot } from '../../../components/assets'
+import { walkContentsTree } from '../../../components/assets'
+import { applyLoaders, filenameWithoutJSSuffix } from '../../webpack-loaders/loaders'
 import { isCssFile, isJsOrTsFile, isTsFile, isJsFile } from '../../shared/file-utils'
-import {
+import type {
   ExportsInfo,
   MultiFileBuildResult,
   BuildType,
@@ -320,7 +312,7 @@ function getTypeInfoFromClassComponent(
   if (symbolCalledProps != null) {
     const reactClassType = typeChecker.getTypeOfSymbolAtLocation(
       symbolCalledProps,
-      symbolCalledProps.valueDeclaration,
+      symbolCalledProps.valueDeclaration!, // TODO instead of fixing this just delete the collection of exports from ts-worker altogether
     )
     const propSymbols = typeChecker.getAugmentedPropertiesOfType(reactClassType)
     let memberInfo: { [name: string]: string } = {}
@@ -330,7 +322,7 @@ function getTypeInfoFromClassComponent(
           // somehow it can have type and no valueDeclaration
           (symbol as any)['type'] != null
             ? (symbol as any)['type']
-            : typeChecker.getTypeOfSymbolAtLocation(symbol, symbol.valueDeclaration)
+            : typeChecker.getTypeOfSymbolAtLocation(symbol, symbol.valueDeclaration!) // TODO instead of fixing this just delete the collection of exports from ts-worker altogether
         memberInfo[symbol.name] = typeChecker.typeToString(detailedType)
       })
     }
@@ -378,7 +370,7 @@ function getReactExports(
       if (firstSignature != null) {
         var parameters = firstSignature.getParameters()
         parameters.forEach((param) => {
-          const paramType = typeChecker.getTypeOfSymbolAtLocation(param, param.valueDeclaration)
+          const paramType = typeChecker.getTypeOfSymbolAtLocation(param, param.valueDeclaration!) // TODO instead of fixing this just delete the collection of exports from ts-worker altogether
           const augmentedProperties = typeChecker.getAugmentedPropertiesOfType(paramType)
           if (augmentedProperties.length > 0 && (paramType as any)['members'] != null) {
             let memberInfo: { type: string; members: { [member: string]: string } } = {
@@ -389,7 +381,7 @@ function getReactExports(
             augmentedProperties.forEach((augmentedProp) => {
               const memberType = typeChecker.getTypeOfSymbolAtLocation(
                 augmentedProp,
-                augmentedProp.valueDeclaration,
+                augmentedProp.valueDeclaration!, // TODO instead of fixing this just delete the collection of exports from ts-worker altogether
               )
               memberInfo.members[augmentedProp.name] = typeChecker.typeToString(memberType)
             })
@@ -449,13 +441,12 @@ function isNodeExported(node: TS.Node): boolean {
 
 function existingFilenameToRead(filename: string): string | undefined {
   // Checks that a filename exists that we can load, and returns the filename
-  if (loaderExistsForFile(filename) && (fs.existsSync(filename) as boolean)) {
+  if (fs.existsSync(filename) as boolean) {
     return filename
   } else {
     const alternativeFilenameToTest = filenameWithoutJSSuffix(filename)
     if (
       alternativeFilenameToTest != null &&
-      loaderExistsForFile(alternativeFilenameToTest) &&
       (fs.existsSync(alternativeFilenameToTest) as boolean)
     ) {
       return alternativeFilenameToTest
@@ -708,7 +699,7 @@ function watch(
 function runBabel(code: string, filename: string, sourceMap: RawSourceMap | null) {
   const plugins = [infiniteLoopPrevention]
   return Babel.transform(code, {
-    presets: ['es2015'],
+    presets: ['es2016'],
     plugins: plugins,
     sourceType: 'script',
     sourceMaps: true,

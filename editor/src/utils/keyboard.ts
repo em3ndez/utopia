@@ -28,7 +28,12 @@ export type Letter =
   | 'x'
   | 'y'
   | 'z'
-export type Digit = '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+
+const Digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const
+export type Digit = (typeof Digits)[number]
+
+export const isDigit = (c: string): c is Digit => (Digits as readonly string[]).includes(c)
+
 export type Bracket = '[' | ']'
 
 export type KeyCharacter =
@@ -66,7 +71,8 @@ function getCachedModifier(modifiers: ReadonlyArray<Modifier>): ReadonlyArray<Mo
   const uniqueAndSortedModifiers = Array.from(new Set(modifiers)).sort()
   const cacheKey = modifiersToString(uniqueAndSortedModifiers)
   if (cacheKey in modifiersCache) {
-    return modifiersCache[cacheKey]
+    // Provably exists because of the `in` check.
+    return modifiersCache[cacheKey]!
   } else {
     modifiersCache[cacheKey] = uniqueAndSortedModifiers
     return uniqueAndSortedModifiers
@@ -95,7 +101,8 @@ function getCachedKey(
   const cachedModifiers = getCachedModifier(modifiers)
   const cacheKey = keyPartsToString(character, modifiers, keyDownOrUp)
   if (cacheKey in keysCache) {
-    return keysCache[cacheKey]
+    // Provably exists because of the `in` check.
+    return keysCache[cacheKey]!
   } else {
     const result: Key = {
       character: character,
@@ -108,8 +115,8 @@ function getCachedKey(
 }
 
 // please don't add more keycharacters here, use them directly from keyboard events
-export const StoredKeyCharacters = ['alt', 'cmd', 'ctrl', 'shift', 'z']
-export type StoredKeyCharacter = Modifier | 'z'
+export const StoredKeyCharacters = ['alt', 'cmd', 'ctrl', 'shift', 'z', 'space']
+export type StoredKeyCharacter = Modifier | 'z' | 'space'
 export type KeysPressed = { [key in StoredKeyCharacter]?: boolean }
 
 export type KeyDownOrUp = 'keydown' | 'keyup'
@@ -144,7 +151,7 @@ export function modifiersForEvent(event: KeyboardEvent): ReadonlyArray<Modifier>
   return getCachedModifier(modifiers)
 }
 
-function keyCharacterFromCode(keyCode: number): KeyCharacter {
+export function keyCharacterFromCode(keyCode: number): KeyCharacter {
   switch (true) {
     case keyCode === KeyCode.BACKSPACE:
       return 'backspace'
@@ -253,6 +260,47 @@ export const Keyboard = {
     return ['alt', 'cmd', 'ctrl', 'shift'].some((char) => {
       return char === keyChar
     })
+  },
+  keyIsArrow: function (keyChar: KeyCharacter): boolean {
+    switch (keyChar) {
+      case 'left':
+      case 'right':
+      case 'up':
+      case 'down':
+        return true
+      default:
+        return false
+    }
+  },
+  keyTriggersFontSizeStrategy: function (keyChar: KeyCharacter): boolean {
+    switch (keyChar) {
+      case 'period':
+      case 'comma':
+        return true
+      default:
+        return false
+    }
+  },
+  keyTriggersFontWeightStrategy: function (keyChar: KeyCharacter): boolean {
+    switch (keyChar) {
+      case 'period':
+      case 'comma':
+        return true
+      default:
+        return false
+    }
+  },
+  keyTriggersOpacityStrategy: function (keyChar: KeyCharacter): boolean {
+    return isDigit(keyChar)
+  },
+  // This needs to be extended when we introduce new keys in canvas strategies
+  keyIsInteraction: function (keyChar: KeyCharacter): boolean {
+    return (
+      this.keyIsArrow(keyChar) ||
+      this.keyTriggersFontSizeStrategy(keyChar) ||
+      this.keyTriggersFontWeightStrategy(keyChar) ||
+      this.keyTriggersOpacityStrategy(keyChar)
+    )
   },
   keyTriggersScroll: function (keyChar: KeyCharacter, keysPressed: KeysPressed): boolean {
     return (

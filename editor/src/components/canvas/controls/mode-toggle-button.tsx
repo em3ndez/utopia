@@ -2,18 +2,19 @@
 /** @jsx jsx */
 import React from 'react'
 import { css, jsx } from '@emotion/react'
-import { useEditorState } from '../../editor/store/store-hook'
+import { Substores, useEditorState } from '../../editor/store/store-hook'
 import { updateFormulaBarMode } from '../../editor/actions/action-creators'
-import { betterReactMemo } from '../../../uuiui-deps'
-import { useColorTheme } from '../../../uuiui'
+import { AlternateColorThemeComponent, useColorTheme } from '../../../uuiui'
+import { useDispatch } from '../../editor/store/dispatch-context'
 
-export const ModeToggleButton = betterReactMemo('ModeToggleButton', () => {
+export const ModeToggleButton = React.memo(() => {
   const colorTheme = useColorTheme()
   const selectedMode = useEditorState(
+    Substores.restOfEditor,
     (store) => store.editor.topmenu.formulaBarMode,
     'ModeToggleButton selectedMode',
   )
-  const dispatch = useEditorState((store) => store.dispatch, 'ModeToggleButton dispatch')
+  const dispatch = useDispatch()
   const toggleMode = React.useCallback(
     (mode: 'css' | 'content') => {
       dispatch([updateFormulaBarMode(mode)], 'everyone')
@@ -44,7 +45,7 @@ export const ModeToggleButton = betterReactMemo('ModeToggleButton', () => {
       </Button>
       <Button
         style={{
-          background: colorTheme.inverted.neutralForeground.value,
+          background: colorTheme.bg2.value,
         }}
         selected={selectedMode === 'content'}
         width={45}
@@ -63,7 +64,7 @@ interface ButtonProps {
   onClick: () => void
 }
 
-const Button: React.FunctionComponent<ButtonProps> = (props) => (
+const Button: React.FunctionComponent<React.PropsWithChildren<ButtonProps>> = (props) => (
   <span
     css={{
       fontSize: 9,
@@ -86,7 +87,7 @@ const Button: React.FunctionComponent<ButtonProps> = (props) => (
         transition: 'all .1s linear',
         transitionDelay: '.1s',
       },
-      ...props.style,
+      ...(props.style as any), // TODO Emotion and React 18 types don't like each other
     }}
     onClick={props.onClick}
   >

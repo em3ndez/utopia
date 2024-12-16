@@ -1,67 +1,79 @@
-import Utils from '../../utils/utils'
-import { EmitFileResult } from '../../core/workers/ts/ts-worker'
-import { PropertyControls } from 'utopia-api'
-import { RawSourceMap } from '../../core/workers/ts/ts-typings/RawSourceMap'
-import {
-  getControlsForExternalDependencies,
-  NodeModulesUpdate,
-  sendPropertyControlsInfoRequest,
-} from '../../core/property-controls/property-controls-utils'
-import {
-  NodeModules,
-  esCodeFile,
-  ProjectContents,
-  isEsCodeFile,
+import type {
   ElementPath,
-  TextFile,
-  isTextFile,
-  RevisionsState,
-  isParseSuccess,
+  Imports,
+  NodeModules,
   StaticElementPath,
-  ParseSuccess,
+  TextFile,
 } from '../../core/shared/project-file-types'
-
-import { EditorDispatch } from '../editor/action-types'
 import {
-  EvaluationCache,
-  getCurriedEditorRequireFn,
-} from '../../core/es-modules/package-manager/package-manager'
-import { updateNodeModulesContents } from '../editor/actions/action-creators'
-import { fastForEach } from '../../core/shared/utils'
-import { arrayToObject } from '../../core/shared/array-utils'
-import { objectMap } from '../../core/shared/object-utils'
-import { getContentsTreeFileFromString, ProjectContentTreeRoot } from '../assets'
-import { Either, isRight, left, right } from '../../core/shared/either'
+  esCodeFile,
+  getParsedContentsFromTextFile,
+  isEsCodeFile,
+  isParseSuccess,
+  isTextFile,
+} from '../../core/shared/project-file-types'
+import type { RawSourceMap } from '../../core/workers/ts/ts-typings/RawSourceMap'
+import type { EmitFileResult } from '../../core/workers/ts/ts-worker'
+import Utils from '../../utils/utils'
+import type {
+  PreferredChildComponentDescriptor,
+  PropertyControls,
+} from './internal-property-controls'
+import type { BuiltInDependencies } from '../../core/es-modules/package-manager/built-in-dependencies-list'
+import { resolveModulePath } from '../../core/es-modules/package-manager/module-resolution'
+import type { EvaluationCache } from '../../core/es-modules/package-manager/package-manager'
+import { getCurriedEditorRequireFn } from '../../core/es-modules/package-manager/package-manager'
+import { getUidMappings, getFilePathForUid } from '../../core/model/get-uid-mappings'
+import type { Either } from '../../core/shared/either'
 import * as EP from '../../core/shared/element-path'
-import {
-  getJSXAttribute,
-  isIntrinsicElement,
-  isJSXAttributeOtherJavaScript,
-  isUtopiaJSXComponent,
-  JSXElement,
+import type {
+  ImportInfo,
+  JSXConditionalExpressionWithoutUID,
+  JSXElementWithoutUID,
+  JSXFragmentWithoutUID,
+  JSXMapExpressionWithoutUID,
   UtopiaJSXComponent,
 } from '../../core/shared/element-template'
-import { findElementWithUID } from '../../core/shared/uid-utils'
-import { importedFromWhere } from '../editor/import-utils'
 import {
-  resolveModule,
-  resolveModulePath,
-} from '../../core/es-modules/package-manager/module-resolution'
+  clearJSXConditionalExpressionWithoutUIDUniqueIDs,
+  clearJSXElementWithoutUIDUniqueIDs,
+  clearJSXFragmentWithoutUIDUniqueIDs,
+  clearJSXMapExpressionWithoutUIDUniqueIDs,
+} from '../../core/shared/element-template'
+import { objectMap } from '../../core/shared/object-utils'
 import { getTransitiveReverseDependencies } from '../../core/shared/project-contents-dependencies'
-import { optionalMap } from '../../core/shared/optional-utils'
-import { findJSXElementAtStaticPath } from '../../core/model/element-template-utils'
-import { getUtopiaJSXComponentsFromSuccess } from '../../core/model/project-file-utils'
-import {
+import { assertNever, fastForEach } from '../../core/shared/utils'
+import type {
+  ExportType,
   ExportsInfo,
   MultiFileBuildResult,
-  ExportType,
-  BuildType,
 } from '../../core/workers/common/worker-types'
+import type { ProjectContentTreeRoot } from '../assets'
+import { getProjectFileByFilePath } from '../assets'
+import type { EditorDispatch } from '../editor/action-types'
+import { StylingOptions } from 'utopia-api'
+import type { Emphasis, Focus, Icon, Styling } from 'utopia-api'
+import type { ComponentDescriptorBounds } from '../../core/property-controls/component-descriptor-parser'
+import { valueDependentCache } from '../../core/shared/memoize'
+
+type ModuleExportTypes = { [name: string]: ExportType }
 
 export interface CodeResult {
   exports: ModuleExportTypes
   transpiledCode: string | null
   sourceMap: RawSourceMap | null
+}
+
+export function codeResult(
+  exports: ModuleExportTypes,
+  transpiledCode: string | null,
+  sourceMap: RawSourceMap | null,
+): CodeResult {
+  return {
+    exports: exports,
+    transpiledCode: transpiledCode,
+    sourceMap: sourceMap,
+  }
 }
 
 // UtopiaRequireFn is a special require function, where you can control whether the evaluation of the code should happen only once or more.
@@ -79,17 +91,184 @@ export type UtopiaRequireFn = (
 
 export type CurriedUtopiaRequireFn = (projectContents: ProjectContentTreeRoot) => UtopiaRequireFn
 
+export type ComponentElementToInsert =
+  | JSXElementWithoutUID
+  | JSXConditionalExpressionWithoutUID
+  | JSXFragmentWithoutUID
+  | JSXMapExpressionWithoutUID
+
+export function clearComponentElementToInsertUniqueIDs(
+  toInsert: ComponentElementToInsert,
+): ComponentElementToInsert {
+  switch (toInsert.type) {
+    case 'JSX_ELEMENT':
+      return clearJSXElementWithoutUIDUniqueIDs(toInsert)
+    case 'JSX_CONDITIONAL_EXPRESSION':
+      return clearJSXConditionalExpressionWithoutUIDUniqueIDs(toInsert)
+    case 'JSX_FRAGMENT':
+      return clearJSXFragmentWithoutUIDUniqueIDs(toInsert)
+    case 'JSX_MAP_EXPRESSION':
+      return clearJSXMapExpressionWithoutUIDUniqueIDs(toInsert)
+    default:
+      assertNever(toInsert)
+  }
+}
+
+export function componentElementToInsertHasChildren(toInsert: ComponentElementToInsert): boolean {
+  switch (toInsert.type) {
+    case 'JSX_ELEMENT':
+    case 'JSX_FRAGMENT':
+      return toInsert.children.length > 0
+    case 'JSX_MAP_EXPRESSION':
+    case 'JSX_CONDITIONAL_EXPRESSION':
+      // More in the conceptual sense than actual sense of having a field containing children.
+      return true
+    default:
+      assertNever(toInsert)
+  }
+}
+
+export interface ComponentInfo {
+  insertMenuLabel: string
+  elementToInsert: () => ComponentElementToInsert
+  importsToAdd: Imports
+}
+
+export function componentInfo(
+  insertMenuLabel: string,
+  elementToInsert: () => ComponentElementToInsert,
+  importsToAdd: Imports,
+): ComponentInfo {
+  return {
+    insertMenuLabel: insertMenuLabel,
+    elementToInsert: elementToInsert,
+    importsToAdd: importsToAdd,
+  }
+}
+
+export type StyleSectionState = 'collapsed' | 'expanded'
+
+export interface ShownInspectorSpec {
+  type: 'shown'
+  display: StyleSectionState
+  sections: Styling[]
+}
+
+export type TypedInspectorSpec = { type: 'hidden' } | ShownInspectorSpec
+
+export interface ComponentDescriptor {
+  properties: PropertyControls
+  supportsChildren: boolean
+  preferredChildComponents: Array<PreferredChildComponentDescriptor>
+  variants: ComponentInfo[]
+  source: ComponentDescriptorSource
+  focus: Focus
+  inspector: TypedInspectorSpec
+  emphasis: Emphasis
+  icon: Icon
+  label: string | null
+}
+
+export const ComponentDescriptorDefaults: Pick<
+  ComponentDescriptor,
+  'focus' | 'inspector' | 'emphasis' | 'icon' | 'label'
+> = {
+  focus: 'default',
+  inspector: { type: 'shown', display: 'expanded', sections: [...StylingOptions] },
+  emphasis: 'regular',
+  icon: 'component',
+  label: null,
+}
+
+export function componentDescriptor(
+  properties: PropertyControls,
+  supportsChildren: boolean,
+  variants: Array<ComponentInfo>,
+  preferredChildComponents: Array<PreferredChildComponentDescriptor>,
+  source: ComponentDescriptorSource,
+  focus: Focus,
+  inspector: TypedInspectorSpec,
+  emphasis: Emphasis,
+  icon: Icon,
+  label: string | null,
+): ComponentDescriptor {
+  return {
+    properties: properties,
+    supportsChildren: supportsChildren,
+    variants: variants,
+    preferredChildComponents: preferredChildComponents,
+    source: source,
+    focus: focus,
+    inspector: inspector,
+    emphasis: emphasis,
+    icon: icon,
+    label: label,
+  }
+}
+
+export type ComponentDescriptorSource =
+  | DefaultComponentDescriptor
+  | ComponentDescriptorFromDescriptorFile
+
+interface DefaultComponentDescriptor {
+  type: 'DEFAULT'
+}
+
+export function defaultComponentDescriptor(): DefaultComponentDescriptor {
+  return {
+    type: 'DEFAULT',
+  }
+}
+
+export function isDefaultComponentDescriptor(
+  desc: ComponentDescriptorSource,
+): desc is DefaultComponentDescriptor {
+  return desc.type === 'DEFAULT'
+}
+
+export interface ComponentDescriptorFromDescriptorFile {
+  type: 'DESCRIPTOR_FILE'
+  sourceDescriptorFile: string
+  bounds: ComponentDescriptorBounds | null
+}
+
+export function componentDescriptorFromDescriptorFile(
+  sourceDescriptorFile: string,
+  bounds: ComponentDescriptorBounds | null,
+): ComponentDescriptorFromDescriptorFile {
+  return {
+    type: 'DESCRIPTOR_FILE',
+    sourceDescriptorFile: sourceDescriptorFile,
+    bounds: bounds,
+  }
+}
+
+export function isComponentDescriptorFromDescriptorFile(
+  desc: ComponentDescriptorSource,
+): desc is ComponentDescriptorFromDescriptorFile {
+  return desc.type === 'DESCRIPTOR_FILE'
+}
+
+export interface ComponentDescriptorWithName extends ComponentDescriptor {
+  componentName: string
+  moduleName: string // if local module, then it's always absolute path without extension
+}
+
+export type ComponentDescriptorsForFile = {
+  [componentName: string]: ComponentDescriptor
+}
+
 export type PropertyControlsInfo = {
-  [filenameNoExtension: string]: { [componentName: string]: PropertyControls }
+  [filenameNoExtension: string]: ComponentDescriptorsForFile
 }
 
 export type ResolveFn = (importOrigin: string, toImport: string) => Either<string, string>
 export type CurriedResolveFn = (projectContents: ProjectContentTreeRoot) => ResolveFn
 
-export type CodeResultCache = {
+export interface CodeResultCache {
   skipDeepFreeze: true
   cache: { [filename: string]: CodeResult }
-  exportsInfo: ReadonlyArray<ExportsInfo>
+  exportsInfo: Array<ExportsInfo>
   error: Error | null
   curriedRequireFn: CurriedUtopiaRequireFn
   curriedResolveFn: CurriedResolveFn
@@ -97,90 +276,24 @@ export type CodeResultCache = {
   evaluationCache: EvaluationCache
 }
 
-type ModuleExportValues = { [name: string]: any }
-type ModuleExportTypes = { [name: string]: ExportType }
-type ExportValue = { value: any }
-type ModuleExportTypesAndValues = { [name: string]: ExportType & ExportValue }
-
-export function getExportValuesFromAllModules(
-  buildResult: MultiFileBuildResult,
-  requireFn: UtopiaRequireFn,
-): { [module: string]: ModuleExportValues } {
-  /**
-   * TODO
-   * we are requiring every user module here. unfortunately it means that if
-   * requiring them has any side effect, we will trigger that side effect here,
-   * even if it was never imported by the user
-   *
-   * a better solution would be to store the exported values as a side effect of the user requiring the module
-   * that way the side effects would happen at the correct time, and we would
-   * still have access to things like the PropertyControls for every component the user
-   * can select (since selecting them requires the component to be on screen, which means it must be imported anyways)
-   *
-   */
-
-  let exports: { [module: string]: ModuleExportValues } = {}
-  const moduleNames = Object.keys(buildResult)
-  // get all the modules from System to fill in the exports with their values
-  moduleNames.forEach((moduleName) => {
-    if (moduleName.toLowerCase().endsWith('.css')) {
-      // Skip eager evalution of css
-      return
-    }
-
-    const module = buildResult[moduleName]
-    if (module.transpiledCode == null) {
-      return
-    }
-    try {
-      exports[moduleName] = {}
-      const codeModule = requireFn('/', moduleName, true)
-      if (codeModule != null) {
-        Object.keys(codeModule).forEach((exp) => {
-          exports[moduleName][exp] = codeModule[exp]
-        })
-      }
-    } catch (e) {
-      // skipping this module, there is a runtime error executing it
-    }
-  })
-  return exports
-}
-
-export function processExportsInfo(
-  exportValues: ModuleExportValues,
-  exportTypes: ModuleExportTypes,
-): {
-  exports: ModuleExportTypesAndValues
-  error: Error | null
-} {
-  let exportsWithType: ModuleExportTypesAndValues = {}
-  try {
-    Utils.fastForEach(Object.keys(exportValues), (name: string) => {
-      if (exportTypes[name] == null) {
-        exportsWithType[name] = {
-          value: exportValues[name],
-          type: 'any',
-          functionInfo: null,
-          reactClassInfo: null,
-        }
-      } else {
-        exportsWithType[name] = {
-          ...exportTypes[name],
-          value: exportValues[name],
-        }
-      }
-    })
-
-    return {
-      exports: exportsWithType,
-      error: null,
-    }
-  } catch (e) {
-    return {
-      exports: exportsWithType,
-      error: e,
-    }
+export function codeResultCache(
+  cache: { [filename: string]: CodeResult },
+  exportsInfo: Array<ExportsInfo>,
+  error: Error | null,
+  curriedRequireFn: CurriedUtopiaRequireFn,
+  curriedResolveFn: CurriedResolveFn,
+  projectModules: MultiFileBuildResult,
+  evaluationCache: EvaluationCache,
+): CodeResultCache {
+  return {
+    skipDeepFreeze: true,
+    cache: cache,
+    exportsInfo: exportsInfo,
+    error: error,
+    curriedRequireFn: curriedRequireFn,
+    curriedResolveFn: curriedResolveFn,
+    projectModules: projectModules,
+    evaluationCache: evaluationCache,
   }
 }
 
@@ -195,7 +308,7 @@ export function incorporateBuildResult(
     if (modulesFile.transpiledCode == null) {
       delete nodeModules[moduleKey]
     } else {
-      const projectContentsFile = getContentsTreeFileFromString(projectContents, moduleKey)
+      const projectContentsFile = getProjectFileByFilePath(projectContents, moduleKey)
       const origin = projectContentsFile == null ? 'NODE_MODULES' : 'PROJECT_CONTENTS'
       nodeModules[moduleKey] = esCodeFile(modulesFile.transpiledCode, origin, moduleKey)
     }
@@ -205,7 +318,7 @@ export function incorporateBuildResult(
     const modulesFile = nodeModules[moduleKey]
     if (isEsCodeFile(modulesFile)) {
       if (modulesFile.origin === 'PROJECT_CONTENTS') {
-        const projectContentsFile = getContentsTreeFileFromString(projectContents, moduleKey)
+        const projectContentsFile = getProjectFileByFilePath(projectContents, moduleKey)
         if (projectContentsFile == null) {
           delete nodeModules[moduleKey]
         }
@@ -214,40 +327,22 @@ export function incorporateBuildResult(
   })
 }
 
-const getCurriedEditorResolveFunction = (nodeModules: NodeModules): CurriedResolveFn => (
-  projectContents: ProjectContentTreeRoot,
-) => (importOrigin: string, toImport: string) =>
-  resolveModulePath(projectContents, nodeModules, importOrigin, toImport)
+const getCurriedEditorResolveFunction =
+  (nodeModules: NodeModules): CurriedResolveFn =>
+  (projectContents: ProjectContentTreeRoot) =>
+  (importOrigin: string, toImport: string) =>
+    resolveModulePath(projectContents, nodeModules, importOrigin, toImport)
 
 export function generateCodeResultCache(
   projectContents: ProjectContentTreeRoot,
-  existingModules: MultiFileBuildResult,
   updatedModules: MultiFileBuildResult,
-  exportsInfo: ReadonlyArray<ExportsInfo>,
+  exportsInfo: Array<ExportsInfo>,
   nodeModules: NodeModules,
   dispatch: EditorDispatch,
   evaluationCache: EvaluationCache,
-  buildType: BuildType,
-  onlyProjectFiles: boolean,
+  builtInDependencies: BuiltInDependencies,
 ): CodeResultCache {
-  // Makes the assumption that `fullBuild` and `updatedModules` are in line
-  // with each other.
-  let projectModules: MultiFileBuildResult
-  switch (buildType) {
-    case 'full-build':
-      projectModules = { ...updatedModules }
-      break
-    case 'incremental':
-      projectModules = {
-        ...existingModules,
-        ...updatedModules,
-      }
-      break
-    default:
-      const _exhaustiveCheck: never = buildType
-      throw new Error(`Unhandled type ${JSON.stringify(buildType)}`)
-  }
-
+  const projectModules = { ...updatedModules }
   const updatedFileNames = Object.keys(updatedModules)
   const updatedAndReverseDepFilenames = getTransitiveReverseDependencies(
     projectContents,
@@ -263,15 +358,12 @@ export function generateCodeResultCache(
   // MUTATION ALERT! This function is mutating editorState.nodeModules.files by inserting the project files into it.
   incorporateBuildResult(nodeModules, projectContents, projectModules)
 
-  // Trigger async call to build the property controls info.
-  sendPropertyControlsInfoRequest(
+  const curriedRequireFn = getCurriedEditorRequireFn(
     nodeModules,
-    projectContents,
-    onlyProjectFiles,
-    updatedAndReverseDepFilenames,
+    dispatch,
+    evaluationCache,
+    builtInDependencies,
   )
-
-  const curriedRequireFn = getCurriedEditorRequireFn(nodeModules, dispatch, evaluationCache)
   const curriedResolveFn = getCurriedEditorResolveFunction(nodeModules)
 
   let cache: { [code: string]: CodeResult } = {}
@@ -299,9 +391,9 @@ export function isJavascriptOrTypescript(filePath: string): boolean {
   return regex.test(filePath)
 }
 
-export function codeCacheToBuildResult(cache: {
-  [filename: string]: CodeResult
-}): { [filename: string]: EmitFileResult } {
+export function codeCacheToBuildResult(cache: { [filename: string]: CodeResult }): {
+  [filename: string]: EmitFileResult
+} {
   return objectMap((entry) => {
     return {
       transpiledCode: entry.transpiledCode,
@@ -316,30 +408,21 @@ export interface NormalisePathSuccess {
   normalisedPath: StaticElementPath | null
   filePath: string
   textFile: TextFile
+  normalisedDynamicPath: ElementPath | null
 }
 
 export function normalisePathSuccess(
   normalisedPath: StaticElementPath | null,
   filePath: string,
   textFile: TextFile,
+  normalisedDynamicPath: ElementPath | null,
 ): NormalisePathSuccess {
   return {
     type: 'NORMALISE_PATH_SUCCESS',
     normalisedPath: normalisedPath,
     filePath: filePath,
     textFile: textFile,
-  }
-}
-
-export interface NormalisePathEndsAtDependency {
-  type: 'NORMALISE_PATH_ENDS_AT_DEPENDENCY'
-  dependency: string
-}
-
-export function normalisePathEndsAtDependency(dependency: string): NormalisePathEndsAtDependency {
-  return {
-    type: 'NORMALISE_PATH_ENDS_AT_DEPENDENCY',
-    dependency: dependency,
+    normalisedDynamicPath: normalisedDynamicPath,
   }
 }
 
@@ -355,35 +438,23 @@ export function normalisePathError(errorMessage: string): NormalisePathError {
   }
 }
 
-export interface NormalisePathUnableToProceed {
-  type: 'NORMALISE_PATH_UNABLE_TO_PROCEED'
-  filePath: string
+export interface NormalisePathElementNotFound {
+  type: 'NORMALISE_PATH_ELEMENT_NOT_FOUND'
+  elementPathString: string
 }
 
-export function normalisePathUnableToProceed(filePath: string): NormalisePathUnableToProceed {
+export function normalisePathElementNotFound(
+  elementPathString: string,
+): NormalisePathElementNotFound {
   return {
-    type: 'NORMALISE_PATH_UNABLE_TO_PROCEED',
-    filePath: filePath,
-  }
-}
-
-export interface NormalisePathImportNotFound {
-  type: 'NORMALISE_PATH_IMPORT_NOT_FOUND'
-  notFound: string
-}
-
-export function normalisePathImportNotFound(notFound: string): NormalisePathImportNotFound {
-  return {
-    type: 'NORMALISE_PATH_IMPORT_NOT_FOUND',
-    notFound: notFound,
+    type: 'NORMALISE_PATH_ELEMENT_NOT_FOUND',
+    elementPathString: elementPathString,
   }
 }
 
 export type NormalisePathResult =
+  | NormalisePathElementNotFound
   | NormalisePathError
-  | NormalisePathUnableToProceed
-  | NormalisePathImportNotFound
-  | NormalisePathEndsAtDependency
   | NormalisePathSuccess
 
 export function normalisePathSuccessOrThrowError(
@@ -392,236 +463,83 @@ export function normalisePathSuccessOrThrowError(
   switch (normalisePathResult.type) {
     case 'NORMALISE_PATH_SUCCESS':
       return normalisePathResult
+    case 'NORMALISE_PATH_ELEMENT_NOT_FOUND':
+      throw new Error(`Could not find element with path ${normalisePathResult.elementPathString}`)
     case 'NORMALISE_PATH_ERROR':
-      throw new Error(normalisePathResult.errorMessage)
-    case 'NORMALISE_PATH_IMPORT_NOT_FOUND':
-      throw new Error(`Could not find an import (${normalisePathResult.notFound}).`)
-    case 'NORMALISE_PATH_UNABLE_TO_PROCEED':
-      throw new Error(`Could not proceed past ${normalisePathResult.filePath}.`)
-    case 'NORMALISE_PATH_ENDS_AT_DEPENDENCY':
-      throw new Error(`Reached an external dependency ${normalisePathResult.dependency}.`)
+      throw new Error(`Could not proceed: ${normalisePathResult.errorMessage}.`)
     default:
       const _exhaustiveCheck: never = normalisePathResult
       throw new Error(`Unhandled case ${JSON.stringify(normalisePathResult)}`)
   }
 }
 
-export function normalisePathToUnderlyingTarget(
+export function normalisePathToUnderlyingTargetUncached(
   projectContents: ProjectContentTreeRoot,
-  nodeModules: NodeModules,
-  currentFilePath: string,
-  elementPath: ElementPath | null,
+  elementPath: ElementPath,
 ): NormalisePathResult {
-  const currentFile = getContentsTreeFileFromString(projectContents, currentFilePath)
-  if (isTextFile(currentFile)) {
-    if (isParseSuccess(currentFile.fileContents.parsed)) {
-      const staticPath = elementPath == null ? null : EP.dynamicPathToStaticPath(elementPath)
-      const potentiallyDroppedFirstPathElementResult = EP.dropFirstPathElement(staticPath)
-      if (potentiallyDroppedFirstPathElementResult.droppedPathElements == null) {
-        // As the scene path is empty, there's no more traversing to do, the target is in this file.
-        return normalisePathSuccess(staticPath, currentFilePath, currentFile)
-      } else {
-        const droppedPathPart = potentiallyDroppedFirstPathElementResult.droppedPathElements
-        if (droppedPathPart.length === 0) {
-          return normalisePathError(
-            `Unable to handle empty scene path part for ${optionalMap(EP.toString, elementPath)}`,
-          )
-        } else {
-          // Now need to identify the element relating to the last part of the dropped scene path.
-          const lastDroppedPathPart = droppedPathPart[droppedPathPart.length - 1]
-
-          // Walk the parsed representation to find the element with the given uid.
-          const parsedContent = currentFile.fileContents.parsed
-          let targetElement: JSXElement | null = null
-          for (const topLevelElement of parsedContent.topLevelElements) {
-            const possibleTarget = findElementWithUID(topLevelElement, lastDroppedPathPart)
-            if (possibleTarget != null) {
-              targetElement = possibleTarget
-              break
-            }
-          }
-
-          // Identify where the component is imported from or if it's in the same file.
-          if (targetElement == null) {
-            return normalisePathImportNotFound(lastDroppedPathPart)
-          } else {
-            const nonNullTargetElement: JSXElement = targetElement
-
-            // Handle things like divs.
-            if (isIntrinsicElement(targetElement.name)) {
-              return normalisePathSuccess(
-                potentiallyDroppedFirstPathElementResult.newPath == null
-                  ? null
-                  : EP.dynamicPathToStaticPath(potentiallyDroppedFirstPathElementResult.newPath),
-                currentFilePath,
-                currentFile,
-              )
-            } else {
-              return lookupElementImport(
-                targetElement.name.baseVariable,
-                currentFilePath,
-                projectContents,
-                nodeModules,
-                nonNullTargetElement,
-                elementPath,
-                parsedContent,
-                potentiallyDroppedFirstPathElementResult,
-              )
-            }
-          }
-        }
-      }
-    } else {
-      return normalisePathUnableToProceed(currentFilePath)
-    }
-  } else {
-    return normalisePathUnableToProceed(currentFilePath)
+  if (EP.isEmptyPath(elementPath)) {
+    return normalisePathError('Empty element path')
   }
-}
 
-function lookupElementImport(
-  elementBaseVariable: string,
-  currentFilePath: string,
-  projectContents: ProjectContentTreeRoot,
-  nodeModules: NodeModules,
-  nonNullTargetElement: JSXElement,
-  elementPath: ElementPath | null,
-  parsedContent: ParseSuccess,
-  potentiallyDroppedFirstPathElementResult: EP.DropFirstPathElementResultType,
-): NormalisePathResult {
-  const importedFrom = importedFromWhere(
-    currentFilePath,
-    elementBaseVariable,
-    parsedContent.topLevelElements,
-    parsedContent.imports,
-  )
-  if (importedFrom == null) {
-    return normalisePathImportNotFound(elementBaseVariable)
-  } else {
-    if (
-      importedFrom.type === 'IMPORTED_ORIGIN' &&
-      importedFrom.filePath === 'utopia-api' &&
-      importedFrom.exportedName === 'Scene'
-    ) {
-      // Navigate around the scene with the special case handling.
-      const componentAttr = getJSXAttribute(nonNullTargetElement.props, 'component')
-      if (componentAttr != null && isJSXAttributeOtherJavaScript(componentAttr)) {
-        return lookupElementImport(
-          componentAttr.javascript,
-          currentFilePath,
-          projectContents,
-          nodeModules,
-          nonNullTargetElement,
-          elementPath,
-          parsedContent,
-          potentiallyDroppedFirstPathElementResult,
-        )
-      } else {
-        return normalisePathError(
-          `Unable to handle Scene component definition for ${optionalMap(
-            EP.toString,
-            elementPath,
-          )}`,
-        )
-      }
-    } else {
-      const resolutionResult = resolveModule(
-        projectContents,
-        nodeModules,
-        currentFilePath,
-        importedFrom.filePath,
-      )
-      switch (resolutionResult.type) {
-        case 'RESOLVE_SUCCESS':
-          const successResult = resolutionResult.success
-          // Avoid drilling into node_modules because we can't do anything useful with
-          // the contents of files in there.
-          if (successResult.path.startsWith('/node_modules/')) {
-            const splitPath = successResult.path.split('/')
-            return normalisePathEndsAtDependency(splitPath[2])
-          } else {
-            switch (successResult.file.type) {
-              case 'ES_CODE_FILE':
-                return normalisePathToUnderlyingTarget(
-                  projectContents,
-                  nodeModules,
-                  successResult.path,
-                  potentiallyDroppedFirstPathElementResult.newPath,
-                )
-              case 'ES_REMOTE_DEPENDENCY_PLACEHOLDER':
-                return normalisePathUnableToProceed(successResult.path)
-              default:
-                const _exhaustiveCheck: never = successResult.file
-                throw new Error(`Unhandled case ${JSON.stringify(successResult.file)}`)
-            }
-          }
-        case 'RESOLVE_NOT_PRESENT':
-          return normalisePathError(`Unable to find resolve path at ${importedFrom}`)
-        default:
-          const _exhaustiveCheck: never = resolutionResult
-          throw new Error(`Unhandled case ${JSON.stringify(resolutionResult)}`)
-      }
-    }
+  const staticPath = EP.dynamicPathToStaticPath(elementPath)
+  const lastPartOfPath = EP.takeLastPartOfPath(elementPath)
+
+  const allUidsWithFiles = getUidMappings(projectContents)
+  const filePathFromUID = getFilePathForUid(allUidsWithFiles.filePathToUids, EP.toUid(staticPath))
+  const fileFromUID =
+    filePathFromUID == null ? null : getProjectFileByFilePath(projectContents, filePathFromUID)
+
+  if (filePathFromUID == null || fileFromUID == null) {
+    return normalisePathElementNotFound(EP.toString(elementPath))
   }
-}
 
-export function normalisePathToUnderlyingTargetForced(
-  projectContents: ProjectContentTreeRoot,
-  nodeModules: NodeModules,
-  currentFilePath: string,
-  elementPath: ElementPath | null,
-): NormalisePathSuccess {
-  return normalisePathSuccessOrThrowError(
-    normalisePathToUnderlyingTarget(projectContents, nodeModules, currentFilePath, elementPath),
+  if (!isTextFile(fileFromUID) || !isParseSuccess(fileFromUID.fileContents.parsed)) {
+    // This shouldn't happen, since getAllUniqueUids only reads from parsed files, but we'll
+    // keep this here in case that changes
+    return normalisePathError(
+      `Error retrieving ${EP.toString(elementPath)} from file ${filePathFromUID}`,
+    )
+  }
+
+  return normalisePathSuccess(
+    EP.dynamicPathToStaticPath(lastPartOfPath),
+    filePathFromUID,
+    fileFromUID,
+    lastPartOfPath,
   )
 }
 
-export function findUnderlyingTargetComponentImplementation(
+export const normalisePathToUnderlyingTarget = valueDependentCache(
+  normalisePathToUnderlyingTargetUncached,
+  EP.toString,
+)
+
+export function findUnderlyingTargetComponentImplementationFromImportInfo(
   projectContents: ProjectContentTreeRoot,
-  nodeModules: NodeModules,
-  currentFilePath: string,
-  elementPath: ElementPath | null,
+  importInfo: ImportInfo | null,
 ): UtopiaJSXComponent | null {
-  const underlyingTarget = normalisePathToUnderlyingTarget(
-    projectContents,
-    nodeModules,
-    currentFilePath,
-    elementPath,
-  )
-  if (underlyingTarget.type === 'NORMALISE_PATH_SUCCESS') {
-    const parseResult = underlyingTarget.textFile.fileContents.parsed
-    if (isParseSuccess(parseResult) && underlyingTarget.normalisedPath != null) {
-      const element = findJSXElementAtStaticPath(
-        getUtopiaJSXComponentsFromSuccess(parseResult),
-        underlyingTarget.normalisedPath,
-      )
-      const elementName = element?.name.baseVariable
-      if (element != null && elementName != null) {
-        const innerUnderlyingTarget = lookupElementImport(
-          elementName,
-          underlyingTarget.filePath,
-          projectContents,
-          nodeModules,
-          element,
-          underlyingTarget.normalisedPath,
-          parseResult,
-          { droppedPathElements: null, newPath: null },
-        )
-        if (
-          innerUnderlyingTarget.type === 'NORMALISE_PATH_SUCCESS' &&
-          isParseSuccess(innerUnderlyingTarget.textFile.fileContents.parsed)
-        ) {
-          return (
-            innerUnderlyingTarget.textFile.fileContents.parsed.topLevelElements.find(
-              (tle): tle is UtopiaJSXComponent => {
-                return isUtopiaJSXComponent(tle) && tle.name === elementName
-              },
-            ) ?? null
-          )
-        }
-      }
-    }
+  if (importInfo == null) {
+    return null
   }
 
-  return null
+  const variableName =
+    importInfo.type === 'SAME_FILE_ORIGIN' ? importInfo.variableName : importInfo.exportedName
+
+  // we have to find the element based on the top level name
+  const file = getProjectFileByFilePath(projectContents, importInfo.filePath)
+  const parsedContents = getParsedContentsFromTextFile(file)
+  if (parsedContents == null) {
+    return null
+  }
+
+  const foundTopLevelElement = parsedContents.topLevelElements.find(
+    (tle): tle is UtopiaJSXComponent =>
+      tle.type === 'UTOPIA_JSX_COMPONENT' && tle.name === variableName,
+  )
+
+  if (foundTopLevelElement == null) {
+    return null
+  }
+
+  return foundTopLevelElement
 }

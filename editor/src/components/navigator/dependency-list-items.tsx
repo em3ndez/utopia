@@ -1,8 +1,9 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx } from '@emotion/react'
 import React from 'react'
 import { FlexRow, UtopiaTheme } from '../../uuiui'
-import { DependencyPackageDetails } from '../editor/store/editor-state'
+import type { DependencyPackageDetails } from '../editor/store/editor-state'
 import { DependencyListItemEditing, DependencySearchSelect } from './dependency-list-input-field'
 import { DependencyListItem } from './dependency-list-item'
 
@@ -18,7 +19,9 @@ interface DependencyListItemsProps {
   handleAbandonEdit: () => void
 }
 
-export const DependencyListItems: React.FunctionComponent<DependencyListItemsProps> = ({
+export const DependencyListItems: React.FunctionComponent<
+  React.PropsWithChildren<DependencyListItemsProps>
+> = ({
   packages,
   editingLocked,
   newlyLoadedItems,

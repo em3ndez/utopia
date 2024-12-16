@@ -1,21 +1,37 @@
-import { Either, isLeft, isRight, right } from '../../../core/shared/either'
+import { clearModifiableAttributeUniqueIDs } from '../../../core/shared/jsx-attributes'
+import type { Either } from '../../../core/shared/either'
+import { isLeft, isRight, left, right } from '../../../core/shared/either'
+import type { GridContainerProperties } from '../../../core/shared/element-template'
 import {
   emptyComments,
-  jsxAttributeFunctionCall,
+  jsExpressionFunctionCall,
   jsxAttributeNestedObjectSimple,
   jsxAttributesFromMap,
-  jsxAttributeValue,
+  jsExpressionValue,
   jsxTestElement,
+  clearExpressionUniqueIDs,
+  clearJSXElementChildUniqueIDs,
+  gridContainerProperties,
+  gridAutoOrTemplateDimensions,
+  gridPositionValue,
+  gridRange,
+  gridSpanNumeric,
+  gridSpanArea,
 } from '../../../core/shared/element-template'
 import * as PP from '../../../core/shared/property-path'
-import {
-  cssAngle,
+import type {
   CSSBackground,
   CSSBackgroundSize,
-  cssBGSize,
   CSSBorderRadius,
-  cssColor,
   CSSColor,
+  CSSTextShadows,
+  CSSTransforms,
+  GridDimension,
+} from './css-utils'
+import {
+  cssAngle,
+  cssBGSize,
+  cssColor,
   cssColorHSL,
   cssColorToChromaColor,
   cssDefault,
@@ -23,13 +39,10 @@ import {
   cssNumber,
   cssPixelLength,
   cssPixelLengthZero,
-  CSSSolidColor,
-  CSSTextShadows,
   cssTransformRotate,
   cssTransformRotateX,
   cssTransformRotateY,
   cssTransformRotateZ,
-  CSSTransforms,
   cssTransformScale,
   cssTransformScaleX,
   cssTransformScaleY,
@@ -42,12 +55,15 @@ import {
   cssTransformTranslateY,
   cssTransformTranslateZ,
   cssUnitlessLength,
-  CSSUnknownArrayItem,
   defaultBGSize,
   defaultCSSGradientStops,
   defaultCSSRadialGradientSize,
   defaultCSSRadialOrConicGradientCenter,
   disabledFunctionName,
+  gridCSSKeyword,
+  gridCSSMinmax,
+  gridCSSNumber,
+  gridCSSRepeat,
   parseBackgroundColor,
   parseBackgroundImage,
   parseBorderRadius,
@@ -56,28 +72,28 @@ import {
   parseConicGradient,
   parseCSSURLFunction,
   parsedCurlyBrace,
+  parseGridRange,
   parseLinearGradient,
   parseRadialGradient,
   parseTextShadow,
   parseTransform,
   printBackgroundImage,
   printBackgroundSize,
+  printGridDimensionCSS,
   RegExpLibrary,
+  stringifyGridDimension,
   toggleSimple,
   toggleStylePropPath,
 } from './css-utils'
 
 describe('toggleStyleProp', () => {
-  const simpleToggleProp = toggleStylePropPath(
-    PP.create(['style', 'backgroundColor']),
-    toggleSimple,
-  )
+  const simpleToggleProp = toggleStylePropPath(PP.create('style', 'backgroundColor'), toggleSimple)
 
   it('disables simple value', () => {
     const element = jsxTestElement(
       'View',
       jsxAttributesFromMap({
-        style: jsxAttributeValue(
+        style: jsExpressionValue(
           {
             backgroundColor: 'red',
           },
@@ -87,21 +103,23 @@ describe('toggleStyleProp', () => {
       [],
     )
 
-    const expectedElement = jsxTestElement(
-      'View',
-      jsxAttributesFromMap({
-        style: jsxAttributeNestedObjectSimple(
-          jsxAttributesFromMap({
-            backgroundColor: jsxAttributeFunctionCall(disabledFunctionName, [
-              jsxAttributeValue('red', emptyComments),
-            ]),
-          }),
-          emptyComments,
-        ),
-      }),
-      [],
+    const expectedElement = clearJSXElementChildUniqueIDs(
+      jsxTestElement(
+        'View',
+        jsxAttributesFromMap({
+          style: jsxAttributeNestedObjectSimple(
+            jsxAttributesFromMap({
+              backgroundColor: jsExpressionFunctionCall(disabledFunctionName, [
+                jsExpressionValue('red', emptyComments),
+              ]),
+            }),
+            emptyComments,
+          ),
+        }),
+        [],
+      ),
     )
-    const toggledElement = simpleToggleProp(element)
+    const toggledElement = clearJSXElementChildUniqueIDs(simpleToggleProp(element))
     expect(toggledElement).toEqual(expectedElement)
   })
 
@@ -111,8 +129,8 @@ describe('toggleStyleProp', () => {
       jsxAttributesFromMap({
         style: jsxAttributeNestedObjectSimple(
           jsxAttributesFromMap({
-            backgroundColor: jsxAttributeFunctionCall(disabledFunctionName, [
-              jsxAttributeValue('red', emptyComments),
+            backgroundColor: jsExpressionFunctionCall(disabledFunctionName, [
+              jsExpressionValue('red', emptyComments),
             ]),
           }),
           emptyComments,
@@ -121,19 +139,21 @@ describe('toggleStyleProp', () => {
       [],
     )
 
-    const expectedElement = jsxTestElement(
-      'View',
-      jsxAttributesFromMap({
-        style: jsxAttributeValue(
-          {
-            backgroundColor: 'red',
-          },
-          emptyComments,
-        ),
-      }),
-      [],
+    const expectedElement = clearJSXElementChildUniqueIDs(
+      jsxTestElement(
+        'View',
+        jsxAttributesFromMap({
+          style: jsxAttributeNestedObjectSimple(
+            jsxAttributesFromMap({
+              backgroundColor: jsExpressionValue('red', emptyComments),
+            }),
+            emptyComments,
+          ),
+        }),
+        [],
+      ),
     )
-    const toggledElement = simpleToggleProp(element)
+    const toggledElement = clearJSXElementChildUniqueIDs(simpleToggleProp(element))
     expect(toggledElement).toEqual(expectedElement)
   })
 
@@ -143,7 +163,7 @@ describe('toggleStyleProp', () => {
       jsxAttributesFromMap({
         style: jsxAttributeNestedObjectSimple(
           jsxAttributesFromMap({
-            backgroundColor: jsxAttributeValue('red', emptyComments),
+            backgroundColor: jsExpressionValue('red', emptyComments),
           }),
           emptyComments,
         ),
@@ -151,73 +171,81 @@ describe('toggleStyleProp', () => {
       [],
     )
 
-    const expectedElement = jsxTestElement(
-      'View',
-      jsxAttributesFromMap({
-        style: jsxAttributeNestedObjectSimple(
-          jsxAttributesFromMap({
-            backgroundColor: jsxAttributeFunctionCall(disabledFunctionName, [
-              jsxAttributeValue('red', emptyComments),
-            ]),
-          }),
-          emptyComments,
-        ),
-      }),
-      [],
+    const expectedElement = clearJSXElementChildUniqueIDs(
+      jsxTestElement(
+        'View',
+        jsxAttributesFromMap({
+          style: jsxAttributeNestedObjectSimple(
+            jsxAttributesFromMap({
+              backgroundColor: jsExpressionFunctionCall(disabledFunctionName, [
+                jsExpressionValue('red', emptyComments),
+              ]),
+            }),
+            emptyComments,
+          ),
+        }),
+        [],
+      ),
     )
-    const toggledElement = simpleToggleProp(element)
+    const toggledElement = clearJSXElementChildUniqueIDs(simpleToggleProp(element))
     expect(toggledElement).toEqual(expectedElement)
   })
 })
 
 describe('toggleSimple', () => {
   it('disables the attribute', () => {
-    const attribute = jsxAttributeValue('colorValue', emptyComments)
-    const expectedAttribute = jsxAttributeFunctionCall(disabledFunctionName, [
-      jsxAttributeValue('colorValue', emptyComments),
+    const attribute = jsExpressionValue('colorValue', emptyComments)
+    const expectedAttribute = jsExpressionFunctionCall(disabledFunctionName, [
+      jsExpressionValue('colorValue', emptyComments),
     ])
     const result = toggleSimple(attribute)
-    expect(result).toEqual(expectedAttribute)
+    expect(clearModifiableAttributeUniqueIDs(result)).toEqual(
+      clearModifiableAttributeUniqueIDs(expectedAttribute),
+    )
   })
 
   it('enables the attribute', () => {
-    const attribute = jsxAttributeFunctionCall(disabledFunctionName, [
-      jsxAttributeValue('colorValue', emptyComments),
+    const attribute = jsExpressionFunctionCall(disabledFunctionName, [
+      jsExpressionValue('colorValue', emptyComments),
     ])
-    const expectedAttribute = jsxAttributeValue('colorValue', emptyComments)
+    const expectedAttribute = jsExpressionValue('colorValue', emptyComments)
     const result = toggleSimple(attribute)
-    expect(result).toEqual(expectedAttribute)
+    expect(clearModifiableAttributeUniqueIDs(result)).toEqual(
+      clearModifiableAttributeUniqueIDs(expectedAttribute),
+    )
   })
 
   it('disables a nested object attribute', () => {
     const attribute = jsxAttributeNestedObjectSimple(
       jsxAttributesFromMap({
-        aParameter: jsxAttributeFunctionCall('aHelperFunction', [
-          jsxAttributeValue('hello', emptyComments),
+        aParameter: jsExpressionFunctionCall('aHelperFunction', [
+          jsExpressionValue('hello', emptyComments),
         ]),
       }),
       emptyComments,
     )
-    const expectedAttribute = jsxAttributeFunctionCall(disabledFunctionName, [
+    const expectedAttribute = jsExpressionFunctionCall(disabledFunctionName, [
       jsxAttributeNestedObjectSimple(
         jsxAttributesFromMap({
-          aParameter: jsxAttributeFunctionCall('aHelperFunction', [
-            jsxAttributeValue('hello', emptyComments),
+          aParameter: jsExpressionFunctionCall('aHelperFunction', [
+            jsExpressionValue('hello', emptyComments),
           ]),
         }),
         emptyComments,
       ),
     ])
     const result = toggleSimple(attribute)
-    expect(result).toEqual(expectedAttribute)
+    expect(clearModifiableAttributeUniqueIDs(result)).toEqual(
+      clearModifiableAttributeUniqueIDs(expectedAttribute),
+    )
   })
 
   it('enables a nested object attribute', () => {
-    const attribute = jsxAttributeFunctionCall(disabledFunctionName, [
+    const attribute = jsExpressionFunctionCall(disabledFunctionName, [
       jsxAttributeNestedObjectSimple(
         jsxAttributesFromMap({
-          aParameter: jsxAttributeFunctionCall('aHelperFunction', [
-            jsxAttributeValue('hello', emptyComments),
+          aParameter: jsExpressionFunctionCall('aHelperFunction', [
+            jsExpressionValue('hello', emptyComments),
           ]),
         }),
         emptyComments,
@@ -225,14 +253,16 @@ describe('toggleSimple', () => {
     ])
     const expectedAttribute = jsxAttributeNestedObjectSimple(
       jsxAttributesFromMap({
-        aParameter: jsxAttributeFunctionCall('aHelperFunction', [
-          jsxAttributeValue('hello', emptyComments),
+        aParameter: jsExpressionFunctionCall('aHelperFunction', [
+          jsExpressionValue('hello', emptyComments),
         ]),
       }),
       emptyComments,
     )
     const result = toggleSimple(attribute)
-    expect(result).toEqual(expectedAttribute)
+    expect(clearModifiableAttributeUniqueIDs(result)).toEqual(
+      clearModifiableAttributeUniqueIDs(expectedAttribute),
+    )
   })
 })
 
@@ -258,7 +288,7 @@ function testRegexMatches(
       const matchGroup = stringAndMatch.matchGroups[i]
       if (matchGroup != null) {
         if (stringAndMatch.testString.match(regex)![i] !== matchGroup) {
-          fail(
+          throw new Error(
             `${stringAndMatch.testString}: ${
               stringAndMatch.testString.match(regex)![i]
             } doesn't equal ${matchGroup}`,
@@ -370,13 +400,13 @@ function testBackgroundLayers(
   for (const validString of validStrings) {
     const parsed = parseFunction(validString)
     if (isLeft(parsed)) {
-      fail(`${parsed.value}: ${validString}`)
+      throw new Error(`${parsed.value}: ${validString}`)
     }
   }
   for (const invalidString of invalidStrings) {
     const parsed = parseFunction(invalidString)
     if (isRight(parsed)) {
-      fail(`${parsed.value}: ${invalidString}`)
+      throw new Error(`${parsed.value}: ${invalidString}`)
     }
   }
 }
@@ -904,7 +934,10 @@ describe('printBackgroundImage', () => {
         },
       ],
     ]
-    expect(validValues.map((valid) => printBackgroundImage(valid))).toMatchInlineSnapshot(`
+    const actualResult = validValues.map((valid) =>
+      clearExpressionUniqueIDs(printBackgroundImage(valid)),
+    )
+    expect(actualResult).toMatchInlineSnapshot(`
       Array [
         Object {
           "comments": Object {
@@ -912,6 +945,7 @@ describe('printBackgroundImage', () => {
             "trailingComments": Array [],
           },
           "type": "ATTRIBUTE_VALUE",
+          "uid": "",
           "value": "radial-gradient(#000 0%, #fff 100%)",
         },
         Object {
@@ -920,6 +954,7 @@ describe('printBackgroundImage', () => {
             "trailingComments": Array [],
           },
           "type": "ATTRIBUTE_VALUE",
+          "uid": "",
           "value": "linear-gradient(90deg, #000 0%, #fff 100%), linear-gradient(#000 0%, #000 100%)",
         },
         Object {
@@ -928,6 +963,7 @@ describe('printBackgroundImage', () => {
             "trailingComments": Array [],
           },
           "type": "ATTRIBUTE_VALUE",
+          "uid": "",
           "value": "linear-gradient(#000 0%, #000 100%), linear-gradient(#000 0%, #fff 100%), /*radial-gradient(#000 0%, #fff 100%)*/ linear-gradient(90deg, #000 0%, #fff 100%), /*linear-gradient(#000 0%, #000 100%)*/ radial-gradient(#000 0%, #fff 100%)",
         },
       ]
@@ -1164,7 +1200,7 @@ describe('parseColor', () => {
       },
     ]
     validStrings.forEach((valid, i) => {
-      expect(parseColor(valid)).toEqual(right(expectedValues[i]))
+      expect(parseColor(valid, 'hex-hash-optional')).toEqual(right(expectedValues[i]))
     })
 
     const invalidStrings: Array<string> = [
@@ -1176,7 +1212,7 @@ describe('parseColor', () => {
       'orangey',
     ]
     invalidStrings.forEach((invalid, i) => {
-      expect(parseColor(invalid).type).toEqual('LEFT')
+      expect(parseColor(invalid, 'hex-hash-optional').type).toEqual('LEFT')
     })
   })
 })
@@ -1640,7 +1676,7 @@ describe('cssColorToChromaColor', () => {
   })
 })
 
-describe('parseBackgroundColor', () => {
+describe('parseBackgroundColor 2', () => {
   it('parses a background color', () => {
     const validStrings = ['#fff', 'rgba(255 255 255 / 1)']
 
@@ -1771,15 +1807,331 @@ describe('printBackgroundSize', () => {
       cssBGSize(cssDefault(parsedCurlyBrace([cssNumber(100, 'px')]), false)),
       cssBGSize(cssDefault(parsedCurlyBrace([cssNumber(100, '%'), cssNumber(100, '%')]), false)),
     ]
-    expect(printBackgroundSize(backgroundSize)).toMatchInlineSnapshot(`
+    expect(clearExpressionUniqueIDs(printBackgroundSize(backgroundSize))).toMatchInlineSnapshot(`
       Object {
         "comments": Object {
           "leadingComments": Array [],
           "trailingComments": Array [],
         },
         "type": "ATTRIBUTE_VALUE",
+        "uid": "",
         "value": "auto, auto auto, 100px, 100% 100%",
       }
     `)
+  })
+})
+
+describe('stringifyGridDimension', () => {
+  it('keyword', async () => {
+    expect(stringifyGridDimension(gridCSSKeyword(cssKeyword('auto'), null))).toBe('auto')
+    expect(stringifyGridDimension(gridCSSKeyword(cssKeyword('auto'), 'the-area'))).toBe('auto')
+  })
+
+  it('number', async () => {
+    expect(stringifyGridDimension(gridCSSNumber(cssNumber(123), null))).toBe('123')
+    expect(stringifyGridDimension(gridCSSNumber(cssNumber(123, 'px'), null))).toBe('123px')
+    expect(stringifyGridDimension(gridCSSNumber(cssNumber(123), 'the-area'))).toBe('123')
+  })
+
+  it('repeat', async () => {
+    expect(
+      stringifyGridDimension(
+        gridCSSRepeat(
+          3,
+          [
+            gridCSSKeyword(cssKeyword('auto'), null),
+            gridCSSKeyword(cssKeyword('min-content'), null),
+            gridCSSNumber(cssNumber(123, 'px'), null),
+          ],
+          null,
+        ),
+      ),
+    ).toBe(`repeat(3, auto min-content 123px)`)
+
+    expect(
+      stringifyGridDimension(
+        gridCSSRepeat(
+          3,
+          [
+            gridCSSKeyword(cssKeyword('auto'), 'foo'),
+            gridCSSKeyword(cssKeyword('min-content'), 'bar'),
+            gridCSSNumber(cssNumber(123, 'px'), null),
+          ],
+          'the-area',
+        ),
+      ),
+    ).toBe(`repeat(3, [foo] auto [bar] min-content 123px)`)
+
+    expect(
+      stringifyGridDimension(
+        gridCSSRepeat(
+          cssKeyword('auto-fit'),
+          [
+            gridCSSMinmax(
+              gridCSSNumber(cssNumber(400, 'px'), null),
+              gridCSSNumber(cssNumber(1, 'fr'), null),
+              null,
+            ),
+          ],
+          null,
+        ),
+      ),
+    ).toBe(`repeat(auto-fit, minmax(400px, 1fr))`)
+  })
+
+  it('minmax', async () => {
+    expect(
+      stringifyGridDimension(
+        gridCSSMinmax(
+          gridCSSKeyword(cssKeyword('auto'), null),
+          gridCSSKeyword(cssKeyword('min-content'), null),
+          null,
+        ),
+      ),
+    ).toBe('minmax(auto, min-content)')
+
+    expect(
+      stringifyGridDimension(
+        gridCSSMinmax(
+          gridCSSKeyword(cssKeyword('auto'), null),
+          gridCSSKeyword(cssKeyword('min-content'), null),
+          'the-area',
+        ),
+      ),
+    ).toBe('minmax(auto, min-content)')
+  })
+})
+
+describe('printGridDimensionCSS', () => {
+  it('keyword', async () => {
+    expect(printGridDimensionCSS(gridCSSKeyword(cssKeyword('auto'), null))).toBe('auto')
+    expect(printGridDimensionCSS(gridCSSKeyword(cssKeyword('auto'), 'the-area'))).toBe(
+      '[the-area] auto',
+    )
+  })
+
+  it('number', async () => {
+    expect(printGridDimensionCSS(gridCSSNumber(cssNumber(123), null))).toBe('123')
+    expect(printGridDimensionCSS(gridCSSNumber(cssNumber(123, 'px'), null))).toBe('123px')
+    expect(printGridDimensionCSS(gridCSSNumber(cssNumber(123), 'the-area'))).toBe('[the-area] 123')
+  })
+
+  it('repeat', async () => {
+    expect(
+      printGridDimensionCSS(
+        gridCSSRepeat(
+          3,
+          [
+            gridCSSKeyword(cssKeyword('auto'), null),
+            gridCSSKeyword(cssKeyword('min-content'), null),
+            gridCSSNumber(cssNumber(123, 'px'), null),
+          ],
+          null,
+        ),
+      ),
+    ).toBe(`repeat(3, auto min-content 123px)`)
+
+    expect(
+      printGridDimensionCSS(
+        gridCSSRepeat(
+          3,
+          [
+            gridCSSKeyword(cssKeyword('auto'), 'foo'),
+            gridCSSKeyword(cssKeyword('min-content'), 'bar'),
+            gridCSSNumber(cssNumber(123, 'px'), null),
+          ],
+          'the-area',
+        ),
+      ),
+    ).toBe(`[the-area] repeat(3, [foo] auto [bar] min-content 123px)`)
+
+    expect(
+      printGridDimensionCSS(
+        gridCSSRepeat(
+          cssKeyword('auto-fit'),
+          [
+            gridCSSMinmax(
+              gridCSSNumber(cssNumber(400, 'px'), null),
+              gridCSSNumber(cssNumber(1, 'fr'), null),
+              null,
+            ),
+          ],
+          null,
+        ),
+      ),
+    ).toBe(`repeat(auto-fit, minmax(400px, 1fr))`)
+  })
+
+  it('minmax', async () => {
+    expect(
+      printGridDimensionCSS(
+        gridCSSMinmax(
+          gridCSSKeyword(cssKeyword('auto'), null),
+          gridCSSKeyword(cssKeyword('min-content'), null),
+          null,
+        ),
+      ),
+    ).toBe('minmax(auto, min-content)')
+
+    expect(
+      printGridDimensionCSS(
+        gridCSSMinmax(
+          gridCSSKeyword(cssKeyword('auto'), null),
+          gridCSSKeyword(cssKeyword('min-content'), null),
+          'the-area',
+        ),
+      ),
+    ).toBe('[the-area] minmax(auto, min-content)')
+
+    expect(
+      printGridDimensionCSS(
+        gridCSSMinmax(
+          gridCSSKeyword(cssKeyword('auto'), 'foo'),
+          gridCSSKeyword(cssKeyword('min-content'), 'bar'),
+          'the-area',
+        ),
+      ),
+    ).toBe('[the-area] minmax(auto, min-content)')
+  })
+})
+
+function testGridContainerProperties(
+  cols: GridDimension[],
+  rows: GridDimension[],
+): GridContainerProperties {
+  return gridContainerProperties(
+    gridAutoOrTemplateDimensions(cols),
+    gridAutoOrTemplateDimensions(rows),
+    gridAutoOrTemplateDimensions([]),
+    gridAutoOrTemplateDimensions([]),
+    null,
+  )
+}
+
+describe('parseGridRange', () => {
+  it('can parse a numerical unit', async () => {
+    const got = parseGridRange(testGridContainerProperties([], []), 'row', '3')
+    expect(got).toEqual(right(gridRange(gridPositionValue(3), null)))
+  })
+  it('can parse a numerical range', async () => {
+    const got = parseGridRange(testGridContainerProperties([], []), 'row', '3 / 4')
+    expect(got).toEqual(right(gridRange(gridPositionValue(3), gridPositionValue(4))))
+  })
+  it('can parse a line', async () => {
+    const got = parseGridRange(
+      testGridContainerProperties(
+        [],
+        [
+          gridCSSNumber(cssNumber(1, 'fr'), 'foo'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'bar'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'baz'),
+        ],
+      ),
+      'row',
+      'bar',
+    )
+    expect(got).toEqual(right(gridRange(gridPositionValue(2), null)))
+  })
+  it('errors if the line is not found in the template', async () => {
+    const got = parseGridRange(
+      testGridContainerProperties(
+        [],
+        [
+          gridCSSNumber(cssNumber(1, 'fr'), 'foo'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'bar'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'baz'),
+        ],
+      ),
+      'row',
+      'WRONG',
+    )
+    expect(got).toEqual(left('missing grid item start'))
+  })
+  it('can parse a line range', async () => {
+    const got = parseGridRange(
+      testGridContainerProperties(
+        [],
+        [
+          gridCSSNumber(cssNumber(1, 'fr'), 'foo'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'bar'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'baz'),
+        ],
+      ),
+      'row',
+      'bar / baz',
+    )
+    expect(got).toEqual(right(gridRange(gridPositionValue(2), gridPositionValue(3))))
+  })
+  it('can parse a line / unit mixed range', async () => {
+    const got = parseGridRange(
+      testGridContainerProperties(
+        [],
+        [
+          gridCSSNumber(cssNumber(1, 'fr'), 'foo'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'bar'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'baz'),
+        ],
+      ),
+      'row',
+      'bar / 3',
+    )
+    expect(got).toEqual(right(gridRange(gridPositionValue(2), gridPositionValue(3))))
+  })
+  it('can parse a numerical span', async () => {
+    const got = parseGridRange(testGridContainerProperties([], []), 'row', 'span 2')
+    expect(got).toEqual(right(gridRange(gridSpanNumeric(2), null)))
+  })
+  it('can parse a numerical span (flipped)', async () => {
+    const got = parseGridRange(testGridContainerProperties([], []), 'row', '2 span')
+    expect(got).toEqual(right(gridRange(gridSpanNumeric(2), null)))
+  })
+  it('can parse an area span', async () => {
+    const got = parseGridRange(testGridContainerProperties([], []), 'row', 'span some-area')
+    expect(got).toEqual(right(gridRange(gridSpanArea('some-area'), null)))
+  })
+  it('can parse an area span (flipped)', async () => {
+    const got = parseGridRange(testGridContainerProperties([], []), 'row', 'some-area span')
+    expect(got).toEqual(right(gridRange(gridSpanArea('some-area'), null)))
+  })
+  it('can parse a span numerical range', async () => {
+    const got = parseGridRange(testGridContainerProperties([], []), 'row', 'span 2 / span 3')
+    expect(got).toEqual(right(gridRange(gridSpanNumeric(2), gridSpanNumeric(3))))
+  })
+  it('can parse an area span range', async () => {
+    const got = parseGridRange(
+      testGridContainerProperties([], []),
+      'row',
+      'span some-area / span some-other-area',
+    )
+    expect(got).toEqual(
+      right(gridRange(gridSpanArea('some-area'), gridSpanArea('some-other-area'))),
+    )
+  })
+  it('can parse a mixed span range', async () => {
+    const got = parseGridRange(
+      testGridContainerProperties([], []),
+      'row',
+      'span some-area / span 3',
+    )
+    expect(got).toEqual(right(gridRange(gridSpanArea('some-area'), gridSpanNumeric(3))))
+  })
+  it('can parse a mixed span and numerical range', async () => {
+    const got = parseGridRange(testGridContainerProperties([], []), 'row', 'span some-area / 3')
+    expect(got).toEqual(right(gridRange(gridSpanArea('some-area'), gridPositionValue(3))))
+  })
+  it('can parse a mixed span and line range', async () => {
+    const got = parseGridRange(
+      testGridContainerProperties(
+        [],
+        [
+          gridCSSNumber(cssNumber(1, 'fr'), 'foo'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'bar'),
+          gridCSSNumber(cssNumber(1, 'fr'), 'baz'),
+        ],
+      ),
+      'row',
+      'span some-area / bar',
+    )
+    expect(got).toEqual(right(gridRange(gridSpanArea('some-area'), gridPositionValue(2))))
   })
 })

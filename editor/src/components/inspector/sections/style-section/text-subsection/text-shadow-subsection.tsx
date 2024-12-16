@@ -1,23 +1,31 @@
 import React from 'react'
-import { animated, SpringValue } from 'react-spring'
+import type { SpringValue } from 'react-spring'
+import { animated } from 'react-spring'
 import { BooleanControl } from '../../../controls/boolean-control'
 import { ColorControl } from '../../../controls/color-control'
-import { ControlStatus, ControlStyles } from '../../../common/control-status'
+import type { ControlStatus } from '../../../common/control-status'
+import { type ControlStyles } from '../../../common/control-styles'
 import { PropertyRow, PropertyRowHeightWithLabel } from '../../../widgets/property-row'
 import { useArraySuperControl } from '../../../controls/array-supercontrol'
-import {
+import type {
   CSSColor,
   CSSTextShadow,
   CSSTextShadows,
-  defaultTextShadow,
   CSSNumber,
-  cssNumber,
   EmptyInputValue,
+} from '../../../common/css-utils'
+import {
+  defaultTextShadow,
+  cssNumber,
   fallbackOnEmptyInputValueToCSSEmptyValue,
   fallbackOnEmptyInputValueToCSSDefaultEmptyValue,
 } from '../../../common/css-utils'
 import { useInspectorStyleInfo, useIsSubSectionVisible } from '../../../common/property-path-hooks'
-import { stopPropagation } from '../../../common/inspector-utils'
+import {
+  RemovePropertyButton,
+  stopPropagation,
+  useGetSubsectionHeaderStyle,
+} from '../../../common/inspector-utils'
 import { FakeUnknownArrayItem } from '../../../controls/unknown-array-item'
 import { InspectorContextMenuWrapper } from '../../../../context-menu-wrapper'
 import { addOnUnsetValues } from '../../../common/context-menu-items'
@@ -29,9 +37,9 @@ import {
   InspectorSubsectionHeader,
   FlexRow,
   Icons,
-  InspectorSectionIcons,
+  Icn,
+  UtopiaTheme,
 } from '../../../../../uuiui'
-import { betterReactMemo } from '../../../../../uuiui-deps'
 
 function getIndexedToggleTextShadowEnabled(index: number) {
   return function indexedToggleTextShadowEnabled(
@@ -133,31 +141,25 @@ type TextShadowItemProps = {
 
 const zeroBlurRadius = cssNumber(0, 'px')
 
-const TextShadowItem = betterReactMemo<TextShadowItemProps>('TextShadowItem', (props) => {
+const TextShadowItem = React.memo<TextShadowItemProps>((props) => {
   const [enabledSubmitValue] = props.useSubmitValueFactory(
     getIndexedToggleTextShadowEnabled(props.index),
   )
   const [colorSubmitValue, colorTransientSubmitValue] = props.useSubmitValueFactory(
     getIndexedUpdateTextShadowColor(props.index),
   )
-  const [
-    offsetXSubmitValue,
-    offsetXTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateTextShadowOffsetX(props.index)),
-  )
-  const [
-    offsetYSubmitValue,
-    offsetYTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateTextShadowOffsetY(props.index)),
-  )
-  const [
-    blurRadiusSubmitValue,
-    blurRadiusTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateTextShadowBlurRadius(props.index)),
-  )
+  const [offsetXSubmitValue, offsetXTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateTextShadowOffsetX(props.index)),
+    )
+  const [offsetYSubmitValue, offsetYTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateTextShadowOffsetY(props.index)),
+    )
+  const [blurRadiusSubmitValue, blurRadiusTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateTextShadowBlurRadius(props.index)),
+    )
   const [deleteTextShadowItemSubmitValue] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
     props.useSubmitValueFactory(getIndexedSpliceTextShadow(props.index)),
   )
@@ -174,8 +176,7 @@ const TextShadowItem = betterReactMemo<TextShadowItemProps>('TextShadowItem', (p
     <PropertyRow
       key={props.index}
       style={{
-        gridTemplateColumns: '12px 28px repeat(3, 1fr) 20px',
-        gridColumnGap: 8,
+        gridTemplateColumns: `12px 28px 1fr 1fr 1fr ${UtopiaTheme.layout.inputHeight.default}px`,
       }}
     >
       <BooleanControl
@@ -204,7 +205,7 @@ const TextShadowItem = betterReactMemo<TextShadowItemProps>('TextShadowItem', (p
       <NumberInput
         style={{ gridColumn: '3 / span 1' }}
         value={props.value.offsetX}
-        DEPRECATED_labelBelow='x'
+        innerLabel='X'
         id={`textShadow-offsetX-${props.index}`}
         testId={`textShadow-offsetX-${props.index}`}
         onSubmitValue={offsetXSubmitValue}
@@ -213,11 +214,12 @@ const TextShadowItem = betterReactMemo<TextShadowItemProps>('TextShadowItem', (p
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='Length'
         defaultUnitToHide={'px'}
+        stepSize={0.1}
       />
       <NumberInput
         style={{ gridColumn: '4 / span 1' }}
         value={props.value.offsetY}
-        DEPRECATED_labelBelow='y'
+        innerLabel='Y'
         id={`textShadow-offsetY-${props.index}`}
         testId={`textShadow-offsetY-${props.index}`}
         onSubmitValue={offsetYSubmitValue}
@@ -226,11 +228,12 @@ const TextShadowItem = betterReactMemo<TextShadowItemProps>('TextShadowItem', (p
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='Length'
         defaultUnitToHide={'px'}
+        stepSize={0.1}
       />
       <NumberInput
         style={{ gridColumn: '5 / span 1' }}
         value={props.value.blurRadius == null ? zeroBlurRadius : props.value.blurRadius.value}
-        DEPRECATED_labelBelow='blur'
+        innerLabel='B'
         id={`textShadow-blurRadius-${props.index}`}
         testId={`textShadow-blurRadius-${props.index}`}
         onSubmitValue={blurRadiusSubmitValue}
@@ -239,15 +242,16 @@ const TextShadowItem = betterReactMemo<TextShadowItemProps>('TextShadowItem', (p
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='Length'
         defaultUnitToHide={'px'}
+        stepSize={0.1}
       />
-      <SquareButton highlight onMouseDown={removeShadow} style={{ marginTop: 1 }}>
-        <Icons.Minus />
+      <SquareButton highlight onMouseDown={removeShadow}>
+        <Icons.SmallMinus />
       </SquareButton>
     </PropertyRow>
   )
 })
 
-export const TextShadowSubsection = betterReactMemo('TextShadowSubsection', () => {
+export const TextShadowSubsection = React.memo(() => {
   const {
     value: textShadowsValue,
     controlStatus,
@@ -255,6 +259,7 @@ export const TextShadowSubsection = betterReactMemo('TextShadowSubsection', () =
     onUnsetValues,
     onSubmitValue,
     useSubmitValueFactory,
+    propertyStatus,
   } = useInspectorStyleInfo('textShadow', undefined, (transformedType: CSSTextShadows) => {
     if (Array.isArray(transformedType) && transformedType.length === 0) {
       return {}
@@ -275,10 +280,6 @@ export const TextShadowSubsection = betterReactMemo('TextShadowSubsection', () =
     PropertyRowHeightWithLabel,
   )
 
-  const unsetTextShadows = React.useCallback(() => {
-    onUnsetValues()
-  }, [onUnsetValues])
-
   const contextMenuItems = utils.stripNulls([
     textShadowsValue.length > 0 ? addOnUnsetValues(['textShadow'], onUnsetValues) : null,
   ])
@@ -289,6 +290,8 @@ export const TextShadowSubsection = betterReactMemo('TextShadowSubsection', () =
     insertTextShadowItemSubmitValue(null)
   }, [insertTextShadowItemSubmitValue])
 
+  const headerStyle = useGetSubsectionHeaderStyle(controlStatus)
+
   if (isVisible) {
     return (
       <InspectorContextMenuWrapper
@@ -296,19 +299,27 @@ export const TextShadowSubsection = betterReactMemo('TextShadowSubsection', () =
         items={contextMenuItems}
         data={null}
       >
-        <InspectorSubsectionHeader>
+        <InspectorSubsectionHeader style={headerStyle}>
           <FlexRow
             style={{
               flexGrow: 1,
               gap: 8,
             }}
           >
-            <InspectorSectionIcons.TextShadow />
             <span>Text Shadow</span>
           </FlexRow>
-          <SquareButton highlight onMouseDown={insertShadow}>
-            <Icons.Plus style={{ paddingTop: 1 }} />
-          </SquareButton>
+          {propertyStatus.overwritable ? (
+            <FlexRow>
+              <RemovePropertyButton
+                testId='inspector-text-shadow-remove-all'
+                onUnsetValues={onUnsetValues}
+                propertySet={propertyStatus.set}
+              />
+              <SquareButton highlight onMouseDown={insertShadow}>
+                <Icons.SmallPlus />
+              </SquareButton>
+            </FlexRow>
+          ) : null}
         </InspectorSubsectionHeader>
         <div
           style={{

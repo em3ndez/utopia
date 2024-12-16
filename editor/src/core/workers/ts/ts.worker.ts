@@ -1,4 +1,5 @@
-import { OutgoingWorkerMessage } from '../common/worker-types'
+import '../../../vite-shims'
+import type { OutgoingWorkerMessage } from '../common/worker-types'
 import { handleMessage } from './ts-worker'
 
 const ctx: Worker = self as any

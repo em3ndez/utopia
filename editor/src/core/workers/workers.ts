@@ -1,6 +1,6 @@
-import { TypeDefinitions } from '../shared/npm-dependency-types'
+import type { TypeDefinitions } from '../shared/npm-dependency-types'
 import { createLinterRequestMessage } from './linter/linter-worker'
-import { createLinterWorker, createParserPrinterWorker, createWatchdogWorker } from './utils'
+import { createLinterWorker, createParserPrinterWorker, createWatchdogWorker } from 'worker-imports'
 import {
   createWatchdogInitMessage,
   createHeartbeatResponseMessage,
@@ -9,16 +9,19 @@ import {
   createWatchdogTerminateMessage,
 } from './watchdog-worker'
 import {
-  UtopiaTsWorkers,
-  FileContent,
-  createParsePrintFilesRequest,
-  ParseOrPrint,
+  type UtopiaTsWorkers,
+  type FileContent,
+  type ParsePrintFilesRequest,
+  createClearParseCacheMessage,
 } from './common/worker-types'
-import { ProjectContentTreeRoot } from '../../components/assets'
+import type { ProjectContentTreeRoot } from '../../components/assets'
+import { FakeParserPrinterWorker } from './test-workers'
+import type { ParseCacheOptions } from '../shared/parse-cache-utils'
 
 export class UtopiaTsWorkersImplementation implements UtopiaTsWorkers {
+  private parserArrayCounter = 0
   constructor(
-    private parserPrinterWorker: ParserPrinterWorker,
+    private parserPrinterWorkerArray: ParserPrinterWorker[],
     private linterWorker: LinterWorker,
     private watchdogWorker: WatchdogWorker,
   ) {}
@@ -27,16 +30,34 @@ export class UtopiaTsWorkersImplementation implements UtopiaTsWorkers {
     this.linterWorker.sendLinterRequestMessage(filename, content)
   }
 
-  sendParsePrintMessage(files: Array<ParseOrPrint>): void {
-    this.parserPrinterWorker.sendParsePrintMessage(files)
+  getNextParserPrinterWorker(): ParserPrinterWorker {
+    const parserPrinterWorker = this.parserPrinterWorkerArray[this.parserArrayCounter]
+    this.parserArrayCounter = (this.parserArrayCounter + 1) % this.parserPrinterWorkerArray.length
+    return parserPrinterWorker
   }
 
-  addParserPrinterEventListener(handler: (e: MessageEvent) => void): void {
-    this.parserPrinterWorker.addParseFileResultEventListener(handler)
+  sendParsePrintMessage(request: ParsePrintFilesRequest, worker: ParserPrinterWorker): void {
+    worker.sendParsePrintMessage(request)
   }
 
-  removeParserPrinterEventListener(handler: (e: MessageEvent) => void): void {
-    this.parserPrinterWorker.removeParseFileResultEventListener(handler)
+  sendClearParseCacheMessage(parsingCacheOptions: ParseCacheOptions): void {
+    this.parserPrinterWorkerArray.forEach((worker) => {
+      worker.sendClearParseCacheMessage(parsingCacheOptions)
+    })
+  }
+
+  addParserPrinterEventListener(
+    handler: (e: MessageEvent) => void,
+    worker: ParserPrinterWorker,
+  ): void {
+    worker.addParseFileResultEventListener(handler)
+  }
+
+  removeParserPrinterEventListener(
+    handler: (e: MessageEvent) => void,
+    worker: ParserPrinterWorker,
+  ): void {
+    worker.removeParseFileResultEventListener(handler)
   }
 
   addLinterResultEventListener(handler: (e: MessageEvent) => void): void {
@@ -61,7 +82,9 @@ export class UtopiaTsWorkersImplementation implements UtopiaTsWorkers {
 }
 
 export interface ParserPrinterWorker {
-  sendParsePrintMessage: (files: Array<ParseOrPrint>) => void
+  sendParsePrintMessage: (request: ParsePrintFilesRequest) => void
+
+  sendClearParseCacheMessage: (parsingCacheOptions: ParseCacheOptions) => void
 
   addParseFileResultEventListener(handler: (e: MessageEvent) => void): void
 
@@ -74,8 +97,12 @@ export class RealParserPrinterWorker implements ParserPrinterWorker {
     this.worker = createParserPrinterWorker()
   }
 
-  sendParsePrintMessage(files: Array<ParseOrPrint>): void {
-    this.worker.postMessage(createParsePrintFilesRequest(files))
+  sendParsePrintMessage(request: ParsePrintFilesRequest): void {
+    this.worker.postMessage(request)
+  }
+
+  sendClearParseCacheMessage(parsingCacheOptions: ParseCacheOptions): void {
+    this.worker.postMessage(createClearParseCacheMessage(parsingCacheOptions))
   }
 
   addParseFileResultEventListener(handler: (e: MessageEvent) => void): void {
@@ -182,6 +209,10 @@ export class RealWatchdogWorker implements WatchdogWorker {
 }
 
 export class MockUtopiaTsWorkers implements UtopiaTsWorkers {
+  getNextParserPrinterWorker(): ParserPrinterWorker {
+    return new FakeParserPrinterWorker()
+  }
+
   sendInitMessage(
     _typeDefinitions: TypeDefinitions,
     _projectContents: ProjectContentTreeRoot,
@@ -193,7 +224,11 @@ export class MockUtopiaTsWorkers implements UtopiaTsWorkers {
     // empty
   }
 
-  sendParsePrintMessage(files: Array<ParseOrPrint>): void {
+  sendParsePrintMessage(request: ParsePrintFilesRequest): void {
+    // empty
+  }
+
+  sendClearParseCacheMessage(): void {
     // empty
   }
 

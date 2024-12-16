@@ -1,166 +1,137 @@
-import {
-  NumberControlDescription,
-  EnumControlDescription,
-  BooleanControlDescription,
-  StringControlDescription,
-  ColorControlDescription,
-  ImageControlDescription,
-  ComponentInstanceDescription,
-  ArrayControlDescription,
-  EventHandlerControlDescription,
-  SliderControlDescription,
-  PopUpListControlDescription,
-  OptionsControlDescription,
-} from 'utopia-api'
-import { getDescriptionUnsetOptionalFields } from './property-controls-utils'
+import type { ProjectContentTreeRoot } from '../../components/assets'
+import { addFileToProjectContents } from '../../components/assets'
+import type {
+  ComponentDescriptor,
+  PropertyControlsInfo,
+} from '../../components/custom-code/code-file'
+import { componentDescriptorFromDescriptorFile } from '../../components/custom-code/code-file'
+import { simpleDefaultProject } from '../../sample-projects/sample-project-utils'
+import { parseProjectContents } from '../../sample-projects/sample-project-utils.test-utils'
+import { codeFile } from '../shared/project-file-types'
+import { assertNever } from '../shared/utils'
+import { getComponentDescriptorForTarget } from './property-controls-utils'
+import * as EP from '../shared/element-path'
 
-function checkSameArrayElementsAndLength<T>(value: Array<T>, checkAgainst: Array<T>): void {
-  expect(value).toEqual(expect.arrayContaining(checkAgainst))
-  expect(value).toHaveLength(checkAgainst.length)
+describe('getComponentDescriptorForTarget', () => {
+  function getProjectContents(mappedPath: 'mapped-path' | 'regular-path'): ProjectContentTreeRoot {
+    let baseProjectContents: ProjectContentTreeRoot = simpleDefaultProject().projectContents
+    baseProjectContents = addFileToProjectContents(
+      baseProjectContents,
+      '/jsconfig.json',
+      codeFile(
+        `{
+  "compilerOptions": {
+    "checkJs": true,
+    "jsx": "react-jsx",
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "~/*": ["app/*"]
+    }
+  },
+  "include": ["./**/*.d.ts", "./**/*.js", "./**/*.jsx"]
 }
-
-describe('getDescriptionUnsetOptionalFields', () => {
-  it('handles number descriptions', () => {
-    const numberDescription: NumberControlDescription = {
-      type: 'number',
-      defaultValue: 9,
-      step: 5,
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(numberDescription), [
-      'min',
-      'title',
-      'max',
-      'unit',
-      'displayStepper',
-    ])
-  })
-  it('handles enum descriptions', () => {
-    const enumDescription: EnumControlDescription = {
-      type: 'enum',
-      options: ['1', true, 5],
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(enumDescription), [
-      'title',
-      'defaultValue',
-      'optionTitles',
-      'displaySegmentedControl',
-    ])
-  })
-  it('handles boolean descriptions', () => {
-    const booleanDescription: BooleanControlDescription = {
-      type: 'boolean',
-      enabledTitle: 'yesss',
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(booleanDescription), [
-      'title',
-      'defaultValue',
-      'disabledTitle',
-    ])
-  })
-  it('handles string descriptions', () => {
-    const stringDescription: StringControlDescription = {
-      type: 'string',
-      placeholder: 'Enter text',
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(stringDescription), [
-      'title',
-      'defaultValue',
-      'obscured',
-    ])
-  })
-  it('handles color descriptions', () => {
-    const colorDescription: ColorControlDescription = {
-      type: 'color',
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(colorDescription), [
-      'title',
-      'defaultValue',
-    ])
-  })
-  it('handles image descriptions', () => {
-    const imageDescription: ImageControlDescription = {
-      type: 'image',
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(imageDescription), ['title'])
-  })
-  it('handles componentinstance descriptions', () => {
-    const componentInstanceDescription: ComponentInstanceDescription = {
-      type: 'componentinstance',
-    }
-    checkSameArrayElementsAndLength(
-      getDescriptionUnsetOptionalFields(componentInstanceDescription),
-      ['title'],
+`,
+        null,
+      ),
     )
-  })
-  it('handles array descriptions', () => {
-    const arrayDescription: ArrayControlDescription = {
-      type: 'array',
-      maxCount: 10,
-      propertyControl: {
-        type: 'string',
-      },
+    baseProjectContents = addFileToProjectContents(
+      baseProjectContents,
+      '/app/components.js',
+      codeFile(
+        `
+import * as React from 'react'
+export const Component = () => {
+  return <div data-uid='component-div' />
+}
+`,
+        null,
+      ),
+    )
+    switch (mappedPath) {
+      case 'mapped-path':
+        baseProjectContents = addFileToProjectContents(
+          baseProjectContents,
+          '/src/app.js',
+          codeFile(
+            `
+import * as React from 'react'
+import { Component } from '~/components'
+export const App = (props) => {
+  return (
+    <div
+      data-uid='div'
+      style={{ width: '100%', height: '100%', backgroundcolor: '#ffffff', position: 'relative' }}
+    >
+      <Component data-uid='component' />
+    </div>
+  )
+}`,
+            null,
+          ),
+        )
+        break
+      case 'regular-path':
+        baseProjectContents = addFileToProjectContents(
+          baseProjectContents,
+          '/src/app.js',
+          codeFile(
+            `
+import * as react from 'react'
+import { Component } from '/app/components'
+export const App = (props) => {
+  return (
+    <div
+      data-uid='div'
+      style={{ width: '100%', height: '100%', backgroundcolor: '#ffffff', position: 'relative' }}
+    >
+      <Component data-uid='component' />
+    </div>
+  )
+}`,
+            null,
+          ),
+        )
+        break
+      default:
+        assertNever(mappedPath)
     }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(arrayDescription), [
-      'title',
-      'defaultValue',
-    ])
+
+    return parseProjectContents(baseProjectContents)
+  }
+  const componentDescriptor: ComponentDescriptor = {
+    properties: {},
+    supportsChildren: true,
+    preferredChildComponents: [],
+    variants: [],
+    source: componentDescriptorFromDescriptorFile('/components.utopia.js', null),
+    focus: 'default',
+    inspector: { type: 'hidden' },
+    emphasis: 'regular',
+    icon: 'component',
+    label: 'Component',
+  }
+  const propertyControlsInfo: PropertyControlsInfo = {
+    ['/app/components']: {
+      ['Component']: componentDescriptor,
+    },
+  }
+  it('works with the regular path', () => {
+    const projectContents = getProjectContents('regular-path')
+    const actualResult = getComponentDescriptorForTarget(
+      { propertyControlsInfo, projectContents },
+      EP.fromString(`sample-storyboard/sample-scene/sample-app:div/component`),
+    )
+    expect(actualResult).toEqual(componentDescriptor)
   })
-  it('handles eventhandler descriptions', () => {
-    const eventHandlerDescription: EventHandlerControlDescription = {
-      type: 'eventhandler',
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(eventHandlerDescription), [
-      'title',
-    ])
-  })
-  it('handles slider descriptions', () => {
-    const sliderDescription: SliderControlDescription = {
-      type: 'slider',
-      min: 1,
-      max: 1,
-      step: 1,
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(sliderDescription), [
-      'title',
-      'defaultValue',
-    ])
-  })
-  it('handles popuplist descriptions', () => {
-    const popupListDescription: PopUpListControlDescription = {
-      type: 'popuplist',
-      defaultValue: 1,
-      options: [
-        {
-          label: 'First',
-          value: 1,
-        },
-        {
-          label: 'Second',
-          value: 2,
-        },
-      ],
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(popupListDescription), [
-      'title',
-    ])
-  })
-  it('handles options descriptions', () => {
-    const optionsDescription: OptionsControlDescription = {
-      type: 'options',
-      title: 'Options',
-      options: [
-        {
-          label: 'First',
-          value: 1,
-        },
-        {
-          label: 'Second',
-          value: 2,
-        },
-      ],
-    }
-    checkSameArrayElementsAndLength(getDescriptionUnsetOptionalFields(optionsDescription), [
-      'defaultValue',
-    ])
+  it('works with a mapped path', () => {
+    const projectContents = getProjectContents('mapped-path')
+    const actualResult = getComponentDescriptorForTarget(
+      { propertyControlsInfo, projectContents },
+      EP.fromString(`sample-storyboard/sample-scene/sample-app:div/component`),
+    )
+    expect(actualResult).toEqual(componentDescriptor)
   })
 })

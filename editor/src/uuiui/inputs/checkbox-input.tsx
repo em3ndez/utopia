@@ -1,14 +1,13 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import composeRefs from '@seznam/compose-react-refs'
 import React from 'react'
 import { jsx } from '@emotion/react'
-import {
-  ControlStatus,
-  getControlStyles,
-  ControlStyles,
-} from '../../components/inspector/common/control-status'
+import type { ControlStatus } from '../../components/inspector/common/control-status'
+import type { ControlStyles } from '../../components/inspector/common/control-styles'
+import { getControlStyles } from '../../components/inspector/common/control-styles'
 import { useColorTheme, UtopiaTheme } from '../styles/theme'
-import { betterReactMemo } from '../../uuiui-deps'
+import { useControlsDisabledInSubtree } from '../utilities/disable-subtree'
 
 export interface CheckboxInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   controlStatus?: ControlStatus
@@ -16,19 +15,27 @@ export interface CheckboxInputProps extends React.InputHTMLAttributes<HTMLInputE
 }
 
 // TODO FIX MY REFs
-export const CheckboxInput = betterReactMemo(
-  'CheckboxInput',
+export const CheckboxInput = React.memo(
   React.forwardRef<HTMLInputElement, CheckboxInputProps>(
     ({ controlStatus = 'simple', focusOnMount = false, style, ...props }, propsRef) => {
       const ref = React.useRef<HTMLInputElement>(null)
 
       const controlStyles: ControlStyles = getControlStyles(controlStatus)
 
+      const controlsDisabled = useControlsDisabledInSubtree()
+      const disabled = !controlStyles.interactive || controlsDisabled
+
       React.useEffect(() => {
         if (ref.current != null) {
           ref.current.indeterminate = controlStyles.mixed
         }
       })
+
+      React.useEffect(() => {
+        if (focusOnMount && ref.current != null) {
+          ref.current.focus()
+        }
+      }, [focusOnMount, ref])
 
       const colorTheme = useColorTheme()
       const checked =
@@ -40,14 +47,14 @@ export const CheckboxInput = betterReactMemo(
         <input
           {...props}
           type='checkbox'
-          disabled={!controlStyles.interactive}
+          disabled={disabled}
           style={style}
           css={{
             WebkitAppearance: 'none',
             outline: 'none',
             margin: '5px 2px',
             boxShadow: `0 0 0 1px ${controlStyles.borderColor}`,
-            backgroundColor: controlStyles.backgroundColor,
+            backgroundColor: colorTheme.bg5.value,
             borderRadius: UtopiaTheme.inputBorderRadius,
             width: 12,
             height: 12,

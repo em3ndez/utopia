@@ -1,77 +1,76 @@
 import React from 'react'
+import { usePubSubAtomWriteOnly } from '../../core/shared/atom-with-pub-sub'
+import { useErrorOverlayRecords } from '../../core/shared/runtime-report-logs'
+import { NO_OP } from '../../core/shared/utils'
 import { EditorCanvas } from '../../templates/editor-canvas'
-import { ReactErrorOverlay } from '../../third-party/react-error-overlay/react-error-overlay'
-import { setFocus } from '../common/actions'
-import { openCodeEditorFile, setSafeMode } from '../editor/actions/action-creators'
-import {
-  createCanvasModelKILLME,
-  getAllCodeEditorErrors,
-  getOpenUIJSFile,
-  getOpenUIJSFileKey,
-  parseFailureAsErrorMessages,
-  NavigatorWidthAtom,
-} from '../editor/store/editor-state'
-import { useEditorState } from '../editor/store/store-hook'
-import ErrorOverlay from '../../third-party/react-error-overlay/components/ErrorOverlay'
 import CloseButton from '../../third-party/react-error-overlay/components/CloseButton'
-import { fastForEach, NO_OP } from '../../core/shared/utils'
+import ErrorOverlay from '../../third-party/react-error-overlay/components/ErrorOverlay'
 import Footer from '../../third-party/react-error-overlay/components/Footer'
 import Header from '../../third-party/react-error-overlay/components/Header'
-import { FlexColumn, Button, UtopiaTheme, FlexRow } from '../../uuiui'
-import { betterReactMemo } from '../../uuiui-deps'
-import { useReadOnlyRuntimeErrors } from '../../core/shared/runtime-report-logs'
-import StackFrame from '../../third-party/react-error-overlay/utils/stack-frame'
-import { ModeSelectButtons } from './mode-select-buttons'
-import { usePubSubAtomReadOnly } from '../../core/shared/atom-with-pub-sub'
-import { ErrorMessage } from '../../core/shared/error-messages'
+import { Button, FlexColumn, FlexRow, UtopiaTheme } from '../../uuiui'
+import { clearPostActionData, setSafeMode } from '../editor/actions/action-creators'
+import { useDispatch } from '../editor/store/dispatch-context'
+import {
+  CanvasSizeAtom,
+  createCanvasModelKILLME,
+  getAllCodeEditorErrors,
+} from '../editor/store/editor-state'
+import { Substores, useEditorState } from '../editor/store/store-hook'
+import { shouldShowErrorOverlay } from './canvas-utils'
+import { FloatingPostActionMenu } from './controls/select-mode/post-action-menu'
 
-export function filterOldPasses(errorMessages: Array<ErrorMessage>): Array<ErrorMessage> {
-  let passTimes: { [key: string]: number } = {}
-  fastForEach(errorMessages, (errorMessage) => {
-    if (errorMessage.passTime != null) {
-      if (errorMessage.source in passTimes) {
-        const existingPassCount = passTimes[errorMessage.source]
-        if (errorMessage.passTime > existingPassCount) {
-          passTimes[errorMessage.source] = errorMessage.passTime
-        }
-      } else {
-        passTimes[errorMessage.source] = errorMessage.passTime
-      }
-    }
-  })
-  return errorMessages.filter((errorMessage) => {
-    if (errorMessage.passTime == null) {
-      return true
-    } else {
-      return passTimes[errorMessage.source] === errorMessage.passTime
-    }
-  })
-}
-
-export const CanvasWrapperComponent = betterReactMemo('CanvasWrapperComponent', () => {
-  const { dispatch, editorState, derivedState } = useEditorState(
+export const CanvasWrapperComponent = React.memo(() => {
+  const dispatch = useDispatch()
+  const { editorState, derivedState, userState } = useEditorState(
+    Substores.fullStore,
     (store) => ({
-      dispatch: store.dispatch,
       editorState: store.editor,
       derivedState: store.derived,
+      userState: store.userState,
     }),
     'CanvasWrapperComponent',
   )
 
-  const fatalErrors = React.useMemo(() => {
-    return getAllCodeEditorErrors(editorState, 'fatal', true)
-  }, [editorState])
-
-  const safeMode = useEditorState((store) => {
-    return store.editor.safeMode
-  }, 'CanvasWrapperComponent safeMode')
-
-  const isNavigatorOverCanvas = useEditorState(
-    (store) => !store.editor.navigator.minimised,
-    'ErrorOverlayComponent isOverlappingWithNavigator',
+  const builtinDependencies = useEditorState(
+    Substores.builtInDependencies,
+    (store) => store.builtInDependencies,
+    'CanvasWrapperComponent builtinDependencies',
   )
 
-  const navigatorWidth = usePubSubAtomReadOnly(NavigatorWidthAtom)
+  const fatalErrors = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return getAllCodeEditorErrors(store.editor.codeEditorErrors, 'fatal', true)
+    },
+    'CanvasWrapperComponent fatalErrors',
+  )
+
+  const safeMode = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return store.editor.safeMode
+    },
+    'CanvasWrapperComponent safeMode',
+  )
+
+  const scale = useEditorState(Substores.canvas, (store) => store.editor.canvas.scale, 'scale')
+
+  const updateCanvasSize = usePubSubAtomWriteOnly(CanvasSizeAtom)
+
+  const postActionSessionInProgress = useEditorState(
+    Substores.postActionInteractionSession,
+    (store) => store.postActionInteractionSession != null,
+    'CanvasWrapperComponent postActionSessionInProgress',
+  )
+  const { errorRecords, overlayErrors } = useErrorOverlayRecords()
+  const errorOverlayShown = shouldShowErrorOverlay(errorRecords, overlayErrors)
+  const shouldDimErrorMessage = postActionSessionInProgress && errorOverlayShown
+
+  const onOverlayClick = React.useCallback(() => {
+    if (shouldDimErrorMessage) {
+      dispatch([clearPostActionData()])
+    }
+  }, [dispatch, shouldDimErrorMessage])
 
   return (
     <FlexColumn
@@ -86,103 +85,47 @@ export const CanvasWrapperComponent = betterReactMemo('CanvasWrapperComponent', 
         // ^ prevents Monaco from pushing the inspector out
       }}
     >
-      {fatalErrors.length === 0 && !safeMode ? (
-        <EditorCanvas
-          editor={editorState}
-          model={createCanvasModelKILLME(editorState, derivedState)}
-          dispatch={dispatch}
-        />
-      ) : null}
+      <EditorCanvas
+        userState={userState}
+        editor={editorState}
+        derived={derivedState}
+        model={createCanvasModelKILLME(editorState, derivedState)}
+        builtinDependencies={builtinDependencies}
+        updateCanvasSize={updateCanvasSize}
+        dispatch={dispatch}
+        shouldRenderCanvas={fatalErrors.length === 0 && !safeMode}
+      />
+
       <FlexRow
         style={{
           position: 'absolute',
           width: '100%',
           height: '100%',
           transform: 'translateZ(0)', // to keep this from tarnishing canvas render performance, we force it to a new layer
-          pointerEvents: 'none', // you need to re-enable pointerevents for the various overlays
+          pointerEvents: errorOverlayShown ? 'initial' : 'none', // you need to re-enable pointerevents for the various overlays
+          transformOrigin: 'left top',
         }}
+        onClick={onOverlayClick}
       >
         <div
           style={{
-            width: isNavigatorOverCanvas ? navigatorWidth : 0,
-          }}
-        />
-        <FlexColumn
-          style={{
-            alignSelf: 'stretch',
-            flexGrow: 1,
             position: 'relative',
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
+            zoom: `${scale * 100}%`,
+            background: `rgba(255, 255, 255, ${shouldDimErrorMessage ? 0.5 : 0})`,
           }}
         >
-          {safeMode ? <SafeModeErrorOverlay /> : <ErrorOverlayComponent />}
-          <ModeSelectButtons />
-        </FlexColumn>
+          <FloatingPostActionMenu errorOverlayShown={errorOverlayShown} />
+        </div>
       </FlexRow>
     </FlexColumn>
   )
 })
 
-interface ErrorOverlayComponentProps {}
-
-const ErrorOverlayComponent = betterReactMemo(
-  'ErrorOverlayComponent',
-  (props: ErrorOverlayComponentProps) => {
-    const dispatch = useEditorState((store) => store.dispatch, 'ErrorOverlayComponent dispatch')
-    const utopiaParserErrors = useEditorState((store) => {
-      return parseFailureAsErrorMessages(
-        getOpenUIJSFileKey(store.editor),
-        getOpenUIJSFile(store.editor),
-      )
-    }, 'ErrorOverlayComponent utopiaParserErrors')
-    const fatalCodeEditorErrors = useEditorState((store) => {
-      return getAllCodeEditorErrors(store.editor, 'error', true)
-    }, 'ErrorOverlayComponent fatalCodeEditorErrors')
-
-    const runtimeErrors = useReadOnlyRuntimeErrors()
-
-    const overlayErrors = React.useMemo(() => {
-      return runtimeErrors.map((runtimeError) => {
-        const stackFrames =
-          runtimeError.error.stackFrames != null
-            ? runtimeError.error.stackFrames
-            : [
-                new StackFrame(
-                  'WARNING: This error has no Stack Frames, it might be coming from Utopia itself!',
-                ),
-              ]
-        return {
-          error: runtimeError.error,
-          unhandledRejection: false,
-          contextSize: 3, // magic number from react-error-overlay
-          stackFrames: stackFrames,
-        }
-      })
-    }, [runtimeErrors])
-
-    const lintErrors = fatalCodeEditorErrors.filter((e) => e.source === 'eslint')
-    // we start with the lint errors, since those show up the fastest. any subsequent error will go below in the error screen
-    const errorRecords = filterOldPasses([...lintErrors, ...utopiaParserErrors])
-
-    const onOpenFile = React.useCallback(
-      (path: string) => {
-        dispatch([openCodeEditorFile(path, true), setFocus('codeEditor')])
-      },
-      [dispatch],
-    )
-
-    return (
-      <ReactErrorOverlay
-        currentBuildErrorRecords={errorRecords}
-        currentRuntimeErrorRecords={overlayErrors}
-        onOpenFile={onOpenFile}
-        overlayOffset={0}
-      />
-    )
-  },
-)
-
-export const SafeModeErrorOverlay = betterReactMemo('SafeModeErrorOverlay', () => {
-  const dispatch = useEditorState((store) => store.dispatch, 'SafeModeErrorOverlay dispatch')
+export const SafeModeErrorOverlay = React.memo(() => {
+  const dispatch = useDispatch()
   const onTryAgain = React.useCallback(() => {
     dispatch([setSafeMode(false)], 'everyone')
   }, [dispatch])

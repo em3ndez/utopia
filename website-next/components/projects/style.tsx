@@ -4,8 +4,7 @@ import styled from '@emotion/styled'
 
 export const H2 = styled.h2({
   fontSize: 18,
-  transform: 'rotate(-1deg)',
-  fontWeight: 400,
+  fontWeight: 600,
   letterSpacing: '.2px',
 })
 

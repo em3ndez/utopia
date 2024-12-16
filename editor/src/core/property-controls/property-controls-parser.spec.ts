@@ -1,53 +1,67 @@
-import {
-  NumberControlDescription,
-  EnumControlDescription,
-  BooleanControlDescription,
-  StringControlDescription,
-  SliderControlDescription,
+import type {
+  NumberInputControlDescription,
+  CheckboxControlDescription,
+  StringInputControlDescription,
   PopUpListControlDescription,
-  OptionsControlDescription,
+  RadioControlDescription,
   ColorControlDescription,
-  ComponentInstanceDescription,
-  IgnoreControlDescription,
-  EventHandlerControlDescription,
-  ImageControlDescription,
-  StyleObjectControlDescription,
-} from 'utopia-api'
+  NoneControlDescription,
+  StyleControlsControlDescription,
+  ExpressionInputControlDescription,
+  Vector2ControlDescription,
+  Vector3ControlDescription,
+  Vector4ControlDescription,
+  EulerControlDescription,
+  Matrix3ControlDescription,
+  Matrix4ControlDescription,
+  ExpressionPopUpListControlDescription,
+  ArrayControlDescription,
+  ObjectControlDescription,
+  TupleControlDescription,
+} from 'utopia-api/core'
+import type { ParsedPropertyControls } from './property-controls-parser'
 import {
-  parseNumberControlDescription,
-  parseEnumControlDescription,
-  parseBooleanControlDescription,
-  parseStringControlDescription,
-  parseSliderControlDescription,
+  parseNumberInputControlDescription,
+  parseCheckboxControlDescription,
+  parseStringInputControlDescription,
   parsePopUpListControlDescription,
-  parseOptionsControlDescription,
+  parseRadioControlDescription,
   parseColorControlDescription,
-  parseComponentInstanceControlDescription,
-  parseControlDescription,
-  ParsedPropertyControls,
   parsePropertyControls,
-  parseIgnoreControlDescription,
-  parseEventHandlerControlDescription,
-  parseImageControlDescription,
-  parseStyleObjectControlDescription,
+  parseNoneControlDescription,
+  parseStyleControlsControlDescription,
+  parseControlDescription,
+  parseExpressionInputControlDescription,
+  parseVector2ControlDescription,
+  parseVector3ControlDescription,
+  parseVector4ControlDescription,
+  parseEulerControlDescription,
+  parseMatrix3ControlDescription,
+  parseMatrix4ControlDescription,
+  parseExpressionPopUpListControlDescription,
+  parseArrayControlDescription,
+  parseObjectControlDescription,
+  parseTupleControlDescription,
 } from './property-controls-parser'
 import { right, left, isLeft } from '../shared/either'
+import type { ParseResult } from '../../utils/value-parser-utils'
 import {
   objectFieldParseError,
   descriptionParseError,
   arrayIndexParseError,
-  ParseResult,
   ParseError,
 } from '../../utils/value-parser-utils'
 import { pick } from '../shared/object-utils'
 import { fastForEach } from '../shared/utils'
+import type { MapLike } from 'typescript'
 
-function runBaseTestSuite<T>(
+function runBaseTestSuite<T extends MapLike<any>>(
   validObject: T,
   requiredFields: Array<keyof T>,
-  invalidDefaults: unknown[],
-  defaultAllowed: boolean,
   parseFn: (value: unknown) => ParseResult<T>,
+  parseErrorDescription: string,
+  supportsRequired: 'supports-required' | 'does-not-support-required',
+  defaultValues: Array<unknown>,
 ) {
   it('parses a full value correctly', () => {
     expect(parseFn(validObject)).toEqual(right(validObject))
@@ -56,332 +70,516 @@ function runBaseTestSuite<T>(
     const value = pick(requiredFields, validObject)
     expect(parseFn(value)).toEqual(right(value))
   })
-  it('fails on an invalid title', () => {
+  it('fails on an invalid label', () => {
     const value = {
       ...validObject,
-      title: true,
+      label: true,
     }
     expect(parseFn(value)).toEqual(
-      left(objectFieldParseError('title', descriptionParseError('Value is not a string.'))),
+      left(objectFieldParseError('label', descriptionParseError('Not a string.'))),
     )
   })
   it('fails on an invalid type', () => {
     const value = {
       ...validObject,
-      type: 'ham sandwich',
+      control: 'ham sandwich',
     }
     expect(parseFn(value)).toEqual(
-      left(
-        objectFieldParseError('type', descriptionParseError('Value is not a member of an enum.')),
-      ),
+      left(objectFieldParseError('control', descriptionParseError(parseErrorDescription))),
     )
   })
-
-  if (defaultAllowed) {
-    it('fails on an invalid default', () => {
-      fastForEach(invalidDefaults, (invalidDefault) => {
-        const value = {
-          ...validObject,
-          defaultValue: invalidDefault,
-        }
-        expect(isLeft(parseFn(value))).toBeTruthy()
-      })
-    })
-  } else {
-    it('ignores a default value', () => {
+  if (supportsRequired === 'supports-required') {
+    it('fails on an invalid value for the required flag', () => {
       const value = {
         ...validObject,
-        defaultValue: 'anything really',
+        required: 'honk',
       }
-
-      expect(parseFn(value)).toEqual(right(validObject))
+      expect(parseFn(value)).toEqual(
+        left(objectFieldParseError('required', descriptionParseError('Not a boolean.'))),
+      )
+    })
+    it('succeeds on a true for the required flag', () => {
+      const value = {
+        ...validObject,
+        required: true,
+      }
+      expect(parseFn(value)).toEqual(right(value))
+    })
+    it('succeeds on a false for the required flag', () => {
+      const value = {
+        ...validObject,
+        required: false,
+      }
+      expect(parseFn(value)).toEqual(right(value))
+    })
+  }
+  for (const defaultValue of defaultValues) {
+    it(`parses with a defaultValue of ${JSON.stringify(defaultValue)}`, () => {
+      const value = {
+        ...validObject,
+        defaultValue: defaultValue,
+      }
+      expect(parseFn(value)).toEqual(right(value))
     })
   }
 }
 
-const validBooleanControlDescriptionValue: BooleanControlDescription = {
-  title: 'Boolean Control',
-  type: 'boolean',
-  defaultValue: true,
-  disabledTitle: 'Value is not set.',
+const validCheckboxControlDescriptionValue: CheckboxControlDescription = {
+  label: 'Checkbox Control',
+  control: 'checkbox',
+  disabledTitle: 'Not set.',
   enabledTitle: 'Value is set',
+  visibleByDefault: true,
 }
 
-describe('parseBooleanControlDescription', () => {
+describe('parseCheckboxControlDescription', () => {
   runBaseTestSuite(
-    validBooleanControlDescriptionValue,
-    ['type'],
-    ['hat'],
-    true,
-    parseBooleanControlDescription,
+    validCheckboxControlDescriptionValue,
+    ['control'],
+    parseCheckboxControlDescription,
+    'Value was not checkbox.',
+    'supports-required',
+    [true, false],
   )
 })
 
 const validColorControlDescriptionValue: ColorControlDescription = {
-  title: 'Slider Control',
-  type: 'color',
-  defaultValue: '#FFFFFF',
+  label: 'Slider Control',
+  control: 'color',
+  visibleByDefault: true,
 }
 
 describe('parseColorControlDescription', () => {
   runBaseTestSuite(
     validColorControlDescriptionValue,
-    ['type'],
-    ['hat', 9],
-    true,
+    ['control'],
     parseColorControlDescription,
+    'Value was not color.',
+    'supports-required',
+    ['blue', '#aabbcc'],
   )
 })
 
-const validComponentInstanceControlDescriptionValue: ComponentInstanceDescription = {
-  title: 'Component Instance Control',
-  type: 'componentinstance',
+const validExpressionInputControlDescriptionValue: ExpressionInputControlDescription = {
+  label: 'Expression Input Control',
+  control: 'expression-input',
+  visibleByDefault: true,
 }
 
-describe('parseComponentInstanceControlDescription', () => {
+describe('parseExpressionInputControlDescription', () => {
   runBaseTestSuite(
-    validComponentInstanceControlDescriptionValue,
-    ['type'],
-    [],
-    false,
-    parseComponentInstanceControlDescription,
+    validExpressionInputControlDescriptionValue,
+    ['control'],
+    parseExpressionInputControlDescription,
+    'Value was not expression-input.',
+    'supports-required',
+    ['something'],
   )
-})
-
-const validEnumControlDescriptionValue: EnumControlDescription = {
-  title: 'Enum Control',
-  type: 'enum',
-  defaultValue: 5,
-  options: ['hat', 5, true, undefined, null],
-  optionTitles: ['first title', 'second title'],
-  displaySegmentedControl: true,
-}
-
-describe('parseEnumControlDescription', () => {
-  runBaseTestSuite(
-    validEnumControlDescriptionValue,
-    ['type', 'options'],
-    [['hat']],
-    true,
-    parseEnumControlDescription,
-  )
-})
-
-const validEventHandlerControlDescriptionValue: EventHandlerControlDescription = {
-  title: 'Event Handler Control',
-  type: 'eventhandler',
-}
-
-describe('parseEventHandlerControlDescription', () => {
-  runBaseTestSuite(
-    validEventHandlerControlDescriptionValue,
-    ['type'],
-    [],
-    false,
-    parseEventHandlerControlDescription,
-  )
-})
-
-const validIgnoreControlDescriptionValue: IgnoreControlDescription = {
-  title: 'Ignore Description',
-  type: 'ignore',
-}
-
-describe('parseIgnoreControlDescription', () => {
-  runBaseTestSuite(
-    validIgnoreControlDescriptionValue,
-    ['type'],
-    [],
-    false,
-    parseIgnoreControlDescription,
-  )
-})
-
-const validImageControlDescriptionValue: ImageControlDescription = {
-  title: 'Image Control',
-  type: 'image',
-  defaultValue: 'www.somewebsite.com/iamanimage.jpg',
-}
-
-describe('parseImageControlDescription', () => {
-  runBaseTestSuite(
-    validImageControlDescriptionValue,
-    ['type'],
-    [0],
-    true,
-    parseImageControlDescription,
-  )
-})
-
-const validNumberControlDescriptionValue: NumberControlDescription = {
-  title: 'Number Title',
-  type: 'number',
-  defaultValue: 5,
-  max: 10,
-  min: 2,
-  unit: 'Some Unit',
-  step: 1,
-  displayStepper: true,
-}
-
-describe('parseNumberControlDescription', () => {
-  runBaseTestSuite(
-    validNumberControlDescriptionValue,
-    ['type'],
-    ['hat'],
-    true,
-    parseNumberControlDescription,
-  )
-})
-
-const validOptionsControlDescriptionValue: OptionsControlDescription = {
-  title: 'Pop Up List Control',
-  type: 'options',
-  defaultValue: 5,
-  options: [
-    { value: 5, label: 'Five' },
-    { value: 8, label: 'Eight' },
-  ],
-}
-
-describe('parseOptionsControlDescription', () => {
-  runBaseTestSuite(
-    validOptionsControlDescriptionValue,
-    ['type', 'options'],
-    [],
-    true,
-    parseOptionsControlDescription,
-  )
-
-  it('fails on an invalid option', () => {
-    const value = {
-      ...validOptionsControlDescriptionValue,
-      options: ['error'],
-    }
-    expect(parseOptionsControlDescription(value)).toEqual(
-      left(
-        objectFieldParseError(
-          'options',
-          arrayIndexParseError(0, descriptionParseError('Value is not an object.')),
-        ),
-      ),
-    )
-  })
 })
 
 const validPopUpListControlDescriptionValue: PopUpListControlDescription = {
-  title: 'Pop Up List Control',
-  type: 'popuplist',
-  defaultValue: 5,
+  label: 'PopUpList Control',
+  control: 'popuplist',
   options: [
-    { value: 5, label: 'Five' },
-    { value: 8, label: 'Eight' },
+    {
+      value: 'hat',
+      label: 'Hat',
+    },
+    {
+      value: 5,
+      label: 'Five',
+    },
+    {
+      value: true,
+      label: 'True',
+    },
+    {
+      value: undefined,
+      label: 'Undefined',
+    },
+    {
+      value: null,
+      label: 'Null',
+    },
   ],
+  visibleByDefault: true,
 }
 
 describe('parsePopUpListControlDescription', () => {
   runBaseTestSuite(
     validPopUpListControlDescriptionValue,
-    ['type', 'options'],
-    [],
-    true,
+    ['control', 'options'],
     parsePopUpListControlDescription,
+    'Value was not popuplist.',
+    'supports-required',
+    [
+      'something',
+      true,
+      false,
+      100,
+      undefined,
+      null,
+      {
+        value: 1,
+        label: 'Option',
+      },
+    ],
   )
-
-  it('fails on an invalid option', () => {
-    const value = {
-      ...validPopUpListControlDescriptionValue,
-      options: ['error'],
-    }
-    expect(parsePopUpListControlDescription(value)).toEqual(
-      left(
-        objectFieldParseError(
-          'options',
-          arrayIndexParseError(0, descriptionParseError('Value is not an object.')),
-        ),
-      ),
-    )
-  })
 })
 
-const validSliderControlDescriptionValue: SliderControlDescription = {
-  title: 'Slider Control',
-  type: 'slider',
-  defaultValue: 5,
-  min: 2,
-  max: 10,
-  step: 1,
+const validExpressionPopUpListControlDescriptionValue: ExpressionPopUpListControlDescription = {
+  label: 'Expression Popuplist Control',
+  control: 'expression-popuplist',
+  options: [
+    {
+      value: 0,
+      expression: 'THREE.Multiply',
+      label: 'Multiply',
+      requiredImport: {
+        source: 'three',
+        name: 'THREE',
+        type: 'star',
+      },
+    },
+    {
+      value: 1,
+      expression: 'THREE.MixOperation',
+      label: 'MixOperation',
+      requiredImport: {
+        source: 'three',
+        name: 'THREE',
+        type: 'star',
+      },
+    },
+    {
+      value: 2,
+      expression: 'THREE.AddOperation',
+      label: 'Multiply',
+      requiredImport: {
+        source: 'three',
+        name: 'THREE',
+        type: 'star',
+      },
+    },
+  ],
+  visibleByDefault: true,
 }
 
-describe('parseSliderControlDescription', () => {
+describe('parseExpressionPopUpListControlDescription', () => {
   runBaseTestSuite(
-    validSliderControlDescriptionValue,
-    ['type', 'max', 'min', 'step'],
-    ['hat'],
-    true,
-    parseSliderControlDescription,
+    validExpressionPopUpListControlDescriptionValue,
+    ['control', 'options'],
+    parseExpressionPopUpListControlDescription,
+    'Value was not expression-popuplist.',
+    'supports-required',
+    [
+      'something',
+      true,
+      false,
+      100,
+      undefined,
+      null,
+      {
+        value: 1,
+        label: 'Option',
+      },
+    ],
   )
 })
 
-const validStringControlDescriptionValue: StringControlDescription = {
-  title: 'String Control',
-  type: 'string',
-  defaultValue: 'Some text',
+const validNoneControlDescriptionValue: NoneControlDescription = {
+  label: 'None Description',
+  control: 'none',
+  visibleByDefault: true,
+}
+
+describe('parseNoneControlDescription', () => {
+  runBaseTestSuite(
+    validNoneControlDescriptionValue,
+    ['control'],
+    parseNoneControlDescription,
+    'Value was not none.',
+    'supports-required',
+    ['something', true, false, 100, undefined, null],
+  )
+})
+
+const validNumberInputControlDescriptionValue: NumberInputControlDescription = {
+  label: 'NumberInput Control',
+  control: 'number-input',
+  max: 10,
+  min: 2,
+  unit: 'Some Unit',
+  step: 1,
+  displayStepper: true,
+  visibleByDefault: true,
+}
+
+describe('parseNumberInputControlDescription', () => {
+  runBaseTestSuite(
+    validNumberInputControlDescriptionValue,
+    ['control'],
+    parseNumberInputControlDescription,
+    'Value was not number-input.',
+    'supports-required',
+    [-100, 0, 100],
+  )
+})
+
+const validRadioControlDescriptionValue: RadioControlDescription = {
+  label: 'Radio Control',
+  control: 'radio',
+  options: [
+    { value: 5, label: 'Five' },
+    { value: 8, label: 'Eight' },
+  ],
+  visibleByDefault: true,
+}
+
+describe('parseRadioControlDescription', () => {
+  runBaseTestSuite(
+    validRadioControlDescriptionValue,
+    ['control', 'options'],
+    parseRadioControlDescription,
+    'Value was not radio.',
+    'supports-required',
+    [
+      'something',
+      true,
+      false,
+      100,
+      undefined,
+      null,
+      {
+        value: 1,
+        label: 'Option',
+      },
+    ],
+  )
+})
+
+const validStringInputControlDescriptionValue: StringInputControlDescription = {
+  label: 'String Input Control',
+  control: 'string-input',
   placeholder: 'Enter text',
   obscured: true,
+  visibleByDefault: true,
+  folder: 'String Input',
 }
 
-describe('parseStringControlDescription', () => {
+describe('parseStringInputControlDescription', () => {
   runBaseTestSuite(
-    validStringControlDescriptionValue,
-    ['type'],
-    [9],
-    true,
-    parseStringControlDescription,
+    validStringInputControlDescriptionValue,
+    ['control'],
+    parseStringInputControlDescription,
+    'Value was not string-input.',
+    'supports-required',
+    ['something'],
   )
 })
 
-const validStyleObjectControlDescriptionValue: StyleObjectControlDescription = {
-  title: 'Style Object Control',
-  type: 'styleobject',
-  defaultValue: { width: 100 },
+const validStyleControlsControlDescriptionValue: StyleControlsControlDescription = {
+  label: 'Style Controls Control',
+  control: 'style-controls',
   placeholder: { height: 100 },
+  visibleByDefault: true,
 }
 
-describe('parseStyleObjectControlDescription', () => {
+describe('parseStyleControlsControlDescription', () => {
   runBaseTestSuite(
-    validStyleObjectControlDescriptionValue,
-    ['type'],
-    ['hat', 9],
-    true,
-    parseStyleObjectControlDescription,
+    validStyleControlsControlDescriptionValue,
+    ['control'],
+    parseStyleControlsControlDescription,
+    'Value was not style-controls.',
+    'supports-required',
+    [{ backgroundColor: 'red' }],
+  )
+})
+
+const validVector2ControlDescriptionValue: Vector2ControlDescription = {
+  label: 'Vector2 Control',
+  control: 'vector2',
+  visibleByDefault: true,
+}
+
+describe('parseVector2ControlDescription', () => {
+  runBaseTestSuite(
+    validVector2ControlDescriptionValue,
+    ['control'],
+    parseVector2ControlDescription,
+    'Value was not vector2.',
+    'supports-required',
+    [[100, 200]],
+  )
+})
+
+const validVector3ControlDescriptionValue: Vector3ControlDescription = {
+  label: 'Vector3 Control',
+  control: 'vector3',
+  visibleByDefault: true,
+}
+
+describe('parseVector3ControlDescription', () => {
+  runBaseTestSuite(
+    validVector3ControlDescriptionValue,
+    ['control'],
+    parseVector3ControlDescription,
+    'Value was not vector3.',
+    'supports-required',
+    [[100, 200, 300]],
+  )
+})
+
+const validVector4ControlDescriptionValue: Vector4ControlDescription = {
+  label: 'Vector4 Control',
+  control: 'vector4',
+  visibleByDefault: true,
+}
+
+describe('parseVector4ControlDescription', () => {
+  runBaseTestSuite(
+    validVector4ControlDescriptionValue,
+    ['control'],
+    parseVector4ControlDescription,
+    'Value was not vector4.',
+    'supports-required',
+    [[100, 200, 300, 400]],
+  )
+})
+
+const validEulerControlDescriptionValue: EulerControlDescription = {
+  label: 'Euler Control',
+  control: 'euler',
+  visibleByDefault: true,
+}
+
+describe('parseEulerControlDescription', () => {
+  runBaseTestSuite(
+    validEulerControlDescriptionValue,
+    ['control'],
+    parseEulerControlDescription,
+    'Value was not euler.',
+    'supports-required',
+    [[100, 200, 300, 'XYZ']],
+  )
+})
+
+const validMatrix3ControlDescriptionValue: Matrix3ControlDescription = {
+  label: 'Matrix3 Control',
+  control: 'matrix3',
+  visibleByDefault: true,
+}
+
+describe('parseMatrix3ControlDescription', () => {
+  runBaseTestSuite(
+    validMatrix3ControlDescriptionValue,
+    ['control'],
+    parseMatrix3ControlDescription,
+    'Value was not matrix3.',
+    'supports-required',
+    [[1, 2, 3, 4, 5, 6, 7, 8, 9]],
+  )
+})
+
+const validMatrix4ControlDescriptionValue: Matrix4ControlDescription = {
+  label: 'Matrix4 Control',
+  control: 'matrix4',
+  visibleByDefault: true,
+}
+
+describe('parseMatrix4ControlDescription', () => {
+  runBaseTestSuite(
+    validMatrix4ControlDescriptionValue,
+    ['control'],
+    parseMatrix4ControlDescription,
+    'Value was not matrix4.',
+    'supports-required',
+    [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]],
+  )
+})
+
+const validArrayControlDescriptionValue: ArrayControlDescription = {
+  label: 'Array Control',
+  control: 'array',
+  propertyControl: {
+    control: 'string-input',
+  },
+  folder: 'Array Control',
+}
+
+describe('parseArrayControlDescription', () => {
+  runBaseTestSuite(
+    validArrayControlDescriptionValue,
+    ['control', 'propertyControl'],
+    parseArrayControlDescription,
+    'Value was not array.',
+    'supports-required',
+    [
+      ['a', 'b', 'c'],
+      [1, 2, 3],
+    ],
+  )
+})
+
+const validObjectControlDescriptionValue: ObjectControlDescription = {
+  label: 'Object Control',
+  control: 'object',
+  object: {
+    cat: {
+      control: 'string-input',
+    },
+  },
+  folder: 'Object Control',
+}
+
+describe('parseObjectControlDescription', () => {
+  runBaseTestSuite(
+    validObjectControlDescriptionValue,
+    ['control', 'object'],
+    parseObjectControlDescription,
+    'Value was not object.',
+    'supports-required',
+    [{ a: 1, b: 2 }],
+  )
+})
+
+const validTupleControlDescriptionValue: TupleControlDescription = {
+  control: 'tuple',
+  propertyControls: [
+    { control: 'string-input' },
+    { control: 'number-input' },
+    { control: 'string-input' },
+  ],
+}
+
+describe('parseTupleControlDescription', () => {
+  runBaseTestSuite(
+    validTupleControlDescriptionValue,
+    ['control', 'propertyControls'],
+    parseTupleControlDescription,
+    'Value was not tuple.',
+    'supports-required',
+    [
+      ['a', 'b', 'c'],
+      [1, 2, 3],
+    ],
   )
 })
 
 describe('parseControlDescription', () => {
-  it('parses a number description correctly', () => {
-    expect(parseControlDescription(validNumberControlDescriptionValue)).toEqual(
-      right(validNumberControlDescriptionValue),
+  it('parses a number input description correctly', () => {
+    expect(parseControlDescription(validNumberInputControlDescriptionValue)).toEqual(
+      right(validNumberInputControlDescriptionValue),
     )
   })
-  it('parses an enum description correctly', () => {
-    expect(parseControlDescription(validEnumControlDescriptionValue)).toEqual(
-      right(validEnumControlDescriptionValue),
+  it('parses a checkbox description correctly', () => {
+    expect(parseControlDescription(validCheckboxControlDescriptionValue)).toEqual(
+      right(validCheckboxControlDescriptionValue),
     )
   })
-  it('parses a boolean description correctly', () => {
-    expect(parseControlDescription(validBooleanControlDescriptionValue)).toEqual(
-      right(validBooleanControlDescriptionValue),
-    )
-  })
-  it('parses a string description correctly', () => {
-    expect(parseControlDescription(validStringControlDescriptionValue)).toEqual(
-      right(validStringControlDescriptionValue),
-    )
-  })
-  it('parses a slider description correctly', () => {
-    expect(parseControlDescription(validSliderControlDescriptionValue)).toEqual(
-      right(validSliderControlDescriptionValue),
+  it('parses a string input description correctly', () => {
+    expect(parseControlDescription(validStringInputControlDescriptionValue)).toEqual(
+      right(validStringInputControlDescriptionValue),
     )
   })
   it('parses a popup list description correctly', () => {
@@ -389,9 +587,14 @@ describe('parseControlDescription', () => {
       right(validPopUpListControlDescriptionValue),
     )
   })
-  it('parses a options list description correctly', () => {
-    expect(parseControlDescription(validOptionsControlDescriptionValue)).toEqual(
-      right(validOptionsControlDescriptionValue),
+  it('parses an expression popup list description correctly', () => {
+    expect(parseControlDescription(validExpressionPopUpListControlDescriptionValue)).toEqual(
+      right(validExpressionPopUpListControlDescriptionValue),
+    )
+  })
+  it('parses a radio description correctly', () => {
+    expect(parseControlDescription(validRadioControlDescriptionValue)).toEqual(
+      right(validRadioControlDescriptionValue),
     )
   })
   it('parses a color description correctly', () => {
@@ -399,28 +602,71 @@ describe('parseControlDescription', () => {
       right(validColorControlDescriptionValue),
     )
   })
-  it('parses a component instance description correctly', () => {
-    expect(parseControlDescription(validComponentInstanceControlDescriptionValue)).toEqual(
-      right(validComponentInstanceControlDescriptionValue),
+  it('parses an expression input control description correctly', () => {
+    expect(parseControlDescription(validExpressionInputControlDescriptionValue)).toEqual(
+      right(validExpressionInputControlDescriptionValue),
     )
   })
-  it('parses an ignore description correctly', () => {
-    expect(parseControlDescription(validIgnoreControlDescriptionValue)).toEqual(
-      right(validIgnoreControlDescriptionValue),
+  it('parses a none description correctly', () => {
+    expect(parseControlDescription(validNoneControlDescriptionValue)).toEqual(
+      right(validNoneControlDescriptionValue),
+    )
+  })
+  it('parses an array description correctly', () => {
+    expect(parseControlDescription(validArrayControlDescriptionValue)).toEqual(
+      right(validArrayControlDescriptionValue),
+    )
+  })
+  it('parses an object description correctly', () => {
+    expect(parseControlDescription(validObjectControlDescriptionValue)).toEqual(
+      right(validObjectControlDescriptionValue),
+    )
+  })
+  it('parses a tuple description correctly', () => {
+    expect(parseControlDescription(validTupleControlDescriptionValue)).toEqual(
+      right(validTupleControlDescriptionValue),
+    )
+  })
+  it('parses a vector2 description correctly', () => {
+    expect(parseControlDescription(validVector2ControlDescriptionValue)).toEqual(
+      right(validVector2ControlDescriptionValue),
+    )
+  })
+  it('parses a vector3 description correctly', () => {
+    expect(parseControlDescription(validVector3ControlDescriptionValue)).toEqual(
+      right(validVector3ControlDescriptionValue),
+    )
+  })
+  it('parses a vector4 description correctly', () => {
+    expect(parseControlDescription(validVector4ControlDescriptionValue)).toEqual(
+      right(validVector4ControlDescriptionValue),
+    )
+  })
+  it('parses a euler description correctly', () => {
+    expect(parseControlDescription(validEulerControlDescriptionValue)).toEqual(
+      right(validEulerControlDescriptionValue),
+    )
+  })
+  it('parses a matrix3 description correctly', () => {
+    expect(parseControlDescription(validMatrix3ControlDescriptionValue)).toEqual(
+      right(validMatrix3ControlDescriptionValue),
+    )
+  })
+  it('parses a matrix4 description correctly', () => {
+    expect(parseControlDescription(validMatrix4ControlDescriptionValue)).toEqual(
+      right(validMatrix4ControlDescriptionValue),
     )
   })
   it('fails on a value that is not an object', () => {
-    expect(parseControlDescription('hat')).toEqual(
-      left(descriptionParseError('Value is not an object.')),
-    )
+    expect(parseControlDescription('hat')).toEqual(left(descriptionParseError('Not an object.')))
   })
   it('fails on a value that is an invalid case of one of the descriptions', () => {
     const value = {
-      ...validOptionsControlDescriptionValue,
-      title: true,
+      ...validRadioControlDescriptionValue,
+      label: true,
     }
     expect(parseControlDescription(value)).toEqual(
-      left(objectFieldParseError('title', descriptionParseError('Value is not a string.'))),
+      left(objectFieldParseError('label', descriptionParseError('Not a string.'))),
     )
   })
 })
@@ -428,35 +674,33 @@ describe('parseControlDescription', () => {
 describe('parsePropertyControls', () => {
   it('returns the property controls fully parsed when they are all valid', () => {
     const propertyControlsValue = {
-      width: validNumberControlDescriptionValue,
-      height: validSliderControlDescriptionValue,
+      width: validNumberInputControlDescriptionValue,
+      height: validNumberInputControlDescriptionValue,
     }
     const expectedResult: ParseResult<ParsedPropertyControls> = right({
-      width: right(validNumberControlDescriptionValue),
-      height: right(validSliderControlDescriptionValue),
+      width: right(validNumberInputControlDescriptionValue),
+      height: right(validNumberInputControlDescriptionValue),
     })
     expect(parsePropertyControls(propertyControlsValue)).toEqual(expectedResult)
   })
   it('returns the property controls fully parsed when some are invalid', () => {
     const propertyControlsValue = {
-      width: validNumberControlDescriptionValue,
+      width: validNumberInputControlDescriptionValue,
       height: {
-        ...validSliderControlDescriptionValue,
-        defaultValue: 'hat',
+        ...validNumberInputControlDescriptionValue,
+        max: 'hat',
       },
     }
     const expectedResult: ParseResult<ParsedPropertyControls> = right({
-      width: right(validNumberControlDescriptionValue),
-      height: left(
-        objectFieldParseError('defaultValue', descriptionParseError('Value is not a number.')),
-      ),
+      width: right(validNumberInputControlDescriptionValue),
+      height: left(objectFieldParseError('max', descriptionParseError('Not a number.'))),
     })
     expect(parsePropertyControls(propertyControlsValue)).toEqual(expectedResult)
   })
   it('gives an error if the entire value is invalid', () => {
     const propertyControlsValue = 5
     const expectedResult: ParseResult<ParsedPropertyControls> = left(
-      descriptionParseError('Property controls are not an object.'),
+      descriptionParseError('Not an object.'),
     )
     expect(parsePropertyControls(propertyControlsValue)).toEqual(expectedResult)
   })

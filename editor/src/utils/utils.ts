@@ -1,21 +1,20 @@
 import chroma from 'chroma-js'
 import { v4 as UUID } from 'uuid'
-import { PackageType } from '../core/shared/project-file-types'
-import { AnyJson, JsonMap } from '../missing-types/json'
-import { JsonSchema, PropSchema } from '../missing-types/json-schema'
-import { ControlStyles } from '../components/inspector/common/control-status'
-import { NormalisedFrame } from 'utopia-api'
+import type { PackageType } from '../core/shared/project-file-types'
+import type { AnyJson, JsonMap } from '../missing-types/json'
+import type { JsonSchema, PropSchema } from '../missing-types/json-schema'
+import type { ControlStyles } from '../components/inspector/common/control-styles'
+import type { NormalisedFrame } from 'utopia-api/core'
 import { fastForEach, NO_OP } from '../core/shared/utils'
-import {
+import type {
   CanvasRectangle,
-  RectangleInner,
+  SimpleRectangle,
   CoordinateMarker,
   Rectangle,
   LocalRectangle,
+} from '../core/shared/math-utils'
+import {
   roundTo,
-  roundToNearestHalf,
-  roundPointToNearestHalf,
-  roundPointTo,
   normalizeDegrees,
   degreesToRadians,
   radiansToDegrees,
@@ -28,8 +27,6 @@ import {
   zeroRectangleAtPoint,
   shiftToOrigin,
   rectOrigin,
-  rectSize,
-  setRectSize,
   rectContainsPoint,
   circleContainsPoint,
   ellipseContainsPoint,
@@ -129,6 +126,7 @@ import {
   findLastIndex,
   drop,
   insert,
+  insertMultiple,
 } from '../core/shared/array-utils'
 import {
   shallowEqual,
@@ -136,12 +134,11 @@ import {
   keepReferenceIfShallowEqual,
 } from '../core/shared/equality-utils'
 import {
-  SafeFunction,
+  safeFunction,
   SafeFunctionCurriedErrorHandler,
   processErrorWithSourceMap,
 } from '../core/shared/code-exec-utils'
-import { memoize } from '../core/shared/memoize'
-import { ValueType, OptionsType, OptionTypeBase } from 'react-select'
+import type { ValueType, OptionsType, OptionTypeBase } from 'react-select'
 import { emptySet } from '../core/shared/set-utils'
 import * as ObjectPath from 'object-path'
 // TODO Remove re-exported functions
@@ -150,26 +147,90 @@ export type FilteredFields<Base, T> = {
   [K in keyof Base]: Base[K] extends T ? K : never
 }[keyof Base]
 
-export type Front = {
+export interface Front {
   type: 'front'
 }
-export type Back = {
+
+export function front(): Front {
+  return {
+    type: 'front',
+  }
+}
+
+export interface Back {
   type: 'back'
 }
-export type Absolute = {
+
+export function back(): Back {
+  return {
+    type: 'back',
+  }
+}
+
+export interface Absolute {
   type: 'absolute'
   index: number
 }
-export type After = {
+
+export function absolute(index: number): Absolute {
+  return {
+    type: 'absolute',
+    index: index,
+  }
+}
+
+export interface After {
   type: 'after'
   index: number
 }
-export type Before = {
+
+export function after(index: number): After {
+  return {
+    type: 'after',
+    index: index,
+  }
+}
+
+export interface Before {
   type: 'before'
   index: number
 }
 
+export function before(index: number): Before {
+  return {
+    type: 'before',
+    index: index,
+  }
+}
+
 export type IndexPosition = Front | Back | Absolute | After | Before
+
+export function shiftIndexPositionForRemovedElement(
+  indexPosition: IndexPosition,
+  removedElementIndex: number,
+): IndexPosition {
+  switch (indexPosition.type) {
+    case 'front':
+    case 'back':
+    case 'absolute':
+      return indexPosition
+    case 'before':
+      if (removedElementIndex < indexPosition.index) {
+        return before(indexPosition.index - 1)
+      } else {
+        return indexPosition
+      }
+    case 'after':
+      if (removedElementIndex < indexPosition.index) {
+        return after(indexPosition.index - 1)
+      } else {
+        return indexPosition
+      }
+    default:
+      const _exhaustiveCheck: never = indexPosition
+      throw new Error(`Unhandled index position ${JSON.stringify(indexPosition)}`)
+  }
+}
 
 export type Axis = 'x' | 'y'
 
@@ -196,12 +257,12 @@ export function normalisedFrameToCanvasFrame(frame: NormalisedFrame): CanvasRect
 
 export type ObtainChildren<T> = (elem: T, parents: Array<T>) => Array<T>
 
-export type GetFrame<T> = (elem: T, parents: Array<T>) => RectangleInner
+export type GetFrame<T> = (elem: T, parents: Array<T>) => SimpleRectangle
 
 export type HitTester<T> = {
   elem: T
   parents: Array<T>
-  frame: RectangleInner
+  frame: SimpleRectangle
 }
 
 export type Clock = {
@@ -330,7 +391,7 @@ function resolveRef($ref: string, completeSchema: JsonSchema): JsonSchema {
     // this ONLY works with top level definitions
     // TODO make it work with deep refs
     const definitionName = $ref.slice(18)
-    return completeSchema.definitions![definitionName]
+    return completeSchema.definitions![definitionName]!
   } else {
     throw new Error(
       'using a $ref which does not point to main#/definitions/ is not yet allowed: ' + $ref,
@@ -345,14 +406,15 @@ function traverseJsonSchema(
 ): JsonSchema | null {
   const schemaToUse = completeSchema ?? schema
 
-  if (schemaPath.length === 0) {
+  const firstSchemaPath = schemaPath[0]
+  if (firstSchemaPath === undefined) {
     return schema
   }
   if (schema.type === 'array' && schema.items != null) {
     return traverseJsonSchema(removeFirst(schemaPath), schema.items, schemaToUse)
   }
   if (schema.properties != null) {
-    const prop = schema.properties[schemaPath[0]]
+    const prop = schema.properties[firstSchemaPath]
     if (prop == null) {
       return null
     } else {
@@ -425,8 +487,7 @@ function compileDefaultForSchema(
   if (schema.properties != null) {
     let result: { [property: string]: AnyJson } = {}
     const properties = schema.properties
-    fastForEach(Object.keys(properties), (key) => {
-      const property = properties[key]
+    for (const [key, property] of Object.entries(properties)) {
       result[key] = compileDefaultForSchema(
         property,
         type,
@@ -434,7 +495,7 @@ function compileDefaultForSchema(
         preferLeafDefault,
         completeSchema,
       )
-    })
+    }
     return result
   }
 
@@ -479,12 +540,12 @@ function getBaseAndIndex(name: string, insertSpace: boolean): { base: string; in
   let lastToken: string = ''
   let baseName = name
   if (insertSpace) {
-    lastToken = tokens[tokens.length - 1]
+    lastToken = forceNotNull('Token should exist.', tokens[tokens.length - 1])
     baseName = dropLast(tokens).join(' ')
   } else {
     const regexMatch = name.match(/\d+$/)
     if (regexMatch != null) {
-      lastToken = regexMatch[0]
+      lastToken = forceNotNull('First regex match should exist.', regexMatch[0])
       baseName = name.slice(0, regexMatch.index)
       tokens = [baseName, lastToken]
     }
@@ -550,6 +611,24 @@ function addToArrayWithFill<T>(
     midResult.push(fillValue())
   }
   return insert(index, element, midResult)
+}
+
+export function addToArrayAtIndexPosition<T>(
+  element: T,
+  array: Array<T>,
+  atPosition: IndexPosition,
+): Array<T> {
+  const index = indexToInsertAt(array, atPosition)
+  return insert(index, element, array)
+}
+
+export function addElementsToArrayAtIndexPosition<T>(
+  elements: Array<T>,
+  array: Array<T>,
+  atPosition: IndexPosition,
+): Array<T> {
+  const index = indexToInsertAt(array, atPosition)
+  return insertMultiple(index, elements, array)
 }
 
 function assert(errorMessage: string, predicate: boolean | (() => boolean)): void {
@@ -647,23 +726,6 @@ const createSimpleClock = function (): Clock {
   }
 }
 
-function getRectPointsAlongAxes<C extends CoordinateMarker>(
-  rectangle: Rectangle<C>,
-): { horizontalPoints: Array<number>; verticalPoints: Array<number> } {
-  return {
-    horizontalPoints: [
-      rectangle.x,
-      rectangle.x + rectangle.width / 2,
-      rectangle.x + rectangle.width,
-    ],
-    verticalPoints: [
-      rectangle.y,
-      rectangle.y + rectangle.height / 2,
-      rectangle.y + rectangle.height,
-    ],
-  }
-}
-
 function stepInArray<T>(
   eq: (first: T, second: T) => boolean,
   step: number,
@@ -756,36 +818,36 @@ function immutableUpdate(
   objPath: Array<string | number>,
   valueToSet: any,
 ): any {
-  switch (objPath.length) {
-    case 0:
-      // No path, so we're just replacing the whole value at this point.
-      return valueToSet
-    case 1:
-      // Last part of the path, setting the `valueToSet` where the final part specifies.
-      return immutableUpdateField(valueToUpdate, objPath[0], valueToSet)
-    default:
-      // 2 or more path elements, need to step down path part to recursively invoke this on the remainder.
-      const [first, ...remainder] = objPath
-      const fieldParsedAsNumber: number = typeof first === 'number' ? first : parseInt(first)
-      const isArrayUpdate = typeof first === 'number' || !isNaN(fieldParsedAsNumber)
-      if (isArrayUpdate) {
-        // Arrays.
-        const defaultedArray: Array<any> = defaultIfNull([], valueToUpdate)
-        let result: Array<any> = [...defaultedArray]
-        result[fieldParsedAsNumber] = immutableUpdate(
-          defaultedArray[fieldParsedAsNumber],
-          remainder,
-          valueToSet,
-        )
-        return result
-      } else {
-        // Objects.
-        const defaultedObject: { [key: string]: any } = defaultIfNull({}, valueToUpdate)
-        return {
-          ...defaultedObject,
-          [first]: immutableUpdate(defaultedObject[first], remainder, valueToSet),
-        }
+  const first = objPath[0]
+  if (first === undefined) {
+    // No path, so we're just replacing the whole value at this point.
+    return valueToSet
+  } else if (objPath.length === 1) {
+    // Last part of the path, setting the `valueToSet` where the final part specifies.
+    return immutableUpdateField(valueToUpdate, first, valueToSet)
+  } else {
+    // 2 or more path elements, need to step down path part to recursively invoke this on the remainder.
+    const remainder = objPath.slice(1)
+    const fieldParsedAsNumber: number = typeof first === 'number' ? first : parseInt(first)
+    const isArrayUpdate = typeof first === 'number' || !isNaN(fieldParsedAsNumber)
+    if (isArrayUpdate) {
+      // Arrays.
+      const defaultedArray: Array<any> = defaultIfNull([], valueToUpdate)
+      let result: Array<any> = [...defaultedArray]
+      result[fieldParsedAsNumber] = immutableUpdate(
+        defaultedArray[fieldParsedAsNumber],
+        remainder,
+        valueToSet,
+      )
+      return result
+    } else {
+      // Objects.
+      const defaultedObject: { [key: string]: any } = defaultIfNull({}, valueToUpdate)
+      return {
+        ...defaultedObject,
+        [first]: immutableUpdate(defaultedObject[first], remainder, valueToSet),
       }
+    }
   }
 }
 
@@ -812,17 +874,21 @@ function update<T>(index: number, newValue: T, array: Array<T>): Array<T> {
   return result
 }
 
-function defer<T>(): Promise<T> & {
+export type Defer<T> = Promise<T> & {
   resolve: (value?: T) => void
   reject: (reason?: any) => void
-} {
+}
+
+export function defer<T>(): Defer<T> {
   var res, rej
 
   var promise = new Promise<T>((resolve, reject) => {
     res = resolve
     rej = reject
   })
+  // eslint-disable-next-line @typescript-eslint/no-floating-promises
   Object.defineProperty(promise, 'resolve', { value: res })
+  // eslint-disable-next-line @typescript-eslint/no-floating-promises
   Object.defineProperty(promise, 'reject', { value: rej })
 
   return promise as any
@@ -856,13 +922,23 @@ export function isOptionsType<T extends OptionTypeBase>(
   return Array.isArray(value)
 }
 
+function deduplicateBy<T>(key: (t: T) => string, ts: Array<T>): Array<T> {
+  const seen = new Set<string>()
+  const results: Array<T> = []
+  for (const t of ts) {
+    const k = key(t)
+    if (!seen.has(k)) {
+      results.push(t)
+      seen.add(k)
+    }
+  }
+  return results
+}
+
 export default {
   generateUUID: generateUUID,
   assert: assert,
   roundTo: roundTo,
-  roundToNearestHalf: roundToNearestHalf,
-  roundPointToNearestHalf: roundPointToNearestHalf,
-  roundPointTo: roundPointTo,
   normalizeDegrees: normalizeDegrees,
   degreesToRadians: degreesToRadians,
   radiansToDegrees: radiansToDegrees,
@@ -875,8 +951,6 @@ export default {
   zeroRectangleAtPoint: zeroRectangleAtPoint,
   shiftToOrigin: shiftToOrigin,
   rectOrigin: rectOrigin,
-  rectSize: rectSize,
-  setRectSize: setRectSize,
   rectContainsPoint: rectContainsPoint,
   circleContainsPoint: circleContainsPoint,
   ellipseContainsPoint: ellipseContainsPoint,
@@ -926,7 +1000,7 @@ export default {
   colorToRGBAWithoutOpacity: colorToRGBAWithoutOpacity,
   colorToReactNativeColor: colorToReactNativeColor,
   nullIfTransparent: nullIfTransparent,
-  SafeFunction: SafeFunction,
+  SafeFunction: safeFunction,
   SafeFunctionCurriedErrorHandler: SafeFunctionCurriedErrorHandler,
   TRANSPARENT_IMAGE_SRC: TRANSPARENT_IMAGE_SRC,
   get: get,
@@ -959,13 +1033,11 @@ export default {
   shallowClone: shallowClone,
   proxyValue: proxyValue,
   createSimpleClock: createSimpleClock,
-  memoize: memoize,
   shallowEqual: shallowEqual,
   oneLevelNestedEquals: oneLevelNestedEquals,
   keepReferenceIfShallowEqual: keepReferenceIfShallowEqual,
   maybeToArray: maybeToArray,
   arrayToMaybe: arrayToMaybe,
-  getRectPointsAlongAxes: getRectPointsAlongAxes,
   rectangleToPoints: rectangleToPoints,
   flatMapArray: flatMapArray,
   boundingRectangle: boundingRectangle,
@@ -1016,4 +1088,5 @@ export default {
   processErrorWithSourceMap: processErrorWithSourceMap,
   findLastIndex: findLastIndex,
   timeLimitPromise: timeLimitPromise,
+  deduplicateBy: deduplicateBy,
 }

@@ -10,7 +10,10 @@ describe('UiJsxCanvas', () => {
       null,
       `
 import React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 
 const DefaultComments = [
   {
@@ -21,8 +24,7 @@ const DefaultComments = [
 
 const Comment = () => <div data-uid='comment-root'>hat</div>
 
-export var App = () =>
-  true ? DefaultComments.map((comment) => <Comment comment={comment} />) : null
+export var App = () => DefaultComments.map((comment) => <Comment comment={comment} />)
 
 export var storyboard = (
   <Storyboard data-uid='sb'>
@@ -43,7 +45,10 @@ export var storyboard = (
       null,
       `
 import React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 
 export const App = () => {
   const div = React.useRef()
@@ -64,31 +69,40 @@ export var storyboard = (
     )
 
     expect(result).toMatchInlineSnapshot(`
-      "<div style=\\"all: initial;\\">
+      "<div style=\\"all: initial\\">
         <div
           id=\\"canvas-container\\"
-          style=\\"position: absolute;\\"
+          data-testid=\\"canvas-container\\"
+          style=\\"position: absolute\\"
           data-utopia-valid-paths=\\"sb sb/scene sb/scene/app sb/scene/app:app-root\\"
           data-utopia-root-element-path=\\"sb\\"
         >
           <div
             data-utopia-scene-id=\\"sb/scene\\"
-            data-paths=\\"sb/scene sb\\"
+            data-path=\\"sb/scene\\"
             style=\\"
+              overflow: hidden;
+              container: scene / inline-size;
               position: absolute;
-              background-color: rgba(255, 255, 255, 1);
-              box-shadow: 0px 0px 1px 0px rgba(26, 26, 26, 0.3);
+              background-color: var(--utopitheme-emphasizedBackground);
+              box-shadow: 0px 1px 2px 0px var(--utopitheme-shadow90),
+                0px 2px 4px -1px var(--utopitheme-shadow50);
+              background-image: conic-gradient(
+                var(--utopitheme-checkerboardLight) 0.25turn,
+                var(--utopitheme-checkerboardDark) 0.25turn 0.5turn,
+                var(--utopitheme-checkerboardLight) 0.5turn 0.75turn,
+                var(--utopitheme-checkerboardDark) 0.75turn
+              );
+              background-size: 12px 12px, 12px 12px, 12px 12px, 12px 12px;
+              background-position: -9px 0px, -3px -6px, 3px 6px, -3px 0;
               left: 0;
               top: 0;
               width: 375px;
               height: 812px;
             \\"
-            data-uid=\\"scene sb\\"
+            data-uid=\\"scene\\"
           >
-            <div
-              data-uid=\\"app-root app\\"
-              data-paths=\\"sb/scene/app:app-root sb/scene/app\\"
-            ></div>
+            <div data-uid=\\"app-root\\" data-path=\\"sb/scene/app:app-root\\"></div>
           </div>
         </div>
       </div>
@@ -101,7 +115,10 @@ export var storyboard = (
       null,
       `
 import React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 import Appy from './app'
 
 export var storyboard = (
@@ -116,7 +133,7 @@ export var storyboard = (
 )
 `,
       {
-        'app.js': `
+        '/app.js': `
 import React from 'react'
 export default function App(props) {
   return <div data-uid='app-outer-div'>
@@ -127,29 +144,129 @@ export default function App(props) {
     )
 
     expect(result).toMatchInlineSnapshot(`
-      "<div style=\\"all: initial;\\">
+      "<div style=\\"all: initial\\">
         <div
           id=\\"canvas-container\\"
-          style=\\"position: absolute;\\"
-          data-utopia-valid-paths=\\"sb sb/scene sb/scene/app\\"
+          data-testid=\\"canvas-container\\"
+          style=\\"position: absolute\\"
+          data-utopia-valid-paths=\\"sb sb/scene sb/scene/app sb/scene/app:app-outer-div sb/scene/app:app-outer-div/inner-div\\"
           data-utopia-root-element-path=\\"sb\\"
         >
           <div
             data-utopia-scene-id=\\"sb/scene\\"
-            data-paths=\\"sb/scene sb\\"
+            data-path=\\"sb/scene\\"
             style=\\"
+              overflow: hidden;
+              container: scene / inline-size;
               position: absolute;
-              background-color: rgba(255, 255, 255, 1);
-              box-shadow: 0px 0px 1px 0px rgba(26, 26, 26, 0.3);
+              background-color: var(--utopitheme-emphasizedBackground);
+              box-shadow: 0px 1px 2px 0px var(--utopitheme-shadow90),
+                0px 2px 4px -1px var(--utopitheme-shadow50);
+              background-image: conic-gradient(
+                var(--utopitheme-checkerboardLight) 0.25turn,
+                var(--utopitheme-checkerboardDark) 0.25turn 0.5turn,
+                var(--utopitheme-checkerboardLight) 0.5turn 0.75turn,
+                var(--utopitheme-checkerboardDark) 0.75turn
+              );
+              background-size: 12px 12px, 12px 12px, 12px 12px, 12px 12px;
+              background-position: -9px 0px, -3px -6px, 3px 6px, -3px 0;
               left: 0;
               top: 0;
               width: 375px;
               height: 812px;
             \\"
-            data-uid=\\"scene sb\\"
+            data-uid=\\"scene\\"
           >
-            <div data-uid=\\"app-outer-div app\\" data-paths=\\"sb/scene/app\\">
-              <div data-uid=\\"inner-div\\">hello</div>
+            <div data-uid=\\"app-outer-div\\" data-path=\\"sb/scene/app:app-outer-div\\">
+              <div
+                data-uid=\\"inner-div\\"
+                data-path=\\"sb/scene/app:app-outer-div/inner-div\\"
+              >
+                hello
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      "
+    `)
+  })
+
+  it('Handles importing default exports declared separately', () => {
+    const result = testCanvasRenderInlineMultifile(
+      null,
+      `
+import React from 'react'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
+import {default as Appy} from '/app'
+
+export var storyboard = (
+  <Storyboard data-uid='sb'>
+    <Scene
+      data-uid='scene'
+      style={{ position: 'absolute', left: 0, top: 0, width: 375, height: 812 }}
+    >
+      <Appy data-uid='app' />
+    </Scene>
+  </Storyboard>
+)
+`,
+      {
+        '/app.js': `
+import React from 'react'
+function App(props) {
+  return <div data-uid='app-outer-div'>
+    <div data-uid='inner-div'>hello</div>
+  </div>
+}
+export default App`,
+      },
+    )
+
+    expect(result).toMatchInlineSnapshot(`
+      "<div style=\\"all: initial\\">
+        <div
+          id=\\"canvas-container\\"
+          data-testid=\\"canvas-container\\"
+          style=\\"position: absolute\\"
+          data-utopia-valid-paths=\\"sb sb/scene sb/scene/app sb/scene/app:app-outer-div sb/scene/app:app-outer-div/inner-div\\"
+          data-utopia-root-element-path=\\"sb\\"
+        >
+          <div
+            data-utopia-scene-id=\\"sb/scene\\"
+            data-path=\\"sb/scene\\"
+            style=\\"
+              overflow: hidden;
+              container: scene / inline-size;
+              position: absolute;
+              background-color: var(--utopitheme-emphasizedBackground);
+              box-shadow: 0px 1px 2px 0px var(--utopitheme-shadow90),
+                0px 2px 4px -1px var(--utopitheme-shadow50);
+              background-image: conic-gradient(
+                var(--utopitheme-checkerboardLight) 0.25turn,
+                var(--utopitheme-checkerboardDark) 0.25turn 0.5turn,
+                var(--utopitheme-checkerboardLight) 0.5turn 0.75turn,
+                var(--utopitheme-checkerboardDark) 0.75turn
+              );
+              background-size: 12px 12px, 12px 12px, 12px 12px, 12px 12px;
+              background-position: -9px 0px, -3px -6px, 3px 6px, -3px 0;
+              left: 0;
+              top: 0;
+              width: 375px;
+              height: 812px;
+            \\"
+            data-uid=\\"scene\\"
+          >
+            <div data-uid=\\"app-outer-div\\" data-path=\\"sb/scene/app:app-outer-div\\">
+              <div
+                data-uid=\\"inner-div\\"
+                data-path=\\"sb/scene/app:app-outer-div/inner-div\\"
+              >
+                hello
+              </div>
             </div>
           </div>
         </div>
@@ -213,7 +330,7 @@ export var storyboard = (
 )
 `,
       {
-        'app.js': `
+        '/app.js': `
 import React from 'react'
 export default function App(props) {
   return <div data-uid='app-outer-div'>
@@ -224,52 +341,80 @@ export default function App(props) {
     )
 
     expect(result).toMatchInlineSnapshot(`
-      "<div style=\\"all: initial;\\">
+      "<div style=\\"all: initial\\">
         <div
           id=\\"canvas-container\\"
-          style=\\"position: absolute;\\"
-          data-utopia-valid-paths=\\"storyboard-entity storyboard-entity/scene-1-entity storyboard-entity/scene-1-entity/app-entity storyboard-entity/scene-2-entity storyboard-entity/scene-2-entity/same-file-app-entity storyboard-entity/scene-2-entity/same-file-app-entity:same-file-app-div\\"
+          data-testid=\\"canvas-container\\"
+          style=\\"position: absolute\\"
+          data-utopia-valid-paths=\\"storyboard-entity storyboard-entity/scene-1-entity storyboard-entity/scene-1-entity/app-entity storyboard-entity/scene-1-entity/app-entity:app-outer-div storyboard-entity/scene-1-entity/app-entity:app-outer-div/inner-div storyboard-entity/scene-2-entity storyboard-entity/scene-2-entity/same-file-app-entity storyboard-entity/scene-2-entity/same-file-app-entity:same-file-app-div\\"
           data-utopia-root-element-path=\\"storyboard-entity\\"
         >
           <div
             data-utopia-scene-id=\\"storyboard-entity/scene-1-entity\\"
-            data-paths=\\"storyboard-entity/scene-1-entity storyboard-entity\\"
+            data-path=\\"storyboard-entity/scene-1-entity\\"
             style=\\"
+              overflow: hidden;
+              container: scene / inline-size;
               position: absolute;
-              background-color: rgba(255, 255, 255, 1);
-              box-shadow: 0px 0px 1px 0px rgba(26, 26, 26, 0.3);
+              background-color: var(--utopitheme-emphasizedBackground);
+              box-shadow: 0px 1px 2px 0px var(--utopitheme-shadow90),
+                0px 2px 4px -1px var(--utopitheme-shadow50);
+              background-image: conic-gradient(
+                var(--utopitheme-checkerboardLight) 0.25turn,
+                var(--utopitheme-checkerboardDark) 0.25turn 0.5turn,
+                var(--utopitheme-checkerboardLight) 0.5turn 0.75turn,
+                var(--utopitheme-checkerboardDark) 0.75turn
+              );
+              background-size: 12px 12px, 12px 12px, 12px 12px, 12px 12px;
+              background-position: -9px 0px, -3px -6px, 3px 6px, -3px 0;
               left: 0;
               top: 0;
               width: 375px;
               height: 812px;
             \\"
-            data-uid=\\"scene-1-entity storyboard-entity\\"
+            data-uid=\\"scene-1-entity\\"
             data-label=\\"Imported App\\"
           >
             <div
-              data-uid=\\"app-outer-div app-entity\\"
-              data-paths=\\"storyboard-entity/scene-1-entity/app-entity\\"
+              data-uid=\\"app-outer-div\\"
+              data-path=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div\\"
             >
-              <div data-uid=\\"inner-div\\">hello</div>
+              <div
+                data-uid=\\"inner-div\\"
+                data-path=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/inner-div\\"
+              >
+                hello
+              </div>
             </div>
           </div>
           <div
             data-utopia-scene-id=\\"storyboard-entity/scene-2-entity\\"
-            data-paths=\\"storyboard-entity/scene-2-entity storyboard-entity\\"
+            data-path=\\"storyboard-entity/scene-2-entity\\"
             style=\\"
+              overflow: hidden;
+              container: scene / inline-size;
               position: absolute;
-              background-color: rgba(255, 255, 255, 1);
-              box-shadow: 0px 0px 1px 0px rgba(26, 26, 26, 0.3);
+              background-color: var(--utopitheme-emphasizedBackground);
+              box-shadow: 0px 1px 2px 0px var(--utopitheme-shadow90),
+                0px 2px 4px -1px var(--utopitheme-shadow50);
+              background-image: conic-gradient(
+                var(--utopitheme-checkerboardLight) 0.25turn,
+                var(--utopitheme-checkerboardDark) 0.25turn 0.5turn,
+                var(--utopitheme-checkerboardLight) 0.5turn 0.75turn,
+                var(--utopitheme-checkerboardDark) 0.75turn
+              );
+              background-size: 12px 12px, 12px 12px, 12px 12px, 12px 12px;
+              background-position: -9px 0px, -3px -6px, 3px 6px, -3px 0;
               left: 400px;
               top: 0;
               width: 375px;
               height: 812px;
             \\"
-            data-uid=\\"scene-2-entity storyboard-entity\\"
+            data-uid=\\"scene-2-entity\\"
             data-label=\\"Same File App\\"
           >
             <div
-              data-uid=\\"same-file-app-div same-file-app-entity\\"
+              data-uid=\\"same-file-app-div\\"
               data-label=\\"Scene Thing\\"
               style=\\"
                 position: relative;
@@ -277,7 +422,7 @@ export default function App(props) {
                 height: 100%;
                 background-color: blue;
               \\"
-              data-paths=\\"storyboard-entity/scene-2-entity/same-file-app-entity:same-file-app-div storyboard-entity/scene-2-entity/same-file-app-entity\\"
+              data-path=\\"storyboard-entity/scene-2-entity/same-file-app-entity:same-file-app-div\\"
             ></div>
           </div>
         </div>
@@ -289,7 +434,10 @@ export default function App(props) {
     const result = testCanvasRenderInlineMultifile(
       null,
       `import * as React from 'react'
-import { Scene, Storyboard } from 'utopia-api'
+import Utopia, {
+  Scene,
+  Storyboard,
+} from 'utopia-api'
 import { App } from '/src/app'
 
 export var storyboard = (
@@ -334,6 +482,7 @@ export var App = (props) => {
 }`,
         '/src/card.js': `import * as React from 'react'
 import { Rectangle } from 'utopia-api'
+import { Spring } from 'non-existant-dummy-library'
 export var Card = (props) => {
   return (
     <div
@@ -351,8 +500,8 @@ export var Card = (props) => {
           backgroundColor: 'red',
         }}
       />
-      <Rectangle
-        data-uid='card-inner-rectangle'
+      <Spring
+        data-uid='card-inner-spring'
         style={{
           position: 'absolute',
           left: 100,
@@ -374,40 +523,52 @@ export default function () {
       },
     )
     expect(result).toMatchInlineSnapshot(`
-      "<div style=\\"all: initial;\\">
+      "<div style=\\"all: initial\\">
         <div
           id=\\"canvas-container\\"
-          style=\\"position: absolute;\\"
-          data-utopia-valid-paths=\\"storyboard-entity storyboard-entity/scene-1-entity storyboard-entity/scene-1-entity/app-entity storyboard-entity/scene-1-entity/app-entity:app-outer-div storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance storyboard-entity/scene-1-entity/app-entity:app-outer-div/d7f\\"
+          data-testid=\\"canvas-container\\"
+          style=\\"position: absolute\\"
+          data-utopia-valid-paths=\\"storyboard-entity storyboard-entity/scene-1-entity storyboard-entity/scene-1-entity/app-entity storyboard-entity/scene-1-entity/app-entity:app-outer-div storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance storyboard-entity/scene-1-entity/app-entity:app-outer-div/ff8 storyboard-entity/scene-1-entity/app-entity:app-outer-div/070\\"
           data-utopia-root-element-path=\\"storyboard-entity\\"
         >
           <div
             data-utopia-scene-id=\\"storyboard-entity/scene-1-entity\\"
-            data-paths=\\"storyboard-entity/scene-1-entity storyboard-entity\\"
+            data-path=\\"storyboard-entity/scene-1-entity\\"
             style=\\"
+              overflow: hidden;
+              container: scene / inline-size;
               position: absolute;
-              background-color: rgba(255, 255, 255, 1);
-              box-shadow: 0px 0px 1px 0px rgba(26, 26, 26, 0.3);
+              background-color: var(--utopitheme-emphasizedBackground);
+              box-shadow: 0px 1px 2px 0px var(--utopitheme-shadow90),
+                0px 2px 4px -1px var(--utopitheme-shadow50);
+              background-image: conic-gradient(
+                var(--utopitheme-checkerboardLight) 0.25turn,
+                var(--utopitheme-checkerboardDark) 0.25turn 0.5turn,
+                var(--utopitheme-checkerboardLight) 0.5turn 0.75turn,
+                var(--utopitheme-checkerboardDark) 0.75turn
+              );
+              background-size: 12px 12px, 12px 12px, 12px 12px, 12px 12px;
+              background-position: -9px 0px, -3px -6px, 3px 6px, -3px 0;
               left: 0;
               top: 0;
               width: 375px;
               height: 812px;
             \\"
-            data-uid=\\"scene-1-entity storyboard-entity\\"
+            data-uid=\\"scene-1-entity\\"
             data-label=\\"Imported App\\"
           >
             <div
-              data-uid=\\"app-outer-div app-entity\\"
+              data-uid=\\"app-outer-div\\"
               style=\\"
                 position: relative;
                 width: 100%;
                 height: 100%;
                 background-color: #ffffff;
               \\"
-              data-paths=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div storyboard-entity/scene-1-entity/app-entity\\"
+              data-path=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div\\"
             >
               <div
-                data-uid=\\"card-outer-div card-instance\\"
+                data-uid=\\"card-outer-div\\"
                 style=\\"
                   position: absolute;
                   left: 67px;
@@ -415,7 +576,7 @@ export default function () {
                   width: 133px;
                   height: 300px;
                 \\"
-                data-paths=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance:card-outer-div storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance\\"
+                data-path=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance:card-outer-div\\"
               >
                 <div
                   data-uid=\\"card-inner-div\\"
@@ -427,9 +588,10 @@ export default function () {
                     height: 50px;
                     background-color: red;
                   \\"
-                  data-paths=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance:card-outer-div/card-inner-div\\"
+                  data-path=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance:card-outer-div/card-inner-div\\"
                 ></div>
                 <div
+                  data-uid=\\"card-inner-spring\\"
                   style=\\"
                     position: absolute;
                     left: 100px;
@@ -438,15 +600,13 @@ export default function () {
                     height: 50px;
                     background-color: blue;
                   \\"
-                  data-paths=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance:card-outer-div/card-inner-rectangle\\"
-                  data-uid=\\"card-inner-rectangle\\"
-                  data-utopia-do-not-traverse=\\"true\\"
+                  data-path=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/card-instance:card-outer-div/card-inner-spring\\"
                 ></div>
               </div>
               hello
               <div
-                data-uid=\\"4cf d7f\\"
-                data-paths=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/d7f:4cf storyboard-entity/scene-1-entity/app-entity:app-outer-div/d7f\\"
+                data-uid=\\"01b\\"
+                data-path=\\"storyboard-entity/scene-1-entity/app-entity:app-outer-div/070:01b\\"
               >
                 Default Function Time
               </div>

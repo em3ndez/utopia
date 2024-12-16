@@ -7,7 +7,7 @@ import {
 } from '../../canvas/ui-jsx.test-utils'
 import { setProp_UNSAFE } from '../../editor/actions/action-creators'
 import * as PP from '../../../core/shared/property-path'
-import { emptyComments, jsxAttributeValue } from '../../../core/shared/element-template'
+import { emptyComments, jsExpressionValue } from '../../../core/shared/element-template'
 
 describe('updating style properties keeps the original order', () => {
   it('element with different padding props', async () => {
@@ -16,7 +16,7 @@ describe('updating style properties keeps the original order', () => {
       <div style={{ ...props.style, position: 'absolute' }} data-uid='aaa'>
         <div
           style={{
-            backgroundColor: '#0091FFAA',
+            backgroundColor: '#aaaaaa33',
             width: 256,
             height: 202,
             paddingRight: 15,
@@ -32,8 +32,8 @@ describe('updating style properties keeps the original order', () => {
 
     const changePinProps = setProp_UNSAFE(
       EP.appendNewElementPath(TestScenePath, ['aaa', 'bbb']),
-      PP.create(['style', 'paddingRight']),
-      jsxAttributeValue(30, emptyComments),
+      PP.create('style', 'paddingRight'),
+      jsExpressionValue(30, emptyComments),
     )
 
     await renderResult.dispatch([changePinProps], true)
@@ -43,7 +43,7 @@ describe('updating style properties keeps the original order', () => {
         `<div style={{ ...props.style, position: 'absolute' }} data-uid='aaa'>
           <div
             style={{
-              backgroundColor: '#0091FFAA',
+              backgroundColor: '#aaaaaa33',
               width: 256,
               height: 202,
               paddingRight: 30,

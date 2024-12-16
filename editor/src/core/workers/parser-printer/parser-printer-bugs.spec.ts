@@ -1,11 +1,14 @@
+import type { JSXAttributes, JSExpressionOtherJavaScript } from '../../shared/element-template'
 import {
   emptyComments,
   isJSXElement,
   isUtopiaJSXComponent,
-  JSXAttributes,
   jsxAttributesFromMap,
-  jsxAttributeValue,
+  jsExpressionValue,
   UtopiaJSXComponent,
+  clearAttributesUniqueIDs,
+  simplifyAttributesIfPossible,
+  getDefinedElsewhereFromElementChild,
 } from '../../shared/element-template'
 import { forEachLeft, isRight } from '../../shared/either'
 import {
@@ -17,26 +20,79 @@ import {
 } from './parser-printer.test-utils'
 import { objectMap, omit } from '../../shared/object-utils'
 import { BakedInStoryboardVariableName, BakedInStoryboardUID } from '../../model/scene-utils'
+import type { ParseSuccess } from '../../shared/project-file-types'
 import { isParseSuccess } from '../../shared/project-file-types'
-
-export function stripUnhelpfulFields(value: any): any {
-  switch (typeof value) {
-    case 'object': {
-      if (Array.isArray(value)) {
-        return value.map(stripUnhelpfulFields)
-      } else {
-        return objectMap(
-          stripUnhelpfulFields,
-          omit(['sourceMap', 'javascript', 'uniqueID', 'code'], value),
-        )
-      }
-    }
-    default:
-      return value
-  }
-}
+import { findJSXElementAtStaticPath } from '../../model/element-template-utils'
+import { getUtopiaJSXComponentsFromSuccess } from '../..//model/project-file-utils'
+import * as EP from '../../shared/element-path'
 
 describe('JSX parser', () => {
+  it('definedElsewhere values in a block including those from elementsWithin', () => {
+    const code = `import * as React from "react";
+
+const cake = 'chocolate'
+
+export var App = props => {
+  return <div style={{ "backgroundColor": "green", "position": "absolute" }} data-uid="aaa">
+    {[1, 2, 3].map(n => {
+      return <div data-uid="bbb">{n} - {cake}</div>
+    })}
+  </div>
+};`
+    const parsedCode = testParseCode(code)
+    if (isParseSuccess(parsedCode)) {
+      expect(elementsStructure(parsedCode.topLevelElements)).toMatchInlineSnapshot(`
+        "IMPORT_STATEMENT
+        UNPARSED_CODE
+        ARBITRARY_JS_BLOCK
+        UNPARSED_CODE
+        UTOPIA_JSX_COMPONENT - App
+          JSX_ELEMENT - div - aaa
+            JSX_MAP_EXPRESSION - 1cc
+                ATTRIBUTE_VALUE - 8f7
+                ATTRIBUTE_VALUE - 5cd
+                ATTRIBUTE_VALUE - 7a4
+              ATTRIBUTE_OTHER_JAVASCRIPT - 831
+                JSX_ELEMENT - div - bbb
+                  JS_IDENTIFIER - aae
+                  JSX_TEXT_BLOCK - 3bd
+                  JS_IDENTIFIER - 804
+              ATTRIBUTE_VALUE - 9e4
+              ATTRIBUTE_VALUE - 753"
+      `)
+
+      const aaaElement = findJSXElementAtStaticPath(
+        getUtopiaJSXComponentsFromSuccess(parsedCode),
+        EP.dynamicPathToStaticPath(EP.elementPath([['App'], ['aaa']])),
+      )
+      const aaaJSXMapExpression = aaaElement?.children[0]
+      if (aaaJSXMapExpression != null) {
+        const definedElsewhere = getDefinedElsewhereFromElementChild([], aaaJSXMapExpression)
+        expect(definedElsewhere).toMatchInlineSnapshot(`
+          Array [
+            "React",
+            "cake",
+            "utopiaCanvasJSXLookup",
+          ]
+        `)
+      } else {
+        throw new Error('Was not a JSX_MAP_EXPRESSION as expected.')
+      }
+
+      const bbbElement = findJSXElementAtStaticPath(
+        getUtopiaJSXComponentsFromSuccess(parsedCode),
+        EP.dynamicPathToStaticPath(EP.elementPath([['App'], ['aaa', 'bbb']])),
+      )
+      const bbbJSXSecondIdentifier = bbbElement?.children[2]
+      if (bbbJSXSecondIdentifier?.type === 'JS_IDENTIFIER') {
+        expect(bbbJSXSecondIdentifier.name).toEqual('cake')
+      } else {
+        throw new Error('Was not a JS_IDENTIFIER as expected.')
+      }
+    } else {
+      throw new Error(JSON.stringify(parsedCode))
+    }
+  })
   it('adds in data-uid attributes for elements in arbitrary code', () => {
     const code = `import * as React from "react";
 import { Ellipse, UtopiaUtils, Image, Rectangle, Text, View } from "utopia-api";
@@ -50,7 +106,7 @@ export var App = props => {
 };`
     const parsedCode = testParseCode(code)
     if (!isParseSuccess(parsedCode)) {
-      fail(parsedCode)
+      throw new Error(JSON.stringify(parsedCode))
     }
   })
   it('fails on unprettied code', () => {
@@ -66,25 +122,29 @@ export var App = props => {
       const topComponent = parsedPlainCode.topLevelElements.find(isUtopiaJSXComponent)
       if (topComponent != null) {
         if (isJSXElement(topComponent.rootElement)) {
-          const expectedProps: JSXAttributes = jsxAttributesFromMap({
-            style: jsxAttributeValue(
-              {
-                backgroundColor: 'green',
-                position: 'absolute',
-              },
-              emptyComments,
-            ),
-            'data-uid': jsxAttributeValue('xxx', emptyComments),
-          })
-          expect(topComponent.rootElement.props).toEqual(expectedProps)
+          const expectedProps: JSXAttributes = clearAttributesUniqueIDs(
+            jsxAttributesFromMap({
+              style: jsExpressionValue(
+                {
+                  backgroundColor: 'green',
+                  position: 'absolute',
+                },
+                emptyComments,
+              ),
+              'data-uid': jsExpressionValue('xxx', emptyComments),
+            }),
+          )
+          expect(
+            simplifyAttributesIfPossible(clearAttributesUniqueIDs(topComponent.rootElement.props)),
+          ).toEqual(expectedProps)
         } else {
-          fail('Root element not a JSX element.')
+          throw new Error('Root element not a JSX element.')
         }
       } else {
-        fail('Not a component.')
+        throw new Error('Not a component.')
       }
     } else {
-      fail(parsedPlainCode)
+      throw new Error(JSON.stringify(parsedPlainCode))
     }
   })
   it('parses elements that use props spreading - #1365', () => {
@@ -128,8 +188,18 @@ export var App = props => {
       UNPARSED_CODE
       UTOPIA_JSX_COMPONENT - Test
         JSX_ELEMENT - div - mapper-parent
-          JSX_ARBITRARY_BLOCK
-            JSX_ELEMENT - Card - card"
+          JSX_MAP_EXPRESSION - 3d5
+            JS_PROPERTY_ACCESS - 741
+              JS_IDENTIFIER - f38
+            ATTRIBUTE_OTHER_JAVASCRIPT - 2d7
+              JSX_ELEMENT - Card - card
+                  ATTRIBUTE_VALUE - d53
+                JS_PROPERTY_ACCESS - 160
+                  JS_IDENTIFIER - ec0
+                JS_PROPERTY_ACCESS - 109
+                  JS_IDENTIFIER - f0f
+                JS_PROPERTY_ACCESS - 032
+                  JS_IDENTIFIER - 805"
     `)
     expect(elementsStructure((testParseCode(spreadCode) as any).topLevelElements))
       .toMatchInlineSnapshot(`
@@ -140,8 +210,12 @@ export var App = props => {
       UNPARSED_CODE
       UTOPIA_JSX_COMPONENT - Test
         JSX_ELEMENT - div - mapper-parent
-          JSX_ARBITRARY_BLOCK
-            JSX_ELEMENT - Card - card"
+          JSX_MAP_EXPRESSION - 84e
+            JS_PROPERTY_ACCESS - 741
+              JS_IDENTIFIER - f38
+            ATTRIBUTE_OTHER_JAVASCRIPT - f54
+              JSX_ELEMENT - Card - card
+                  ATTRIBUTE_VALUE - d53"
     `)
   })
 })
@@ -327,5 +401,81 @@ export var ${BakedInStoryboardVariableName} = (
 )
 `
     testParseThenPrint('/index.js', code, code)
+  })
+})
+
+describe('Identifiers as return statements', () => {
+  it('Arrow functions which return an identifier will correctly add it to defined elsewhere', () => {
+    const code = `import './style.css'
+    import * as React from 'react'
+    import { Storyboard } from 'utopia-api'
+
+    const hello = 'hi'
+
+    export var ${BakedInStoryboardVariableName} = (
+      <Storyboard data-uid='${BakedInStoryboardUID}'>
+        {(() => hello)()}
+      </Storyboard>
+    )
+    `
+
+    const parsedCode = testParseCode(code)
+    expect(isParseSuccess(parsedCode)).toBeTruthy()
+    const parseSuccess = parsedCode as ParseSuccess
+
+    const storyboardElement = findJSXElementAtStaticPath(
+      getUtopiaJSXComponentsFromSuccess(parseSuccess),
+      EP.dynamicPathToStaticPath(EP.elementPath([[BakedInStoryboardUID]])),
+    )
+    expect(storyboardElement).not.toBeNull()
+
+    const jsxBlock = storyboardElement!.children[0]
+
+    expect(jsxBlock.type).toEqual('ATTRIBUTE_OTHER_JAVASCRIPT')
+    expect((jsxBlock as JSExpressionOtherJavaScript).definedElsewhere).toMatchInlineSnapshot(`
+      Array [
+        "hello",
+      ]
+    `)
+  })
+
+  it('Regular functions which return an identifier will correctly add it to defined elsewhere', () => {
+    const code = `import './style.css'
+    import * as React from 'react'
+    import { Storyboard } from 'utopia-api'
+
+    const hello = 'hi'
+
+    export var App = props => {
+      function sayHi() { return hello }
+      return <div>{sayHi()}</div>
+    }
+
+    export var ${BakedInStoryboardVariableName} = (
+      <Storyboard data-uid='${BakedInStoryboardUID}'>
+        <App />
+      </Storyboard>
+    )
+    `
+
+    const parsedCode = testParseCode(code)
+    expect(isParseSuccess(parsedCode)).toBeTruthy()
+    const parseSuccess = parsedCode as ParseSuccess
+
+    const appComponent = getUtopiaJSXComponentsFromSuccess(parseSuccess)[0]
+    expect(appComponent).toBeDefined()
+
+    const jsBlock = appComponent.arbitraryJSBlock
+    expect(jsBlock).not.toBeNull()
+
+    expect(jsBlock!.definedElsewhere).toMatchInlineSnapshot(`
+      Array [
+        "hello",
+        "utopiaCanvasJSXLookup",
+        "utopiaCanvasBlockRanToEnd",
+        "utopiaCanvasEarlyReturnResult",
+        "utopiaCanvasEarlyReturnVoid",
+      ]
+    `)
   })
 })

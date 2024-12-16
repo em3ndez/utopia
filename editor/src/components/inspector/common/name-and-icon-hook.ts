@@ -1,16 +1,22 @@
 import { MetadataUtils } from '../../../core/model/element-metadata-utils'
-import { JSXElementName, ElementInstanceMetadataMap } from '../../../core/shared/element-template'
-import { ElementPath } from '../../../core/shared/project-file-types'
-import { useEditorState } from '../../editor/store/store-hook'
-import { IcnProps } from '../../../uuiui'
+import type {
+  JSXElementName,
+  ElementInstanceMetadataMap,
+  ElementInstanceMetadata,
+} from '../../../core/shared/element-template'
+import type { ElementPath } from '../../../core/shared/project-file-types'
+import { Substores, useEditorState } from '../../editor/store/store-hook'
+import type { IcnProps } from '../../../uuiui'
 import { createComponentOrElementIconProps } from '../../navigator/layout-element-icons'
-import {
-  NameAndIconResultArrayKeepDeepEquality,
-  NameAndIconResultKeepDeepEquality,
-} from '../../../utils/deep-equality-instances'
-import { createSelector } from 'reselect'
-import { EditorStore } from '../../editor/store/editor-state'
+import type { AllElementProps } from '../../editor/store/editor-state'
+import type { EditorStorePatched } from '../../editor/store/editor-state'
 import React from 'react'
+import { objectValues } from '../../../core/shared/object-utils'
+import { eitherToMaybe } from '../../../core/shared/either'
+import type { ElementPathTrees } from '../../../core/shared/element-path-tree'
+import type { FilePathMappings } from '../../../core/model/project-file-utils'
+import type { PropertyControlsInfo } from '../../custom-code/code-file'
+import type { ProjectContentTreeRoot } from '../../assets'
 
 export interface NameAndIconResult {
   path: ElementPath
@@ -20,34 +26,64 @@ export interface NameAndIconResult {
 }
 
 export function useMetadata(): ElementInstanceMetadataMap {
-  return useEditorState((store) => store.editor.jsxMetadata, 'useMetadata')
+  return useEditorState(Substores.metadata, (store) => store.editor.jsxMetadata, 'useMetadata')
 }
 
-const namesAndIconsAllPathsResultSelector = createSelector(
-  (store: EditorStore) => store.editor.jsxMetadata,
-  (metadata) => {
-    return MetadataUtils.getAllPaths(metadata).map((path) => {
-      return getNameAndIconResult(path, metadata)
-    })
-  },
-)
-
-export function useNamesAndIconsAllPaths(): NameAndIconResult[] {
-  const selector = React.useMemo(() => namesAndIconsAllPathsResultSelector, [])
-  return useEditorState(selector, 'useNamesAndIconsAllPaths', (oldResult, newResult) => {
-    return NameAndIconResultArrayKeepDeepEquality(oldResult, newResult).areEqual
+export function getNamesAndIconsAllPaths(
+  metadata: ElementInstanceMetadataMap,
+  allElementProps: AllElementProps,
+  elementPathTree: ElementPathTrees,
+  autoFocusedPaths: Array<ElementPath>,
+  filePathMappings: FilePathMappings,
+  propertyControlsInfo: PropertyControlsInfo,
+  projectContents: ProjectContentTreeRoot,
+): NameAndIconResult[] {
+  return objectValues(metadata).map((elementInstanceMetadata) => {
+    return getNameAndIconResult(
+      metadata,
+      allElementProps,
+      elementInstanceMetadata,
+      elementPathTree,
+      autoFocusedPaths,
+      filePathMappings,
+      propertyControlsInfo,
+      projectContents,
+    )
   })
 }
 
 function getNameAndIconResult(
-  path: ElementPath,
   metadata: ElementInstanceMetadataMap,
+  allElementProps: AllElementProps,
+  elementInstanceMetadata: ElementInstanceMetadata,
+  pathTrees: ElementPathTrees,
+  autoFocusedPaths: Array<ElementPath>,
+  filePathMappings: FilePathMappings,
+  propertyControlsInfo: PropertyControlsInfo,
+  projectContents: ProjectContentTreeRoot,
 ): NameAndIconResult {
-  const elementName = MetadataUtils.getJSXElementNameFromMetadata(metadata, path)
+  const elementName = MetadataUtils.getJSXElementName(
+    eitherToMaybe(elementInstanceMetadata.element),
+  )
   return {
-    path: path,
+    path: elementInstanceMetadata.elementPath,
     name: elementName,
-    label: MetadataUtils.getElementLabel(path, metadata),
-    iconProps: createComponentOrElementIconProps(path, metadata),
+    label: MetadataUtils.getElementLabelFromMetadata(
+      metadata,
+      allElementProps,
+      pathTrees,
+      elementInstanceMetadata,
+    ),
+    iconProps: createComponentOrElementIconProps(
+      elementInstanceMetadata.elementPath,
+      metadata,
+      pathTrees,
+      autoFocusedPaths,
+      null,
+      allElementProps,
+      filePathMappings,
+      propertyControlsInfo,
+      projectContents,
+    ),
   }
 }

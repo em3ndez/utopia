@@ -1,17 +1,15 @@
+import type { CSSFlex, CSSNumber } from '../../components/inspector/common/css-utils'
 import {
-  CSSFlex,
   cssNumber,
-  CSSNumber,
   printCSSNumber,
   printCSSNumberWithDefaultUnit,
 } from '../../components/inspector/common/css-utils'
-import { Either, isRight, left, mapEither, right } from '../../core/shared/either'
-import {
-  emptyComments,
-  JSXAttributeValue,
-  jsxAttributeValue,
-} from '../../core/shared/element-template'
-import { descriptionParseError, Parser } from '../../utils/value-parser-utils'
+import type { Either } from '../../core/shared/either'
+import { isRight, left, mapEither, right } from '../../core/shared/either'
+import type { JSExpressionValue } from '../../core/shared/element-template'
+import { emptyComments, jsExpressionValue } from '../../core/shared/element-template'
+import type { Parser } from '../../utils/value-parser-utils'
+import { descriptionParseError } from '../../utils/value-parser-utils'
 import {
   getLexerPropertyMatches,
   parseLengthPercentage,
@@ -133,18 +131,18 @@ function isCSSFlexBasis(value: CSSFlexGrow | CSSFlexShrink | CSSFlexBasis): valu
   return value.type === 'flex-basis'
 }
 
-export const printFlexAsAttributeValue = (value: CSSFlex): JSXAttributeValue<number | string> => {
+export const printFlexAsAttributeValue = (value: CSSFlex): JSExpressionValue<number | string> => {
   const flexGrow = value.flexGrow
   const flexShrink = value.flexShrink
   const flexBasis = printCSSNumber(value.flexBasis, null)
 
   if (flexBasis === printCSSNumber(AssumedFlexDefaults.flexBasis, null)) {
     if (flexShrink === AssumedFlexDefaults.flexShrink) {
-      return jsxAttributeValue(`${flexGrow}`, emptyComments)
+      return jsExpressionValue(`${flexGrow}`, emptyComments)
     } else {
-      return jsxAttributeValue(`${flexGrow} ${flexShrink}`, emptyComments)
+      return jsExpressionValue(`${flexGrow} ${flexShrink}`, emptyComments)
     }
   } else {
-    return jsxAttributeValue(`${flexGrow} ${flexShrink} ${flexBasis}`, emptyComments)
+    return jsExpressionValue(`${flexGrow} ${flexShrink} ${flexBasis}`, emptyComments)
   }
 }

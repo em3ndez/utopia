@@ -1,6 +1,6 @@
 {
   "name": "utopia-vscode-common",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "license": "MIT",
   "private": true,
   "description": "Common code for bridging VSCode and Utopia",
@@ -14,23 +14,22 @@
     "url": "https://github.com/concrete-utopia/utopia"
   },
   "scripts": {
-    "build": "webpack-cli",
-    "production": "webpack-cli --mode production",
-    "watch": "webpack-cli --mode production --watch --info-verbosity verbose",
-    "watch-dev": "webpack-cli --watch --info-verbosity verbose",
+    "build": "tsc && NODE_OPTIONS=$NODE_OPENSSL_OPTION webpack-cli",
+    "production": "tsc && NODE_OPTIONS=$NODE_OPENSSL_OPTION webpack-cli --mode production",
+    "watch": "tsc --watch",
+    "watch-dev": "tsc --watch",
     "preinstall": "npx only-allow pnpm"
   },
   "dependencies": {
     "localforage": "1.9.0",
-    "prettier": "2.0.5"
+    "prettier": "2.8.8"
   },
   "devDependencies": {
-    "@types/prettier": "2.0.1",
+    "@types/prettier": "2.7.3",
     "ts-loader": "5.3.3",
     "typescript": "4.0.5",
+    "vscode-dts": "0.3.1",
     "webpack": "4.42.0",
-    "webpack-cli": "3.3.11",
-    "webpack-node-externals": "3.0.0",
-    "vscode-dts": "0.3.1"
+    "webpack-cli": "3.3.11"
   }
 }

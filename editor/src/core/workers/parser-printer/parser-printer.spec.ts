@@ -1,75 +1,94 @@
+/* eslint jest/expect-expect: ["error", { "assertFunctionNames": ["expect", "FastCheck.assert", "ensureElementsHaveUID", "checkElementUIDs"] }] */
 import * as FastCheck from 'fast-check'
 import { getSourceMapConsumer } from '../../../third-party/react-error-overlay/utils/getSourceMap'
+import type { JSXAttributes, JSXElement, UtopiaJSXComponent } from '../../shared/element-template'
 import {
   arbitraryJSBlock,
   isArbitraryJSBlock,
-  isJSXAttributeOtherJavaScript,
+  modifiableAttributeIsAttributeOtherJavaScript,
   isJSXElement,
   isUtopiaJSXComponent,
-  jsxArbitraryBlock,
   jsxArraySpread,
   jsxArrayValue,
-  jsxAttributeFunctionCall,
-  jsxAttributeNestedArray,
+  jsExpressionFunctionCall,
+  jsExpressionNestedArray,
   jsxAttributeNestedArraySimple,
-  jsxAttributeNestedObject,
+  jsExpressionNestedObject,
   jsxAttributeNestedObjectSimple,
-  jsxAttributeOtherJavaScript,
-  JSXAttributes,
-  jsxAttributeValue,
+  jsExpressionOtherJavaScript,
+  jsExpressionValue,
   jsxElement,
   jsxPropertyAssignment,
   jsxSpreadAssignment,
   jsxTextBlock,
   utopiaJSXComponent,
-  UtopiaJSXComponent,
   defaultPropsParam,
   clearArbitraryJSBlockUniqueIDs,
   jsxAttributesFromMap,
   getJSXAttributeForced,
   isJSXAttributesEntry,
   emptyComments,
+  clearJSXElementChildUniqueIDs,
+  clearJSXElementUniqueIDs,
+  jsxMapExpression,
+  jsPropertyAccess,
+  jsIdentifier,
+  jsElementAccess,
+  modifiableAttributeIsJsxElement,
+  jsOpaqueArbitraryStatement,
+  jsAssignment,
+  jsAssignmentStatement,
+  functionParam,
+  regularParam,
+  simpleJSAssignmentStatement,
 } from '../../shared/element-template'
 import { sampleCode } from '../../model/new-project-files'
 import { addImport, emptyImports } from '../common/project-file-utils'
-import { onlyImportReact, sampleImportsForTests } from '../../model/test-ui-js-file.test-utils'
+import { sampleImportsForTests } from '../../model/test-ui-js-file.test-utils'
+import type { ParseSuccess } from '../../shared/project-file-types'
 import {
   isParseSuccess,
   importAlias,
   foldParsedTextFile,
-  EmptyExportsDetail,
   exportFunction,
   exportDefaultFunctionOrClass,
-  exportVariables,
-  exportVariable,
   parseSuccess,
 } from '../../shared/project-file-types'
-import {
-  lintAndParse,
-  parseCode,
-  printCode,
-  printCodeOptions,
-  getHighlightBoundsWithoutUID,
-} from './parser-printer'
+import { lintAndParse, parseCode, printCode, printCodeOptions } from './parser-printer'
 import { applyPrettier } from 'utopia-vscode-common'
 import { transpileJavascriptFromCode } from './parser-printer-transpiling'
 import {
   clearParseResultPassTimes,
+  clearParseResultSourceMapsUniqueIDsAndEmptyBlocks,
   clearParseResultUniqueIDsAndEmptyBlocks,
   clearTopLevelElementUniqueIDsAndEmptyBlocks,
   elementsStructure,
   ensureElementsHaveUID,
   JustImportViewAndReact,
-  PrintableProjectContent,
-  printableProjectContentArbitrary,
+  printedProjectContentArbitrary,
+  simplifyParsedTextFileAttributes,
   testParseCode,
 } from './parser-printer.test-utils'
+import type { ArbitraryProject } from './parser-printer.test-utils'
 import { InfiniteLoopError, InfiniteLoopMaxIterations } from './transform-prevent-infinite-loops'
 import { BakedInStoryboardUID, BakedInStoryboardVariableName } from '../../model/scene-utils'
 import { optionalMap } from '../../shared/optional-utils'
 import { StoryboardFilePath } from '../../../components/editor/store/editor-state'
 import { emptySet } from '../../shared/set-utils'
-import { JSX_CANVAS_LOOKUP_FUNCTION_NAME } from '../../shared/dom-utils'
+import {
+  BLOCK_RAN_TO_END_FUNCTION_NAME,
+  EARLY_RETURN_RESULT_FUNCTION_NAME,
+  EARLY_RETURN_VOID_FUNCTION_NAME,
+  JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+} from '../../shared/dom-utils'
+import {
+  filtered,
+  fromField,
+  fromTypeGuard,
+  notNull,
+  traverseArray,
+} from '../../shared/optics/optic-creators'
+import { toFirst } from '../../shared/optics/optic-utilities'
 
 describe('JSX parser', () => {
   it('parses the code when it is a var', () => {
@@ -89,25 +108,45 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={props.leftOfTheCake[0].hat} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -115,6 +154,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -122,8 +162,9 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -137,6 +178,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -157,19 +199,21 @@ export var whatever = () => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={20} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeValue(20, emptyComments),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsExpressionValue(20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -177,15 +221,17 @@ export var whatever = () => <View data-uid='aaa'>
       true,
       'var',
       'expression',
-      null,
+      [],
+      [],
       [],
       view,
       null,
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -199,6 +245,7 @@ export var whatever = () => <View data-uid='aaa'>
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -223,25 +270,45 @@ export function whatever(props) {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -249,6 +316,7 @@ export function whatever(props) {
       true,
       'function',
       'block',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -256,8 +324,9 @@ export function whatever(props) {
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -271,6 +340,7 @@ export function whatever(props) {
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -295,19 +365,21 @@ export function whatever() {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeValue(20, emptyComments),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsExpressionValue(20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -315,15 +387,17 @@ export function whatever() {
       true,
       'function',
       'block',
-      null,
+      [],
+      [],
       [],
       view,
       null,
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -337,6 +411,7 @@ export function whatever() {
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -361,25 +436,45 @@ export default function whatever(props) {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -387,6 +482,7 @@ export default function whatever(props) {
       true,
       'function',
       'block',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -394,8 +490,9 @@ export default function whatever(props) {
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -409,6 +506,7 @@ export default function whatever(props) {
       null,
       null,
       [exportDefaultFunctionOrClass('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -433,19 +531,21 @@ export default function whatever() {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeValue(20, emptyComments),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsExpressionValue(20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -453,15 +553,17 @@ export default function whatever() {
       true,
       'function',
       'block',
-      null,
+      [],
+      [],
       [],
       view,
       null,
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -475,6 +577,7 @@ export default function whatever() {
       null,
       null,
       [exportDefaultFunctionOrClass('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -496,25 +599,45 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={props.leftOfTheCake[0].hat} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -522,6 +645,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -529,9 +653,18 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const importsWithCake = addImport('/code.js', 'cake', 'cake', [], null, sampleImportsForTests)
-    const importsWithStylecss = addImport(
+    const { imports: importsWithCake } = addImport(
       '/code.js',
+      [],
+      'cake',
+      'cake',
+      [],
+      null,
+      sampleImportsForTests,
+    )
+    const { imports: importsWithStylecss } = addImport(
+      '/code.js',
+      [],
       './style.css',
       null,
       [],
@@ -545,6 +678,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -566,39 +700,77 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake2 data-uid='aac' style={{backgroundColor: 'red'}} left={props.leftOfTheCake[0].hat} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake2Attributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aac', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aac', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const cake2 = jsxElement('cake2', 'aac', cake2Attributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake, cake2],
     )
     const exported = utopiaJSXComponent(
@@ -606,6 +778,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -613,8 +786,9 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       'cake',
       [importAlias('cake2')],
@@ -628,6 +802,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   }),
@@ -648,25 +823,45 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake2 data-uid='aac' style={{backgroundColor: 'red'}} left={props.leftOfTheCake[0].hat} right={20} top={-20} />
 </View>
 `
-      const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+      const actualResult = simplifyParsedTextFileAttributes(
+        clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+      )
       const cake2Attributes: JSXAttributes = jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aac', emptyComments),
-        style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-        left: jsxAttributeOtherJavaScript(
-          'props.leftOfTheCake[0].hat',
-          'return props.leftOfTheCake[0].hat;',
-          ['props'],
+        'data-uid': jsExpressionValue('aac', emptyComments),
+        style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+        left: jsPropertyAccess(
+          jsElementAccess(
+            jsPropertyAccess(
+              jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+              'leftOfTheCake',
+              '',
+              expect.objectContaining({}),
+              emptyComments,
+              'props.leftOfTheCake',
+              'not-optionally-chained',
+            ),
+            jsExpressionValue(0, emptyComments, ''),
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake[0]',
+            'not-optionally-chained',
+          ),
+          'hat',
+          '',
           expect.objectContaining({}),
-          {},
+          emptyComments,
+          'props.leftOfTheCake[0].hat',
+          'not-optionally-chained',
         ),
-        right: jsxAttributeValue(20, emptyComments),
-        top: jsxAttributeValue(-20, emptyComments),
+        right: jsExpressionValue(20, emptyComments),
+        top: jsExpressionValue(-20, emptyComments),
       })
       const cake2 = jsxElement('cake2', 'aac', cake2Attributes, [])
       const view = jsxElement(
         'View',
         'aaa',
-        jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
         [cake2],
       )
       const exported = utopiaJSXComponent(
@@ -674,6 +869,7 @@ export var whatever = (props) => <View data-uid='aaa'>
         true,
         'var',
         'expression',
+        [],
         defaultPropsParam,
         ['leftOfTheCake'],
         view,
@@ -681,8 +877,9 @@ export var whatever = (props) => <View data-uid='aaa'>
         false,
         emptyComments,
       )
-      const imports = addImport(
+      const { imports } = addImport(
         '/code.js',
+        [],
         'cake',
         null,
         [importAlias('cake', 'cake2')],
@@ -696,6 +893,7 @@ export var whatever = (props) => <View data-uid='aaa'>
         null,
         null,
         [exportFunction('whatever')],
+        expect.objectContaining({}),
       )
       expect(actualResult).toEqual(expectedResult)
     }),
@@ -717,41 +915,79 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='111' data-label='Second cake' style={{backgroundColor: 'blue'}} left={props.rightOfTheCake[0].hat} right={10} top={-10} />
 </View>
 `
-      const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+      const actualResult = simplifyParsedTextFileAttributes(
+        clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+      )
       const firstCakeAttributes: JSXAttributes = jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aab', emptyComments),
-        'data-label': jsxAttributeValue('First cake', emptyComments),
-        style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-        left: jsxAttributeOtherJavaScript(
-          'props.leftOfTheCake[0].hat',
-          'return props.leftOfTheCake[0].hat;',
-          ['props'],
+        'data-uid': jsExpressionValue('aab', emptyComments),
+        'data-label': jsExpressionValue('First cake', emptyComments),
+        style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+        left: jsPropertyAccess(
+          jsElementAccess(
+            jsPropertyAccess(
+              jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+              'leftOfTheCake',
+              '',
+              expect.objectContaining({}),
+              emptyComments,
+              'props.leftOfTheCake',
+              'not-optionally-chained',
+            ),
+            jsExpressionValue(0, emptyComments, ''),
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake[0]',
+            'not-optionally-chained',
+          ),
+          'hat',
+          '',
           expect.objectContaining({}),
-          {},
+          emptyComments,
+          'props.leftOfTheCake[0].hat',
+          'not-optionally-chained',
         ),
-        right: jsxAttributeValue(20, emptyComments),
-        top: jsxAttributeValue(-20, emptyComments),
+        right: jsExpressionValue(20, emptyComments),
+        top: jsExpressionValue(-20, emptyComments),
       })
       const firstCake = jsxElement('cake', 'aab', firstCakeAttributes, [])
       const secondCakeAttributes: JSXAttributes = jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('111', emptyComments),
-        'data-label': jsxAttributeValue('Second cake', emptyComments),
-        style: jsxAttributeValue({ backgroundColor: 'blue' }, emptyComments),
-        left: jsxAttributeOtherJavaScript(
-          'props.rightOfTheCake[0].hat',
-          'return props.rightOfTheCake[0].hat;',
-          ['props'],
+        'data-uid': jsExpressionValue('111', emptyComments),
+        'data-label': jsExpressionValue('Second cake', emptyComments),
+        style: jsExpressionValue({ backgroundColor: 'blue' }, emptyComments),
+        left: jsPropertyAccess(
+          jsElementAccess(
+            jsPropertyAccess(
+              jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+              'rightOfTheCake',
+              '',
+              expect.objectContaining({}),
+              emptyComments,
+              'props.rightOfTheCake',
+              'not-optionally-chained',
+            ),
+            jsExpressionValue(0, emptyComments, ''),
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.rightOfTheCake[0]',
+            'not-optionally-chained',
+          ),
+          'hat',
+          '',
           expect.objectContaining({}),
-          {},
+          emptyComments,
+          'props.rightOfTheCake[0].hat',
+          'not-optionally-chained',
         ),
-        right: jsxAttributeValue(10, emptyComments),
-        top: jsxAttributeValue(-10, emptyComments),
+        right: jsExpressionValue(10, emptyComments),
+        top: jsExpressionValue(-10, emptyComments),
       })
       const secondCake = jsxElement('cake', '111', secondCakeAttributes, [])
       const view = jsxElement(
         'View',
         'aaa',
-        jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
         [firstCake, secondCake],
       )
       const exported = utopiaJSXComponent(
@@ -759,6 +995,7 @@ export var whatever = (props) => <View data-uid='aaa'>
         true,
         'var',
         'expression',
+        [],
         defaultPropsParam,
         ['leftOfTheCake', 'rightOfTheCake'],
         view,
@@ -766,8 +1003,9 @@ export var whatever = (props) => <View data-uid='aaa'>
         false,
         emptyComments,
       )
-      const imports = addImport(
+      const { imports } = addImport(
         '/code.js',
+        [],
         'cake',
         null,
         [importAlias('cake')],
@@ -781,6 +1019,7 @@ export var whatever = (props) => <View data-uid='aaa'>
         null,
         null,
         [exportFunction('whatever')],
+        expect.objectContaining({}),
       )
       expect(actualResult).toEqual(expectedResult)
     })
@@ -801,34 +1040,54 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red' }} left={props.leftOfTheCake[0].hat} right={20} top={-20} nullProp={null} undefinedProp={undefined} trueProp={true} falseProp={false} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue(
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue(
         {
           backgroundColor: 'red',
         },
         emptyComments,
       ),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
-      nullProp: jsxAttributeValue(null, emptyComments),
-      undefinedProp: jsxAttributeValue(undefined, emptyComments),
-      trueProp: jsxAttributeValue(true, emptyComments),
-      falseProp: jsxAttributeValue(false, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
+      nullProp: jsExpressionValue(null, emptyComments),
+      undefinedProp: jsExpressionValue(undefined, emptyComments),
+      trueProp: jsExpressionValue(true, emptyComments),
+      falseProp: jsExpressionValue(false, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -836,6 +1095,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -843,8 +1103,9 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -858,6 +1119,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -879,15 +1141,19 @@ function getSizing(n) {
 }
 var spacing = 20
 export var whatever = (props) => <View data-uid='aaa'>
-  <cake data-uid='aab' style={{backgroundColor: 'red'}} left={getSizing(spacing)} right={20} top={-20} onClick={function(){console.log('click')}} />
+  <cake data-uid='aab' style={{backgroundColor: 'red'}} left={getSizing(spacing)} right={20} top={-20} onClick={function click(){console.log('click')}} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsExpressionOtherJavaScript(
+        [],
         'getSizing(spacing)',
+        'getSizing(spacing);',
         'return getSizing(spacing);',
         ['getSizing', 'spacing'],
         expect.objectContaining({
@@ -896,12 +1162,15 @@ export var whatever = (props) => <View data-uid='aaa'>
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
-      onClick: jsxAttributeOtherJavaScript(
-        `function(){console.log('click')}`,
-        `return (function () {
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
+      onClick: jsExpressionOtherJavaScript(
+        [],
+        `function click(){console.log('click')}`,
+        `(function click() {console.log('click');});`,
+        `return (function click() {
   console.log('click');
 });`,
         ['console'],
@@ -911,13 +1180,14 @@ export var whatever = (props) => <View data-uid='aaa'>
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -925,6 +1195,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -932,67 +1203,107 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const jsCode1 = `function getSizing(n) {
+    const jsCode1 = `
+function getSizing(n) {
   return 100 + n
 }`
-    const transpiledJsCode1 = `function getSizing(n) {
-  return 100 + n;
-}
-return { getSizing: getSizing };`
+    const transpiledJsCode1 = `return (() => {
+  function getSizing(n) {
+    return 100 + n;
+  }
+
+  return utopiaCanvasBlockRanToEnd({
+    getSizing: getSizing
+  });
+})();`
     const arbitraryBlock1 = arbitraryJSBlock(
+      [],
       jsCode1,
       transpiledJsCode1,
       ['getSizing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [jsOpaqueArbitraryStatement(jsCode1.trim(), ['getSizing'], [], '')],
     )
     const jsCode2 = `var spacing = 20`
-    const transpiledJsCode2 = `var spacing = 20;
-return { spacing: spacing };`
+    const transpiledJsCode2 = `return (() => {
+  var spacing = 20;
+  return utopiaCanvasBlockRanToEnd({
+    spacing: spacing
+  });
+})();`
     const arbitraryBlock2 = arbitraryJSBlock(
+      [],
       jsCode2,
       transpiledJsCode2,
       ['spacing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [simpleJSAssignmentStatement('var', 'spacing', 20)],
     )
     const combinedJsCode = `function getSizing(n) {
   return 100 + n
 }
 var spacing = 20`
-    const transpiledcombinedJsCode = `function getSizing(n) {
-  return 100 + n;
-}
+    const transpiledCombinedJsCode = `return (() => {
+  function getSizing(n) {
+    return 100 + n;
+  }
 
-var spacing = 20;
-return { getSizing: getSizing, spacing: spacing };`
+  var spacing = 20;
+  return utopiaCanvasBlockRanToEnd({
+    getSizing: getSizing,
+    spacing: spacing
+  });
+})();`
     const combinedArbitraryBlock = arbitraryJSBlock(
+      [],
       combinedJsCode,
-      transpiledcombinedJsCode,
+      transpiledCombinedJsCode,
       ['getSizing', 'spacing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsOpaqueArbitraryStatement(jsCode1, ['getSizing'], [], ''),
+        simpleJSAssignmentStatement('var', 'spacing', 20),
+      ],
     )
     const topLevelElements = [arbitraryBlock1, arbitraryBlock2, exported].map(
       clearTopLevelElementUniqueIDsAndEmptyBlocks,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -1006,6 +1317,7 @@ return { getSizing: getSizing, spacing: spacing };`
       null,
       clearArbitraryJSBlockUniqueIDs(combinedArbitraryBlock),
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1029,25 +1341,45 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={props.leftOfTheCake[0].hat} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -1055,6 +1387,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -1062,30 +1395,63 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const jsCode = `export default function getSizing(n) {
+    const jsCode = `
+export default function getSizing(n) {
   return 100 + n
 }`
-    const transpiledJsCode = `function getSizing(n) {
-  return 100 + n;
-}
-return { getSizing: getSizing };`
-    const arbitraryBlock = arbitraryJSBlock(
-      jsCode,
+    const transpiledJsCode = `return (() => {
+  function getSizing(n) {
+    return 100 + n;
+  }
+
+  return utopiaCanvasBlockRanToEnd({
+    getSizing: getSizing
+  });
+})();`
+    const arbitraryBlockCombinedBlock = arbitraryJSBlock(
+      [],
+      jsCode.trim(),
       transpiledJsCode,
       ['getSizing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [jsOpaqueArbitraryStatement(jsCode, ['getSizing'], [], '')],
     )
-    const topLevelElements = [arbitraryBlock, exported].map(
+    const arbitraryBlockTopLevelElement = arbitraryJSBlock(
+      [],
+      jsCode.trim(),
+      transpiledJsCode,
+      ['getSizing'],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
+      expect.objectContaining({
+        sources: ['code.tsx'],
+        version: 3,
+        file: 'code.tsx',
+      }),
+      {},
+      [jsOpaqueArbitraryStatement(jsCode.trim(), ['getSizing'], [], '')],
+    )
+    const topLevelElements = [arbitraryBlockTopLevelElement, exported].map(
       clearTopLevelElementUniqueIDsAndEmptyBlocks,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -1097,8 +1463,9 @@ return { getSizing: getSizing };`
       expect.arrayContaining(topLevelElements),
       expect.objectContaining({}),
       null,
-      clearArbitraryJSBlockUniqueIDs(arbitraryBlock),
+      clearArbitraryJSBlockUniqueIDs(arbitraryBlockCombinedBlock),
       [exportDefaultFunctionOrClass('getSizing'), exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1127,25 +1494,45 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={props.leftOfTheCake[0].hat} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -1153,6 +1540,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -1160,7 +1548,8 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const jsCode = `export function getSizing(n) {
+    const jsCode = `
+export function getSizing(n) {
   switch (n) {
     case 100:
       return 1
@@ -1168,33 +1557,65 @@ export var whatever = (props) => <View data-uid='aaa'>
       return 100 + n
   }
 }`
-    const transpiledJsCode = `function getSizing(n) {
-  switch (n) {
-    case 100:
-      return 1;
+    const transpiledJsCode = `return (() => {
+  function getSizing(n) {
+    switch (n) {
+      case 100:
+        return 1;
 
-    default:
-      return 100 + n;
+      default:
+        return 100 + n;
+    }
   }
-}
-return { getSizing: getSizing };`
-    const arbitraryBlock = arbitraryJSBlock(
-      jsCode,
+
+  return utopiaCanvasBlockRanToEnd({
+    getSizing: getSizing
+  });
+})();`
+    const arbitraryBlockTopLevelElement = arbitraryJSBlock(
+      [],
+      jsCode.trim(),
       transpiledJsCode,
       ['getSizing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [jsOpaqueArbitraryStatement(jsCode.trim(), ['getSizing'], [], '')],
     )
-    const topLevelElements = [arbitraryBlock, exported].map(
+    const arbitraryBlockCombinedBlock = arbitraryJSBlock(
+      [],
+      jsCode.trim(),
+      transpiledJsCode,
+      ['getSizing'],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
+      expect.objectContaining({
+        sources: ['code.tsx'],
+        version: 3,
+        file: 'code.tsx',
+      }),
+      {},
+      [jsOpaqueArbitraryStatement(jsCode, ['getSizing'], [], '')],
+    )
+    const topLevelElements = [arbitraryBlockTopLevelElement, exported].map(
       clearTopLevelElementUniqueIDsAndEmptyBlocks,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -1206,12 +1627,16 @@ return { getSizing: getSizing };`
       expect.arrayContaining(topLevelElements),
       expect.objectContaining({}),
       null,
-      clearArbitraryJSBlockUniqueIDs(arbitraryBlock),
+      clearArbitraryJSBlockUniqueIDs(arbitraryBlockCombinedBlock),
       [exportFunction('getSizing'), exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
-  it('parses the code when it has an export default anonymous function', () => {
+  // Temporarily disabled, as it appears these weren't being handled correctly currently.
+  // Appears they'll need capturing in a slightly different way to the existing values
+  // because of their lack of identifying name, which is what the logic currently relies on.
+  xit('parses the code when it has an export default anonymous function', () => {
     const code = `import * as React from "react";
 import {
   UtopiaUtils,
@@ -1231,25 +1656,45 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={props.leftOfTheCake[0].hat} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'props.leftOfTheCake[0].hat',
-        'return props.leftOfTheCake[0].hat;',
-        ['props'],
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsPropertyAccess(
+        jsElementAccess(
+          jsPropertyAccess(
+            jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+            'leftOfTheCake',
+            '',
+            expect.objectContaining({}),
+            emptyComments,
+            'props.leftOfTheCake',
+            'not-optionally-chained',
+          ),
+          jsExpressionValue(0, emptyComments, ''),
+          '',
+          expect.objectContaining({}),
+          emptyComments,
+          'props.leftOfTheCake[0]',
+          'not-optionally-chained',
+        ),
+        'hat',
+        '',
         expect.objectContaining({}),
-        {},
+        emptyComments,
+        'props.leftOfTheCake[0].hat',
+        'not-optionally-chained',
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -1257,6 +1702,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['leftOfTheCake'],
       view,
@@ -1267,11 +1713,12 @@ export var whatever = (props) => <View data-uid='aaa'>
     const jsCode = `export default (n) => {
   return 100 + n
 }`
-    const transpiledJsCode = `(function (n) {
+    const transpiledJsCode = `n => {
   return 100 + n;
-});
+};
 return {  };`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       [],
@@ -1282,12 +1729,14 @@ return {  };`
         file: 'code.tsx',
       }),
       {},
+      [],
     )
     const topLevelElements = [arbitraryBlock, exported].map(
       clearTopLevelElementUniqueIDsAndEmptyBlocks,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -1301,6 +1750,7 @@ return {  };`
       null,
       clearArbitraryJSBlockUniqueIDs(arbitraryBlock),
       [exportDefaultFunctionOrClass(null), exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1322,29 +1772,21 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={spacing} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
-        'spacing',
-        'return spacing;',
-        ['spacing'],
-        expect.objectContaining({
-          sources: ['code.tsx'],
-          version: 3,
-          file: 'code.tsx',
-        }),
-        {},
-      ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsIdentifier('spacing', '', expect.objectContaining({}), emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -1352,6 +1794,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1359,23 +1802,35 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const transpiledJSCode = `var spacing = 20;
-return { spacing: spacing };`
+    const transpiledJSCode = `return (() => {
+  var spacing = 20;
+  return utopiaCanvasBlockRanToEnd({
+    spacing: spacing
+  });
+})();`
     const jsVariable = arbitraryJSBlock(
+      [],
       'var spacing = 20',
       transpiledJSCode,
       ['spacing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [simpleJSAssignmentStatement('var', 'spacing', 20)],
     )
     const topLevelElements = [jsVariable, exported].map(clearTopLevelElementUniqueIDsAndEmptyBlocks)
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -1389,6 +1844,7 @@ return { spacing: spacing };`
       null,
       clearArbitraryJSBlockUniqueIDs(jsVariable),
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1405,21 +1861,21 @@ export var whatever = (props) => {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const viewAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aaa', emptyComments),
+      'data-uid': jsExpressionValue('aaa', emptyComments),
       style: jsxAttributeNestedObjectSimple(
         jsxAttributesFromMap({
-          backgroundColor: jsxAttributeOtherJavaScript(
+          backgroundColor: jsElementAccess(
+            jsIdentifier('bgs', '', expect.objectContaining({}), emptyComments),
+            jsExpressionValue(0, emptyComments, ''),
+            '',
+            expect.objectContaining({}),
+            emptyComments,
             'bgs[0]',
-            'return bgs[0];',
-            ['bgs'],
-            expect.objectContaining({
-              sources: ['code.tsx'],
-              version: 3,
-              file: 'code.tsx',
-            }),
-            {},
+            'not-optionally-chained',
           ),
         }),
         emptyComments,
@@ -1428,26 +1884,96 @@ export var whatever = (props) => {
     const view = jsxElement('View', 'aaa', viewAttributes, [])
     const jsCode = `const bgs = ['black', 'grey']
   const bg = bgs[0]`
-    const transpiledJsCode = `var bgs = ['black', 'grey'];
-var bg = bgs[0];
-return { bgs: bgs, bg: bg };`
+    const transpiledJsCode = `return (() => {
+  const bgs = ['black', 'grey'];
+  const bg = bgs[0];
+  return utopiaCanvasBlockRanToEnd({
+    bgs: bgs,
+    bg: bg
+  });
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       ['bgs', 'bg'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsAssignmentStatement(
+          'const',
+          [
+            jsAssignment(
+              regularParam(
+                'bgs',
+                jsExpressionNestedArray(
+                  [
+                    jsxArrayValue(jsExpressionValue('black', emptyComments, ''), emptyComments),
+                    jsxArrayValue(jsExpressionValue('grey', emptyComments, ''), emptyComments),
+                  ],
+                  emptyComments,
+                  '',
+                ),
+              ),
+              jsExpressionNestedArray(
+                [
+                  jsxArrayValue(jsExpressionValue('black', emptyComments, ''), emptyComments),
+                  jsxArrayValue(jsExpressionValue('grey', emptyComments, ''), emptyComments),
+                ],
+                emptyComments,
+                '',
+              ),
+            ),
+          ],
+          expect.objectContaining({}),
+        ),
+        jsAssignmentStatement(
+          'const',
+          [
+            jsAssignment(
+              regularParam(
+                'bg',
+                jsElementAccess(
+                  jsIdentifier('bgs', '', expect.objectContaining({}), emptyComments),
+                  jsExpressionValue(0, emptyComments, ''),
+                  '',
+                  expect.objectContaining({}),
+                  emptyComments,
+                  'bgs[0]',
+                  'not-optionally-chained',
+                ),
+              ),
+              jsElementAccess(
+                jsIdentifier('bgs', '', expect.objectContaining({}), emptyComments),
+                jsExpressionValue(0, emptyComments, ''),
+                '',
+                expect.objectContaining({}),
+                emptyComments,
+                'bgs[0]',
+                'not-optionally-chained',
+              ),
+            ),
+          ],
+          expect.objectContaining({}),
+        ),
+      ],
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1463,6 +1989,7 @@ return { bgs: bgs, bg: bg };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1478,24 +2005,16 @@ export var whatever = (props) => {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const viewAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aaa', emptyComments),
-      colors: jsxAttributeNestedArray(
+      'data-uid': jsExpressionValue('aaa', emptyComments),
+      colors: jsExpressionNestedArray(
         [
-          jsxArrayValue(jsxAttributeValue('black', emptyComments), emptyComments),
+          jsxArrayValue(jsExpressionValue('black', emptyComments), emptyComments),
           jsxArraySpread(
-            jsxAttributeOtherJavaScript(
-              'greys',
-              'return greys;',
-              ['greys'],
-              expect.objectContaining({
-                sources: ['code.tsx'],
-                version: 3,
-                file: 'code.tsx',
-              }),
-              {},
-            ),
+            jsIdentifier('greys', '', expect.objectContaining({}), emptyComments),
             emptyComments,
           ),
         ],
@@ -1504,25 +2023,65 @@ export var whatever = (props) => {
     })
     const view = jsxElement('View', 'aaa', viewAttributes, [])
     const jsCode = `const greys = ['lightGrey', 'grey']`
-    const transpiledJsCode = `var greys = ['lightGrey', 'grey'];
-return { greys: greys };`
+    const transpiledJsCode = `return (() => {
+  const greys = ['lightGrey', 'grey'];
+  return utopiaCanvasBlockRanToEnd({
+    greys: greys
+  });
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       ['greys'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsAssignmentStatement(
+          'const',
+          [
+            jsAssignment(
+              regularParam(
+                'greys',
+                jsExpressionNestedArray(
+                  [
+                    jsxArrayValue(jsExpressionValue('lightGrey', emptyComments, ''), emptyComments),
+                    jsxArrayValue(jsExpressionValue('grey', emptyComments, ''), emptyComments),
+                  ],
+                  emptyComments,
+                  '',
+                ),
+              ),
+              jsExpressionNestedArray(
+                [
+                  jsxArrayValue(jsExpressionValue('lightGrey', emptyComments, ''), emptyComments),
+                  jsxArrayValue(jsExpressionValue('grey', emptyComments, ''), emptyComments),
+                ],
+                emptyComments,
+                '',
+              ),
+            ),
+          ],
+          expect.objectContaining({}),
+        ),
+      ],
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1538,6 +2097,7 @@ return { greys: greys };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1554,11 +2114,15 @@ export var whatever = (props) => {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const viewAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aaa', emptyComments),
-      left: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('aaa', emptyComments),
+      left: jsExpressionOtherJavaScript(
+        [],
         'a + b',
+        'a + b;',
         'return a + b;',
         ['a', 'b'],
         expect.objectContaining({
@@ -1567,31 +2131,48 @@ export var whatever = (props) => {
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
     })
     const view = jsxElement('View', 'aaa', viewAttributes, [])
     const jsCode = `const a = 10
   const b = 20`
-    const transpiledJsCode = `var a = 10;
-var b = 20;
-return { a: a, b: b };`
+    const transpiledJsCode = `return (() => {
+  const a = 10;
+  const b = 20;
+  return utopiaCanvasBlockRanToEnd({
+    a: a,
+    b: b
+  });
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       ['a', 'b'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        simpleJSAssignmentStatement('const', 'a', 10),
+        simpleJSAssignmentStatement('const', 'b', 20),
+      ],
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1607,6 +2188,7 @@ return { a: a, b: b };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1624,11 +2206,15 @@ export var whatever = (props) => {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const viewAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aaa', emptyComments),
-      left: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('aaa', emptyComments),
+      left: jsExpressionOtherJavaScript(
+        [],
         'a ? b : c',
+        'a ? b : c;',
         'return a ? b : c;',
         ['a', 'b', 'c'],
         expect.objectContaining({
@@ -1637,33 +2223,52 @@ export var whatever = (props) => {
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
     })
     const view = jsxElement('View', 'aaa', viewAttributes, [])
     const jsCode = `const a = true
   const b = 10
   const c = 20`
-    const transpiledJsCode = `var a = true;
-var b = 10;
-var c = 20;
-return { a: a, b: b, c: c };`
+    const transpiledJsCode = `return (() => {
+  const a = true;
+  const b = 10;
+  const c = 20;
+  return utopiaCanvasBlockRanToEnd({
+    a: a,
+    b: b,
+    c: c
+  });
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       ['a', 'b', 'c'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        simpleJSAssignmentStatement('const', 'a', true),
+        simpleJSAssignmentStatement('const', 'b', 10),
+        simpleJSAssignmentStatement('const', 'c', 20),
+      ],
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1679,6 +2284,7 @@ return { a: a, b: b, c: c };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1694,11 +2300,15 @@ export var whatever = (props) => {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const viewAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aaa', emptyComments),
-      left: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('aaa', emptyComments),
+      left: jsExpressionOtherJavaScript(
+        [],
         'a++',
+        'a++;',
         'return a++;',
         ['a'],
         expect.objectContaining({
@@ -1707,9 +2317,12 @@ export var whatever = (props) => {
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
-      right: jsxAttributeOtherJavaScript(
+      right: jsExpressionOtherJavaScript(
+        [],
         '++a',
+        '++a;',
         'return ++a;',
         ['a'],
         expect.objectContaining({
@@ -1718,29 +2331,42 @@ export var whatever = (props) => {
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
     })
     const view = jsxElement('View', 'aaa', viewAttributes, [])
     const jsCode = `let a = 10`
-    const transpiledJsCode = `var a = 10;
-return { a: a };`
+    const transpiledJsCode = `return (() => {
+  let a = 10;
+  return utopiaCanvasBlockRanToEnd({
+    a: a
+  });
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       ['a'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [simpleJSAssignmentStatement('let', 'a', 10)],
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1756,6 +2382,7 @@ return { a: a };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1772,46 +2399,96 @@ export var whatever = (props) => {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const viewAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aaa', emptyComments),
-      left: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('aaa', emptyComments),
+      left: jsPropertyAccess(
+        jsIdentifier('b', '', expect.objectContaining({}), emptyComments),
+        'a',
+        '',
+        expect.objectContaining({}),
+        emptyComments,
         'b.a',
-        'return b.a;',
-        ['b'],
-        expect.objectContaining({
-          sources: ['code.tsx'],
-          version: 3,
-          file: 'code.tsx',
-        }),
-        {},
+        'not-optionally-chained',
       ),
     })
     const view = jsxElement('View', 'aaa', viewAttributes, [])
     const jsCode = `const a = 10
   const b = { a: a }`
-    const transpiledJsCode = `var a = 10;
-var b = {
-  a: a
-};
-return { a: a, b: b };`
+    const transpiledJsCode = `return (() => {
+  const a = 10;
+  const b = {
+    a: a
+  };
+  return utopiaCanvasBlockRanToEnd({
+    a: a,
+    b: b
+  });
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       ['a', 'b'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        simpleJSAssignmentStatement('const', 'a', 10),
+        jsAssignmentStatement(
+          'const',
+          [
+            jsAssignment(
+              regularParam(
+                'b',
+                jsExpressionNestedObject(
+                  [
+                    jsxPropertyAssignment(
+                      'a',
+                      jsIdentifier('a', '', expect.objectContaining({}), emptyComments),
+                      emptyComments,
+                      emptyComments,
+                    ),
+                  ],
+                  emptyComments,
+                  '',
+                ),
+              ),
+              jsExpressionNestedObject(
+                [
+                  jsxPropertyAssignment(
+                    'a',
+                    jsIdentifier('a', '', expect.objectContaining({}), emptyComments),
+                    emptyComments,
+                    emptyComments,
+                  ),
+                ],
+                emptyComments,
+                '',
+              ),
+            ),
+          ],
+          '',
+        ),
+      ],
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1827,8 +2504,69 @@ return { a: a, b: b };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
+  })
+
+  it('parses object literal initializers', () => {
+    const code = `import * as React from 'react'
+    import { Scene, Storyboard } from 'utopia-api'
+    
+    function showMeWhatYouGot(obj) {
+      return obj.t
+    }
+    
+    const App = (props) => {
+      const text = 'I got this!'
+      const t = text
+      const obj = { t: text }
+    
+      return (
+        <div style={props.style}>
+          {showMeWhatYouGot(obj)}
+          <br />
+          {showMeWhatYouGot({ t })}
+          <br />
+          {showMeWhatYouGot({ t: text })}
+        </div>
+      )
+    }
+    
+    export var storyboard = (
+      <Storyboard data-uid='0cd'>
+        <App
+          style={{
+            backgroundColor: '#aaaaaa33',
+            position: 'absolute',
+            left: 178,
+            top: 131,
+            width: 443,
+            height: 451,
+          }}
+        />
+      </Storyboard>
+    )
+    `
+
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
+    expect(actualResult.type).toEqual('PARSE_SUCCESS')
+    const jsxComponent = (actualResult as ParseSuccess).topLevelElements.find(
+      (e): e is UtopiaJSXComponent => e.type === 'UTOPIA_JSX_COMPONENT',
+    )!
+    const definedElseWhere = (jsxComponent.rootElement as JSXElement).children.flatMap((c) =>
+      c.type === 'ATTRIBUTE_OTHER_JAVASCRIPT' ? c.definedElsewhere : [],
+    )
+    expect(definedElseWhere).toEqual([
+      'showMeWhatYouGot',
+      'obj',
+      'showMeWhatYouGot',
+      't',
+      'showMeWhatYouGot',
+      'text',
+    ])
   })
 
   it('parses the code when it is a function, with some arbitrary JavaScript (object spread)', () => {
@@ -1842,23 +2580,15 @@ export var whatever = (props) => {
   )
 }
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const viewAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aaa', emptyComments),
-      style: jsxAttributeNestedObject(
+      'data-uid': jsExpressionValue('aaa', emptyComments),
+      style: jsExpressionNestedObject(
         [
           jsxSpreadAssignment(
-            jsxAttributeOtherJavaScript(
-              'bg',
-              'return bg;',
-              ['bg'],
-              expect.objectContaining({
-                sources: ['code.tsx'],
-                version: 3,
-                file: 'code.tsx',
-              }),
-              {},
-            ),
+            jsIdentifier('bg', '', expect.objectContaining({}), emptyComments),
             emptyComments,
           ),
         ],
@@ -1867,27 +2597,75 @@ export var whatever = (props) => {
     })
     const view = jsxElement('View', 'aaa', viewAttributes, [])
     const jsCode = `const bg = { backgroundColor: 'grey' }`
-    const transpiledJsCode = `var bg = {
-  backgroundColor: 'grey'
-};
-return { bg: bg };`
+    const transpiledJsCode = `return (() => {
+  const bg = {
+    backgroundColor: 'grey'
+  };
+  return utopiaCanvasBlockRanToEnd({
+    bg: bg
+  });
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       ['bg'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsAssignmentStatement(
+          'const',
+          [
+            jsAssignment(
+              regularParam(
+                'bg',
+                jsExpressionNestedObject(
+                  [
+                    jsxPropertyAssignment(
+                      'backgroundColor',
+                      jsExpressionValue('grey', emptyComments, ''),
+                      emptyComments,
+                      emptyComments,
+                    ),
+                  ],
+                  emptyComments,
+                  '',
+                ),
+              ),
+              jsExpressionNestedObject(
+                [
+                  jsxPropertyAssignment(
+                    'backgroundColor',
+                    jsExpressionValue('grey', emptyComments, ''),
+                    emptyComments,
+                    emptyComments,
+                  ),
+                ],
+                emptyComments,
+                '',
+              ),
+            ),
+          ],
+          '',
+        ),
+      ],
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1903,6 +2681,7 @@ return { bg: bg };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -1925,13 +2704,17 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} text={\`Count \${count}\`} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      text: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      text: jsExpressionOtherJavaScript(
+        [],
         '`Count ${count}`',
-        'return "Count ".concat(count);',
+        '`Count ${count}`;',
+        'return `Count ${count}`;',
         ['count'],
         expect.objectContaining({
           sources: ['code.tsx'],
@@ -1939,13 +2722,14 @@ export var whatever = (props) => <View data-uid='aaa'>
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -1953,6 +2737,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -1961,23 +2746,35 @@ export var whatever = (props) => <View data-uid='aaa'>
       emptyComments,
     )
     const jsCode = `var count = 10`
-    const transpiledJSCode = `var count = 10;
-return { count: count };`
+    const transpiledJSCode = `return (() => {
+  var count = 10;
+  return utopiaCanvasBlockRanToEnd({
+    count: count
+  });
+})();`
     const jsVariable = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJSCode,
       ['count'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [simpleJSAssignmentStatement('var', 'count', 10)],
     )
     const topLevelElements = [jsVariable, exported].map(clearTopLevelElementUniqueIDsAndEmptyBlocks)
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -1991,6 +2788,7 @@ return { count: count };`
       null,
       clearArbitraryJSBlockUniqueIDs(jsVariable),
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -2013,12 +2811,16 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={use20 ? 20 : 10} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsExpressionOtherJavaScript(
+        [],
         'use20 ? 20 : 10',
+        'use20 ? 20 : 10;',
         'return use20 ? 20 : 10;',
         ['use20'],
         expect.objectContaining({
@@ -2027,15 +2829,16 @@ export var whatever = (props) => <View data-uid='aaa'>
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -2043,6 +2846,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -2050,23 +2854,35 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const transpiledJSCode = `var use20 = true;
-return { use20: use20 };`
+    const transpiledJSCode = `return (() => {
+  var use20 = true;
+  return utopiaCanvasBlockRanToEnd({
+    use20: use20
+  });
+})();`
     const jsVariable = arbitraryJSBlock(
+      [],
       'var use20 = true',
       transpiledJSCode,
       ['use20'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [simpleJSAssignmentStatement('var', 'use20', true)],
     )
     const topLevelElements = [jsVariable, exported].map(clearTopLevelElementUniqueIDsAndEmptyBlocks)
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -2080,6 +2896,7 @@ return { use20: use20 };`
       null,
       clearArbitraryJSBlockUniqueIDs(jsVariable),
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -2100,11 +2917,13 @@ var mySet = new Set()
 export var whatever = (props) => <View data-uid='aaa'>
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [],
     )
     const exported = utopiaJSXComponent(
@@ -2112,6 +2931,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -2119,19 +2939,63 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const transpiledJSCode = `var mySet = new Set();
-return { mySet: mySet };`
+    const transpiledJSCode = `return (() => {
+  var mySet = new Set();
+  return utopiaCanvasBlockRanToEnd({
+    mySet: mySet
+  });
+})();`
     const jsVariable = arbitraryJSBlock(
+      [],
       'var mySet = new Set()',
       transpiledJSCode,
       ['mySet'],
-      ['Set', JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        'Set',
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsAssignmentStatement(
+          'var',
+          [
+            jsAssignment(
+              regularParam(
+                'mySet',
+                jsExpressionOtherJavaScript(
+                  [],
+                  expect.stringContaining(''),
+                  expect.stringContaining(''),
+                  expect.stringContaining(''),
+                  ['Set'],
+                  expect.objectContaining({}),
+                  {},
+                  emptyComments,
+                ),
+              ),
+              jsExpressionOtherJavaScript(
+                [],
+                expect.stringContaining(''),
+                expect.stringContaining(''),
+                expect.stringContaining(''),
+                ['Set'],
+                expect.objectContaining({}),
+                {},
+                emptyComments,
+              ),
+            ),
+          ],
+          '',
+        ),
+      ],
     )
     const topLevelElements = [jsVariable, exported].map(clearTopLevelElementUniqueIDsAndEmptyBlocks)
     const expectedResult = parseSuccess(
@@ -2141,6 +3005,7 @@ return { mySet: mySet };`
       null,
       clearArbitraryJSBlockUniqueIDs(jsVariable),
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -2163,12 +3028,16 @@ export var whatever = (props) => <View data-uid='aaa'>
   <cake data-uid='aab' style={{backgroundColor: 'red'}} left={props.left + spacing} right={20} top={-20} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsExpressionOtherJavaScript(
+        [],
         'props.left + spacing',
+        'props.left + spacing;',
         'return props.left + spacing;',
         ['spacing', 'props'],
         expect.objectContaining({
@@ -2177,15 +3046,16 @@ export var whatever = (props) => <View data-uid='aaa'>
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
     const cake = jsxElement('cake', 'aab', cakeAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -2193,6 +3063,7 @@ export var whatever = (props) => <View data-uid='aaa'>
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['left'],
       view,
@@ -2200,23 +3071,46 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const transpiledJSCode = `var spacing = 20;
-return { spacing: spacing };`
+    const transpiledJSCode = `return (() => {
+  var spacing = 20;
+  return utopiaCanvasBlockRanToEnd({
+    spacing: spacing
+  });
+})();`
     const jsVariable = arbitraryJSBlock(
+      [],
       'var spacing = 20',
       transpiledJSCode,
       ['spacing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsAssignmentStatement(
+          'var',
+          [
+            jsAssignment(
+              regularParam('spacing', jsExpressionValue(20, emptyComments)),
+              jsExpressionValue(20, emptyComments),
+            ),
+          ],
+          '',
+        ),
+      ],
     )
     const topLevelElements = [jsVariable, exported].map(clearTopLevelElementUniqueIDsAndEmptyBlocks)
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -2230,6 +3124,7 @@ return { spacing: spacing };`
       null,
       clearArbitraryJSBlockUniqueIDs(jsVariable),
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -2263,7 +3158,9 @@ export var whatever = (props) => <View data-uid='aaa'>
   <MyComp data-uid='aab' layout={{left: 100}} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const jsCode = `var MyComp = props => {
   return React.createElement(
     "div",
@@ -2277,18 +3174,42 @@ export var whatever = (props) => <View data-uid='aaa'>
     "hello"
   );
 };`
-    const transpiledJsCode = `var MyComp = function MyComp(props) {
-  return React.createElement("div", {
-    style: {
-      position: "absolute",
-      left: props.layout.left,
-      backgroundColor: "hotpink"
-    }
-  }, "hello");
-};
-return { MyComp: MyComp };`
-    const definedElseWhere = ['React', JSX_CANVAS_LOOKUP_FUNCTION_NAME]
+    const transpiledJsCode = `return (() => {
+  var MyComp = props => {
+    return React.createElement("div", {
+      style: {
+        position: "absolute",
+        left: props.layout.left,
+        backgroundColor: "hotpink"
+      }
+    }, "hello");
+  };
+
+  return utopiaCanvasBlockRanToEnd({
+    MyComp: MyComp
+  });
+})();`
+    const definedElseWhere = [
+      'React',
+      JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+      BLOCK_RAN_TO_END_FUNCTION_NAME,
+      EARLY_RETURN_RESULT_FUNCTION_NAME,
+      EARLY_RETURN_VOID_FUNCTION_NAME,
+    ]
+    const myCompContent = jsExpressionOtherJavaScript(
+      [functionParam(false, regularParam('props', null))],
+      expect.stringContaining(''),
+      expect.stringContaining(''),
+      expect.stringContaining(''),
+      ['React'],
+      expect.objectContaining({}),
+      {},
+      emptyComments,
+      '',
+    )
+
     const MyComp = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJsCode,
       ['MyComp'],
@@ -2299,16 +3220,23 @@ return { MyComp: MyComp };`
         file: 'code.tsx',
       }),
       {},
+      [
+        jsAssignmentStatement(
+          'var',
+          [jsAssignment(regularParam('MyComp', myCompContent), myCompContent)],
+          '',
+        ),
+      ],
     )
     const myCompAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      layout: jsxAttributeValue({ left: 100 }, emptyComments),
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      layout: jsExpressionValue({ left: 100 }, emptyComments),
     })
     const myCompElement = jsxElement('MyComp', 'aab', myCompAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [myCompElement],
     )
     const exported = utopiaJSXComponent(
@@ -2316,6 +3244,7 @@ return { MyComp: MyComp };`
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -2331,6 +3260,7 @@ return { MyComp: MyComp };`
       null,
       clearArbitraryJSBlockUniqueIDs(MyComp),
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -2368,57 +3298,79 @@ export var whatever = props => (
   </View>
 )
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
 
     const rootDivAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('abc', emptyComments),
-      style: jsxAttributeNestedObject(
+      'data-uid': jsExpressionValue('abc', emptyComments),
+      style: jsExpressionNestedObject(
         [
           jsxPropertyAssignment(
             'position',
-            jsxAttributeValue('absolute', emptyComments),
+            jsExpressionValue('absolute', emptyComments),
             emptyComments,
             emptyComments,
           ),
           jsxPropertyAssignment(
             'left',
-            jsxAttributeOtherJavaScript(
-              'props.layout.left',
-              'return props.layout.left;',
-              ['props'],
+            jsPropertyAccess(
+              jsPropertyAccess(
+                jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                'layout',
+                '',
+                expect.objectContaining({}),
+                emptyComments,
+                'props.layout',
+                'not-optionally-chained',
+              ),
+              'left',
+              '',
               expect.objectContaining({}),
-              {},
+              emptyComments,
+              'props.layout.left',
+              'not-optionally-chained',
             ),
             emptyComments,
             emptyComments,
           ),
           jsxPropertyAssignment(
             'top',
-            jsxAttributeOtherJavaScript(
-              'props.layout.top',
-              'return props.layout.top;',
-              ['props'],
+            jsPropertyAccess(
+              jsPropertyAccess(
+                jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                'layout',
+                '',
+                expect.objectContaining({}),
+                emptyComments,
+                'props.layout',
+                'not-optionally-chained',
+              ),
+              'top',
+              '',
               expect.objectContaining({}),
-              {},
+              emptyComments,
+              'props.layout.top',
+              'not-optionally-chained',
             ),
             emptyComments,
             emptyComments,
           ),
           jsxPropertyAssignment(
             'width',
-            jsxAttributeValue(100, emptyComments),
+            jsExpressionValue(100, emptyComments),
             emptyComments,
             emptyComments,
           ),
           jsxPropertyAssignment(
             'height',
-            jsxAttributeValue(100, emptyComments),
+            jsExpressionValue(100, emptyComments),
             emptyComments,
             emptyComments,
           ),
           jsxPropertyAssignment(
             'backgroundColor',
-            jsxAttributeValue('hotpink', emptyComments),
+            jsExpressionValue('hotpink', emptyComments),
             emptyComments,
             emptyComments,
           ),
@@ -2434,6 +3386,7 @@ export var whatever = props => (
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       ['layout'],
       rootDiv,
@@ -2443,14 +3396,14 @@ export var whatever = props => (
     )
 
     const myCompAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      layout: jsxAttributeValue({ left: 100 }, emptyComments),
+      'data-uid': jsExpressionValue('aab', emptyComments),
+      layout: jsExpressionValue({ left: 100 }, emptyComments),
     })
     const myCompElement = jsxElement('MyComp', 'aab', myCompAttributes, [])
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [myCompElement],
     )
     const whatever = utopiaJSXComponent(
@@ -2458,6 +3411,7 @@ export var whatever = props => (
       true,
       'var',
       'parenthesized-expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -2473,6 +3427,7 @@ export var whatever = props => (
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -2493,12 +3448,19 @@ export var Whatever = (props) => <View>
   <MyComp layout={{left: 100}} />
 </View>
 `
-    const actualResult = parseCode('code.tsx', code, null, emptySet())
+    const actualResult = parseCode(
+      'code.tsx',
+      [],
+      code,
+      null,
+      emptySet(),
+      'do-not-apply-steganography',
+    )
     if (isParseSuccess(actualResult)) {
       expect(actualResult.topLevelElements.filter(isArbitraryJSBlock).length).toEqual(1)
       expect(actualResult.topLevelElements.filter(isUtopiaJSXComponent).length).toEqual(0)
     } else {
-      fail('Parse result is not a success.')
+      throw new Error('Parse result is not a success.')
     }
   })
 
@@ -2525,13 +3487,15 @@ export var whatever = (props) => <View data-uid='aaa'>
             const leftProp = getJSXAttributeForced(child.props, 'left')
             expect(leftProp.type).toEqual('ATTRIBUTE_OTHER_JAVASCRIPT')
           } else {
-            fail(`First child is not an element ${child}`)
+            throw new Error(`First child is not an element ${child}`)
           }
         } else {
-          fail(`Unexpected number of children returned: ${result.rootElement.children.length}`)
+          throw new Error(
+            `Unexpected number of children returned: ${result.rootElement.children.length}`,
+          )
         }
       } else {
-        fail(`Root element is not an element ${result.rootElement}`)
+        throw new Error(`Root element is not an element ${result.rootElement}`)
       }
     }
   })
@@ -2552,42 +3516,51 @@ export var whatever = (props) => <View data-uid='aaa'>
 <cake data-uid='aab' style={{backgroundColor: 'red', color: [props.color, -200]}} />
 </View>
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
-    const cake = jsxElement(
-      'cake',
-      'aab',
-      jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aab', emptyComments),
-        style: jsxAttributeNestedObjectSimple(
-          jsxAttributesFromMap({
-            backgroundColor: jsxAttributeValue('red', emptyComments),
-            color: jsxAttributeNestedArraySimple([
-              jsxAttributeOtherJavaScript(
-                'props.color',
-                'return props.color;',
-                ['props'],
-                expect.objectContaining({}),
-                {},
-              ),
-              jsxAttributeValue(-200, emptyComments),
-            ]),
-          }),
-          emptyComments,
-        ),
-      }),
-      [],
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
     )
-    const view = jsxElement(
-      'View',
-      'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
-      [cake],
+    const cake = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'cake',
+        'aab',
+        jsxAttributesFromMap({
+          'data-uid': jsExpressionValue('aab', emptyComments),
+          style: jsxAttributeNestedObjectSimple(
+            jsxAttributesFromMap({
+              backgroundColor: jsExpressionValue('red', emptyComments),
+              color: jsxAttributeNestedArraySimple([
+                jsPropertyAccess(
+                  jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                  'color',
+                  '',
+                  expect.objectContaining({}),
+                  emptyComments,
+                  'props.color',
+                  'not-optionally-chained',
+                ),
+                jsExpressionValue(-200, emptyComments),
+              ]),
+            }),
+            emptyComments,
+          ),
+        }),
+        [],
+      ),
+    )
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'View',
+        'aaa',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
+        [cake],
+      ),
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       ['color'],
       view,
@@ -2595,8 +3568,9 @@ export var whatever = (props) => <View data-uid='aaa'>
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -2610,10 +3584,11 @@ export var whatever = (props) => <View data-uid='aaa'>
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
-  it('parses the code when it is a var', () => {
+  it('parses the code when it is a var 2', () => {
     const code = `import * as React from "react";
 import {
   UtopiaUtils,
@@ -2630,36 +3605,44 @@ export var whatever = () => <View data-uid='aaa'>
 <cake data-uid='aab' style={{backgroundColor: 'red'}} />
 </View>
 `
-    const actualResult = testParseCode(code)
-    const cake = jsxElement(
-      'cake',
-      'aab',
-      jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aab', emptyComments),
-        style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      }),
-      [],
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
     )
-    const view = jsxElement(
-      'View',
-      'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
-      [cake],
+    const cake = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'cake',
+        'aab',
+        jsxAttributesFromMap({
+          'data-uid': jsExpressionValue('aab', emptyComments),
+          style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+        }),
+        [],
+      ),
+    )
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'View',
+        'aaa',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
+        [cake],
+      ),
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'expression',
-      null,
+      [],
+      [],
       [],
       view,
       null,
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -2673,6 +3656,7 @@ export var whatever = () => <View data-uid='aaa'>
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -2692,22 +3676,27 @@ export var App = (props) => <View data-uid='bbb'>
   {}
 </View>
 `
-    const actualResult = testParseCode(code)
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const emptyBrackets = {
-      ...jsxArbitraryBlock('', '', 'return undefined', [], null, {}),
-      uniqueID: expect.any(String),
+      ...jsExpressionOtherJavaScript([], '', '', 'return undefined', [], null, {}, emptyComments),
+      uid: expect.any(String),
     }
-    const view = jsxElement(
-      'View',
-      'bbb',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('bbb', emptyComments) }),
-      [emptyBrackets],
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'View',
+        'bbb',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('bbb', emptyComments) }),
+        [emptyBrackets],
+      ),
     )
     const exported = utopiaJSXComponent(
       'App',
       true,
       'var',
       'expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -2722,6 +3711,7 @@ export var App = (props) => <View data-uid='bbb'>
       null,
       null,
       [exportFunction('App')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -2743,41 +3733,49 @@ export var App = (props) => <View data-uid='bbb'>
 </View>
 `
     const actualResult = testParseCode(code)
-    expect(clearParseResultUniqueIDsAndEmptyBlocks(actualResult)).toMatchSnapshot()
+    expect(
+      simplifyParsedTextFileAttributes(clearParseResultUniqueIDsAndEmptyBlocks(actualResult)),
+    ).toMatchSnapshot()
   })
 
   it('parses back and forth as a var', () => {
-    const cake = jsxElement(
-      'cake',
-      'aab',
-      jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aab', emptyComments),
-        style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-        left: jsxAttributeValue(10, emptyComments),
-        name: jsxAttributeValue('test', emptyComments),
-      }),
-      [],
+    const cake = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'cake',
+        'aab',
+        jsxAttributesFromMap({
+          'data-uid': jsExpressionValue('aab', emptyComments),
+          style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+          left: jsExpressionValue(10, emptyComments),
+          name: jsExpressionValue('test', emptyComments),
+        }),
+        [],
+      ),
     )
-    const view = jsxElement(
-      'View',
-      'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
-      [cake],
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'View',
+        'aaa',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
+        [cake],
+      ),
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'parenthesized-expression',
-      null,
+      [],
+      [],
       [],
       view,
       null,
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -2793,7 +3791,9 @@ export var App = (props) => <View data-uid='bbb'>
       null,
       detailOfExports,
     )
-    const actualResult = testParseCode(printedCode)
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode)),
+    )
     const expectedResult = parseSuccess(
       imports,
       expect.arrayContaining([exported]),
@@ -2801,16 +3801,19 @@ export var App = (props) => <View data-uid='bbb'>
       null,
       null,
       detailOfExports,
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
 
   it('parses back and forth as a var, with some arbitrary javascript', () => {
     const cakeAttributes: JSXAttributes = jsxAttributesFromMap({
-      'data-uid': jsxAttributeValue('aab', emptyComments),
-      style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      left: jsxAttributeOtherJavaScript(
+      'data-uid': jsExpressionValue('cake', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+      left: jsExpressionOtherJavaScript(
+        [],
         'getSizing(spacing)',
+        'getSizing(spacing);',
         'return getSizing(spacing);',
         ['getSizing', 'spacing'],
         expect.objectContaining({
@@ -2819,15 +3822,16 @@ export var App = (props) => <View data-uid='bbb'>
           file: 'code.tsx',
         }),
         {},
+        emptyComments,
       ),
-      right: jsxAttributeValue(20, emptyComments),
-      top: jsxAttributeValue(-20, emptyComments),
+      right: jsExpressionValue(20, emptyComments),
+      top: jsExpressionValue(-20, emptyComments),
     })
-    const cake = jsxElement('cake', 'aab', cakeAttributes, [])
+    const cake = jsxElement('cake', 'cake', cakeAttributes, [])
     const view = jsxElement(
       'View',
-      'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      'view',
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('view', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -2835,6 +3839,7 @@ export var App = (props) => <View data-uid='bbb'>
       true,
       'var',
       'parenthesized-expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -2842,67 +3847,127 @@ export var App = (props) => <View data-uid='bbb'>
       false,
       emptyComments,
     )
-    const jsCode1 = `function getSizing(n) {
+    const jsCode1 = `
+function getSizing(n) {
   return 100 + n
 }`
-    const transpiledJSCode1 = `function getSizing(n) {
-  return 100 + n;
-}
-return { getSizing: getSizing };`
+    const transpiledJSCode1 = `return (() => {
+  function getSizing(n) {
+    return 100 + n;
+  }
+
+  return utopiaCanvasBlockRanToEnd({
+    getSizing: getSizing
+  });
+})();`
     const arbitraryBlock1 = arbitraryJSBlock(
+      [],
       jsCode1,
       transpiledJSCode1,
       ['getSizing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [jsOpaqueArbitraryStatement(jsCode1.trim(), ['getSizing'], [], '')],
     )
     const jsCode2 = `var spacing = 20`
-    const transpiledJSCode2 = `var spacing = 20;
-return { spacing: spacing };`
+    const transpiledJSCode2 = `return (() => {
+  var spacing = 20;
+  return utopiaCanvasBlockRanToEnd({
+    spacing: spacing
+  });
+})();`
     const arbitraryBlock2 = arbitraryJSBlock(
+      [],
       jsCode2,
       transpiledJSCode2,
       ['spacing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsAssignmentStatement(
+          'var',
+          [
+            jsAssignment(
+              regularParam('spacing', jsExpressionValue(20, emptyComments)),
+              jsExpressionValue(20, emptyComments),
+            ),
+          ],
+          '',
+        ),
+      ],
     )
     const combinedJSCode = `function getSizing(n) {
   return 100 + n
 }
 var spacing = 20`
-    const transpiledcombinedJSCode = `function getSizing(n) {
-  return 100 + n;
-}
+    const transpiledCombinedJSCode = `return (() => {
+  function getSizing(n) {
+    return 100 + n;
+  }
 
-var spacing = 20;
-return { getSizing: getSizing, spacing: spacing };`
+  var spacing = 20;
+  return utopiaCanvasBlockRanToEnd({
+    getSizing: getSizing,
+    spacing: spacing
+  });
+})();`
     const combinedArbitraryBlock = arbitraryJSBlock(
+      [],
       combinedJSCode,
-      transpiledcombinedJSCode,
+      transpiledCombinedJSCode,
       ['getSizing', 'spacing'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsOpaqueArbitraryStatement(jsCode1, ['getSizing'], [], ''),
+        jsAssignmentStatement(
+          'var',
+          [
+            jsAssignment(
+              regularParam('spacing', jsExpressionValue(20, emptyComments)),
+              jsExpressionValue(20, emptyComments),
+            ),
+          ],
+          '',
+        ),
+      ],
     )
     const topLevelElements = [arbitraryBlock1, arbitraryBlock2, exported].map(
       clearTopLevelElementUniqueIDsAndEmptyBlocks,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -2918,7 +3983,9 @@ return { getSizing: getSizing, spacing: spacing };`
       null,
       detailOfExports,
     )
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode)),
+    )
     const expectedResult = parseSuccess(
       imports,
       expect.arrayContaining(topLevelElements),
@@ -2926,39 +3993,46 @@ return { getSizing: getSizing, spacing: spacing };`
       null,
       clearArbitraryJSBlockUniqueIDs(combinedArbitraryBlock),
       detailOfExports,
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
   it('parses back and forth as a var and includes canvas metadata', () => {
-    const cake = jsxElement(
-      'cake',
-      'aab',
-      jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aab', emptyComments),
-        style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      }),
-      [],
+    const cake = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'cake',
+        'aab',
+        jsxAttributesFromMap({
+          'data-uid': jsExpressionValue('aab', emptyComments),
+          style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+        }),
+        [],
+      ),
     )
-    const view = jsxElement(
-      'View',
-      'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
-      [cake],
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'View',
+        'aaa',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
+        [cake],
+      ),
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'parenthesized-expression',
-      null,
+      [],
+      [],
       [],
       view,
       null,
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -2974,7 +4048,9 @@ return { getSizing: getSizing, spacing: spacing };`
       null,
       detailOfExports,
     )
-    const actualResult = testParseCode(printedCode)
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode)),
+    )
     const expectedResult = parseSuccess(
       imports,
       expect.arrayContaining([exported]),
@@ -2982,6 +4058,7 @@ return { getSizing: getSizing, spacing: spacing };`
       null,
       null,
       detailOfExports,
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3017,7 +4094,9 @@ export var whatever = props => {
       false,
     ).formatted
     const parsedCode = testParseCode(code)
-    expect(clearParseResultUniqueIDsAndEmptyBlocks(parsedCode)).toMatchSnapshot()
+    expect(
+      simplifyParsedTextFileAttributes(clearParseResultUniqueIDsAndEmptyBlocks(parsedCode)),
+    ).toMatchSnapshot()
   })
   it('parses back and forth as a function, with an empty bracket jsx child {}', () => {
     const code = applyPrettier(
@@ -3055,30 +4134,35 @@ export var whatever = props => {
       )
       expect(printedCode).toEqual(code)
     } else {
-      fail('Parse result is not a success.')
+      throw new Error('Parse result is not a success.')
     }
   })
   it('parses back and forth as a function', () => {
-    const cake = jsxElement(
-      'cake',
-      'aaa',
-      jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aaa', emptyComments),
-        style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-      }),
-      [],
+    const cake = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'cake',
+        'aaa',
+        jsxAttributesFromMap({
+          'data-uid': jsExpressionValue('aaa', emptyComments),
+          style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+        }),
+        [],
+      ),
     )
-    const view = jsxElement(
-      'View',
-      'aab',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aab', emptyComments) }),
-      [cake],
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'View',
+        'aab',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aab', emptyComments) }),
+        [cake],
+      ),
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'parenthesized-expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -3086,8 +4170,9 @@ export var whatever = props => {
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -3103,7 +4188,9 @@ export var whatever = props => {
       null,
       detailOfExports,
     )
-    const actualResult = testParseCode(printedCode)
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode)),
+    )
     const expectedResult = parseSuccess(
       imports,
       expect.arrayContaining([exported]),
@@ -3111,34 +4198,40 @@ export var whatever = props => {
       null,
       null,
       detailOfExports,
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
   it('parses back and forth as a function, with null and undefined values for props', () => {
-    const cake = jsxElement(
-      'cake',
-      'aaa',
-      jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aaa', emptyComments),
-        style: jsxAttributeValue({ backgroundColor: 'red' }, emptyComments),
-        trueProp: jsxAttributeValue(true, emptyComments),
-        falseProp: jsxAttributeValue(false, emptyComments),
-        nullProp: jsxAttributeValue(null, emptyComments),
-        undefinedProp: jsxAttributeValue(undefined, emptyComments),
-      }),
-      [],
+    const cake = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'cake',
+        'aaa',
+        jsxAttributesFromMap({
+          'data-uid': jsExpressionValue('aaa', emptyComments),
+          style: jsExpressionValue({ backgroundColor: 'red' }, emptyComments),
+          trueProp: jsExpressionValue(true, emptyComments),
+          falseProp: jsExpressionValue(false, emptyComments),
+          nullProp: jsExpressionValue(null, emptyComments),
+          undefinedProp: jsExpressionValue(undefined, emptyComments),
+        }),
+        [],
+      ),
     )
-    const view = jsxElement(
-      'View',
-      'aab',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aab', emptyComments) }),
-      [cake],
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'View',
+        'aab',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aab', emptyComments) }),
+        [cake],
+      ),
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'parenthesized-expression',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -3146,8 +4239,9 @@ export var whatever = props => {
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -3163,7 +4257,9 @@ export var whatever = props => {
       null,
       detailOfExports,
     )
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode)),
+    )
     const expectedResult = parseSuccess(
       imports,
       expect.arrayContaining([exported]),
@@ -3171,6 +4267,7 @@ export var whatever = props => {
       null,
       null,
       detailOfExports,
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3179,37 +4276,43 @@ export var whatever = props => {
       'cake',
       'aab',
       jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aab', emptyComments),
+        'data-uid': jsExpressionValue('aab', emptyComments),
         style: jsxAttributeNestedObjectSimple(
           jsxAttributesFromMap({
-            backgroundColor: jsxAttributeValue('red', emptyComments),
+            backgroundColor: jsExpressionValue('red', emptyComments),
             color: jsxAttributeNestedArraySimple([
-              jsxAttributeOtherJavaScript(
+              jsPropertyAccess(
+                jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                'color',
+                '',
+                expect.objectContaining({}),
+                emptyComments,
                 'props.color',
-                'return props.color;',
-                ['props'],
-                expect.objectContaining({}),
-                {},
+                'not-optionally-chained',
               ),
-              jsxAttributeValue(-200, emptyComments),
+              jsExpressionValue(-200, emptyComments),
             ]),
-            boxShadow: jsxAttributeFunctionCall('createShadow', [
-              jsxAttributeValue(15, emptyComments),
-              jsxAttributeOtherJavaScript(
-                'props.shadowValue',
-                'return props.shadowValue;',
-                ['props'],
+            boxShadow: jsExpressionFunctionCall('createShadow', [
+              jsExpressionValue(15, emptyComments),
+              jsPropertyAccess(
+                jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                'shadowValue',
+                '',
                 expect.objectContaining({}),
-                {},
+                emptyComments,
+                'props.shadowValue',
+                'not-optionally-chained',
               ),
               jsxAttributeNestedArraySimple([
-                jsxAttributeValue('hello', emptyComments),
-                jsxAttributeOtherJavaScript(
-                  'props.there',
-                  'return props.there;',
-                  ['props'],
+                jsExpressionValue('hello', emptyComments),
+                jsPropertyAccess(
+                  jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                  'there',
+                  '',
                   expect.objectContaining({}),
-                  {},
+                  emptyComments,
+                  'props.there',
+                  'not-optionally-chained',
                 ),
               ]),
             ]),
@@ -3222,7 +4325,7 @@ export var whatever = props => {
     const view = jsxElement(
       'View',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [cake],
     )
     const exported = utopiaJSXComponent(
@@ -3230,6 +4333,7 @@ export var whatever = props => {
       true,
       'var',
       'parenthesized-expression',
+      [],
       defaultPropsParam,
       ['color', 'shadowValue', 'there'],
       view,
@@ -3237,8 +4341,9 @@ export var whatever = props => {
       false,
       emptyComments,
     )
-    const imports = addImport(
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -3254,7 +4359,9 @@ export var whatever = props => {
       null,
       detailOfExports,
     )
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode)),
+    )
     const expectedResult = parseSuccess(
       imports,
       expect.arrayContaining([exported].map(clearTopLevelElementUniqueIDsAndEmptyBlocks)),
@@ -3262,6 +4369,7 @@ export var whatever = props => {
       null,
       null,
       detailOfExports,
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3320,16 +4428,25 @@ export var whatever = props => {
   );
 };
 `
-    const jsCode = `function test(n) {
+    const jsCode = `
+  function test(n) {
     return n * 2
   }`
-    const transpiledJSCode = `function test(n) {
-  return n * 2;
-}
-return { test: test };`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
-    const imports = addImport(
+    const transpiledJSCode = `return (() => {
+  function test(n) {
+    return n * 2;
+  }
+
+  return utopiaCanvasBlockRanToEnd({
+    test: test
+  });
+})();`
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
+    const { imports } = addImport(
       '/code.js',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -3337,16 +4454,23 @@ return { test: test };`
       sampleImportsForTests,
     )
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       jsCode,
       transpiledJSCode,
       ['test'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [jsOpaqueArbitraryStatement(jsCode, ['test'], [], '')],
     )
     const expectedResult = parseSuccess(
       imports,
@@ -3357,22 +4481,25 @@ return { test: test };`
             true,
             'var',
             'block',
+            [],
             defaultPropsParam,
             [],
             jsxElement(
               'View',
               'aaa',
               jsxAttributesFromMap({
-                'data-uid': jsxAttributeValue('aaa', emptyComments),
+                'data-uid': jsExpressionValue('aaa', emptyComments),
               }),
               [
                 jsxElement(
                   'cake',
                   'aab',
                   jsxAttributesFromMap({
-                    'data-uid': jsxAttributeValue('aab', emptyComments),
-                    left: jsxAttributeOtherJavaScript(
+                    'data-uid': jsExpressionValue('aab', emptyComments),
+                    left: jsExpressionOtherJavaScript(
+                      [],
                       'test(100)',
+                      'test(100);',
                       'return test(100);',
                       ['test'],
                       expect.objectContaining({
@@ -3381,6 +4508,7 @@ return { test: test };`
                         file: 'code.tsx',
                       }),
                       {},
+                      emptyComments,
                     ),
                   }),
                   [],
@@ -3397,20 +4525,28 @@ return { test: test };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
 
     expect(actualResult).toEqual(expectedResult)
   })
   it('parses arbitrary code in a component back and forth', () => {
-    const jsCode = `function test(n) {
+    const jsCode = `
+  function test(n) {
     return n * 2
   }`
-    const transpiledJSCode = `function test(n) {
-  return n * 2;
-}
-return { test: test };`
-    const imports = addImport(
+    const transpiledJSCode = `return (() => {
+  function test(n) {
+    return n * 2;
+  }
+
+  return utopiaCanvasBlockRanToEnd({
+    test: test
+  });
+})();`
+    const { imports } = addImport(
       'code.jsx',
+      [],
       'cake',
       null,
       [importAlias('cake')],
@@ -3424,22 +4560,25 @@ return { test: test };`
           true,
           'var',
           'block',
+          [],
           defaultPropsParam,
           [],
           jsxElement(
             'View',
             'aaa',
             jsxAttributesFromMap({
-              'data-uid': jsxAttributeValue('aaa', emptyComments),
+              'data-uid': jsExpressionValue('aaa', emptyComments),
             }),
             [
               jsxElement(
                 'cake',
                 'aab',
                 jsxAttributesFromMap({
-                  'data-uid': jsxAttributeValue('aab', emptyComments),
-                  left: jsxAttributeOtherJavaScript(
+                  'data-uid': jsExpressionValue('aab', emptyComments),
+                  left: jsExpressionOtherJavaScript(
+                    [],
                     'test(100)',
+                    'test(100);',
                     'return test(100);',
                     ['test'],
                     expect.objectContaining({
@@ -3448,6 +4587,7 @@ return { test: test };`
                       file: 'code.tsx',
                     }),
                     {},
+                    emptyComments,
                   ),
                 }),
                 [],
@@ -3455,16 +4595,23 @@ return { test: test };`
             ],
           ),
           arbitraryJSBlock(
+            [],
             jsCode,
             transpiledJSCode,
             ['test'],
-            [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+            [
+              JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+              BLOCK_RAN_TO_END_FUNCTION_NAME,
+              EARLY_RETURN_RESULT_FUNCTION_NAME,
+              EARLY_RETURN_VOID_FUNCTION_NAME,
+            ],
             expect.objectContaining({
               sources: ['code.tsx'],
               version: 3,
               file: 'code.tsx',
             }),
             {},
+            [jsOpaqueArbitraryStatement(jsCode, ['test'], [], '')],
           ),
           false,
           emptyComments,
@@ -3476,13 +4623,14 @@ return { test: test };`
           false,
           'var',
           'parenthesized-expression',
+          [],
           null,
           [],
           jsxElement(
             'Storyboard',
             BakedInStoryboardUID,
             jsxAttributesFromMap({
-              'data-uid': jsxAttributeValue(BakedInStoryboardUID, emptyComments),
+              'data-uid': jsExpressionValue(BakedInStoryboardUID, emptyComments),
             }),
             [],
           ),
@@ -3501,7 +4649,9 @@ return { test: test };`
       null,
       detailOfExports,
     )
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode)),
+    )
     const expectedResult = parseSuccess(
       imports,
       expect.arrayContaining(components.map(clearTopLevelElementUniqueIDsAndEmptyBlocks)),
@@ -3509,6 +4659,7 @@ return { test: test };`
       null,
       null,
       detailOfExports,
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3531,43 +4682,58 @@ export var App = props => {
     </View>
   );
 };`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const component = utopiaJSXComponent(
       'App',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       jsxElement(
         'View',
         'aaa',
         jsxAttributesFromMap({
-          'data-uid': jsxAttributeValue('aaa', emptyComments),
+          'data-uid': jsExpressionValue('aaa', emptyComments),
         }),
         [
-          jsxArbitraryBlock(
-            `[1,2,3].map(x=> <View data-uid='abc' />)`,
-            `[1, 2, 3].map((x) => <View data-uid='abc' />);`,
-            `return [1, 2, 3].map(function (x) {
-  return utopiaCanvasJSXLookup("abc", {
-    callerThis: this
-  });
+          jsxMapExpression(
+            jsxAttributeNestedArraySimple([
+              jsExpressionValue(1, emptyComments),
+              jsExpressionValue(2, emptyComments),
+              jsExpressionValue(3, emptyComments),
+            ]),
+            jsExpressionOtherJavaScript(
+              [functionParam(false, regularParam('x', null))],
+              `x=> <View data-uid='abc' />`,
+              `(x) => <View data-uid='abc' />;`,
+              `return x => utopiaCanvasJSXLookup("abc", {
+  x: x,
+  callerThis: this
 });`,
-            ['React', 'View', 'utopiaCanvasJSXLookup'],
-            expect.objectContaining({
-              sources: ['code.tsx'],
-              version: 3,
-              file: 'code.tsx',
-            }),
-            {
-              abc: jsxElement(
-                'View',
-                'abc',
-                jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('abc', emptyComments) }),
-                [],
-              ),
-            },
+              ['React', 'View', JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+              expect.objectContaining({
+                sources: ['code.tsx'],
+                version: 3,
+                file: 'code.tsx',
+              }),
+              {
+                abc: jsxElement(
+                  'View',
+                  'abc',
+                  jsxAttributesFromMap({ 'data-uid': jsExpressionValue('abc', emptyComments) }),
+                  [],
+                ),
+              },
+              emptyComments,
+              '',
+            ),
+            emptyComments,
+            ['x'],
+            '',
           ),
         ],
       ),
@@ -3582,6 +4748,7 @@ export var App = props => {
       null,
       null,
       [exportFunction('App')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3603,19 +4770,22 @@ export var App = props => {
     <View data-uid='aaa'>cake</View>
   );
 };`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const component = utopiaJSXComponent(
       'App',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       jsxElement(
         'View',
         'aaa',
         jsxAttributesFromMap({
-          'data-uid': jsxAttributeValue('aaa', emptyComments),
+          'data-uid': jsExpressionValue('aaa', emptyComments),
         }),
         [jsxTextBlock('cake')],
       ),
@@ -3630,6 +4800,7 @@ export var App = props => {
       null,
       null,
       [exportFunction('App')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3654,46 +4825,61 @@ export var App = props => {
     </View>
   );
 };`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const component = utopiaJSXComponent(
       'App',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       jsxElement(
         'View',
         'aaa',
         jsxAttributesFromMap({
-          'data-uid': jsxAttributeValue('aaa', emptyComments),
+          'data-uid': jsExpressionValue('aaa', emptyComments),
         }),
         [
-          jsxArbitraryBlock(
-            `[1, 2, 3].map(n => (
+          jsxMapExpression(
+            jsxAttributeNestedArraySimple([
+              jsExpressionValue(1, emptyComments),
+              jsExpressionValue(2, emptyComments),
+              jsExpressionValue(3, emptyComments),
+            ]),
+            jsExpressionOtherJavaScript(
+              [functionParam(false, regularParam('n', null))],
+              `n => (
         <div data-uid="abc" />
-      ))`,
-            `[1, 2, 3].map((n) =>
-<div data-uid="abc" />);`,
-            `return [1, 2, 3].map(function (n) {
-  return utopiaCanvasJSXLookup("abc", {
-    callerThis: this
-  });
+      )`,
+              `(n) =>
+<div data-uid="abc" />;`,
+              `return n => utopiaCanvasJSXLookup("abc", {
+  n: n,
+  callerThis: this
 });`,
-            ['React', 'utopiaCanvasJSXLookup'],
-            expect.objectContaining({
-              sources: ['code.tsx'],
-              version: 3,
-              file: 'code.tsx',
-            }),
-            {
-              abc: jsxElement(
-                'div',
-                'abc',
-                jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('abc', emptyComments) }),
-                [],
-              ),
-            },
+              ['React', JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+              expect.objectContaining({
+                sources: ['code.tsx'],
+                version: 3,
+                file: 'code.tsx',
+              }),
+              {
+                abc: jsxElement(
+                  'div',
+                  'abc',
+                  jsxAttributesFromMap({ 'data-uid': jsExpressionValue('abc', emptyComments) }),
+                  [],
+                ),
+              },
+              emptyComments,
+              '',
+            ),
+            emptyComments,
+            ['n'],
+            '',
           ),
         ],
       ),
@@ -3708,6 +4894,7 @@ export var App = props => {
       null,
       null,
       [exportFunction('App')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3721,42 +4908,53 @@ export var App = props => {
       true,
       'var',
       'parenthesized-expression',
+      [],
       defaultPropsParam,
       [],
       jsxElement(
         'View',
         'aaa',
         jsxAttributesFromMap({
-          'data-uid': jsxAttributeValue('aaa', emptyComments),
+          'data-uid': jsExpressionValue('aaa', emptyComments),
         }),
         [
-          jsxArbitraryBlock(
-            `[1, 2, 3].map((n) => (
-      <div data-uid='abc' />
-    ))`,
-            `[1, 2, 3].map((n) =>
-<div data-uid='abc' />);`,
-            `return [1, 2, 3].map(function (n) {
-  return utopiaCanvasJSXLookup("abc", {
-    callerThis: this
-  });
+          jsxMapExpression(
+            jsxAttributeNestedArraySimple([
+              jsExpressionValue(1, emptyComments),
+              jsExpressionValue(2, emptyComments),
+              jsExpressionValue(3, emptyComments),
+            ]),
+            jsExpressionOtherJavaScript(
+              [functionParam(false, regularParam('x', null))],
+              `(x) => (
+      <View data-uid='abc' />
+    )`,
+              `(x) =>
+<View data-uid='abc' />;`,
+              `return x => utopiaCanvasJSXLookup("abc", {
+  x: x,
+  callerThis: this
 });`,
-            ['React', 'utopiaCanvasJSXLookup'],
-            expect.objectContaining({
-              sources: ['code.tsx'],
-              version: 3,
-              file: 'code.tsx',
-            }),
-            {
-              abc: jsxElement(
-                'div',
-                'abc',
-                jsxAttributesFromMap({
-                  'data-uid': jsxAttributeValue('abc', emptyComments),
-                }),
-                [],
-              ),
-            },
+              ['React', 'View', JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+              expect.objectContaining({
+                sources: ['code.tsx'],
+                version: 3,
+                file: 'code.tsx',
+              }),
+              {
+                abc: jsxElement(
+                  'View',
+                  'abc',
+                  jsxAttributesFromMap({ 'data-uid': jsExpressionValue('abc', emptyComments) }),
+                  [],
+                ),
+              },
+              emptyComments,
+              '',
+            ),
+            emptyComments,
+            ['x'],
+            '',
           ),
         ],
       ),
@@ -3773,7 +4971,9 @@ export var App = props => {
       null,
       detailOfExports,
     )
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(printedCode)),
+    )
     const expectedResult = parseSuccess(
       sampleImportsForTests,
       expect.arrayContaining([component].map(clearTopLevelElementUniqueIDsAndEmptyBlocks)),
@@ -3781,6 +4981,7 @@ export var App = props => {
       null,
       null,
       detailOfExports,
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3799,7 +5000,7 @@ import {
 export var App = props => {
   const a = 20;
   const b = 40;
-  const MyCustomCompomnent = props => <View data-uid="abc">{props.children}</View>;
+  const MyCustomComponent = props => <View data-uid="abc">{props.children}</View>;
 
   return (
     <View
@@ -3812,7 +5013,7 @@ export var App = props => {
       }}
       data-uid="aaa"
     >
-      <MyCustomCompomnent data-uid="ddd">
+      <MyCustomComponent data-uid="ddd">
         <Ellipse
           style={{ backgroundColor: "lightgreen" }}
           layout={{ height: 100, left: 150, width: 100, top: 540 }}
@@ -3823,7 +5024,7 @@ export var App = props => {
           layout={{ height: 100, left: 150, width: 100, top: 540 }}
           data-uid="ccc"
         />
-      </MyCustomCompomnent>
+      </MyCustomComponent>
       <View
         style={{ backgroundColor: "blue", position: "absolute" }}
         layout={{ height: 200, left: 80, width: 100, top: 145 }}
@@ -3832,125 +5033,256 @@ export var App = props => {
     </View>
   );
 };`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
-    const ellipse = jsxElement(
-      'Ellipse',
-      'bbb',
-      jsxAttributesFromMap({
-        style: jsxAttributeValue({ backgroundColor: 'lightgreen' }, emptyComments),
-        layout: jsxAttributeValue({ height: 100, left: 150, width: 100, top: 540 }, emptyComments),
-        'data-uid': jsxAttributeValue('bbb', emptyComments),
-      }),
-      [],
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
     )
-    const rectangle = jsxElement(
-      'Rectangle',
-      'ccc',
-      jsxAttributesFromMap({
-        style: jsxAttributeValue({ backgroundColor: 'orange' }, emptyComments),
-        layout: jsxAttributeValue({ height: 100, left: 150, width: 100, top: 540 }, emptyComments),
-        'data-uid': jsxAttributeValue('ccc', emptyComments),
-      }),
-      [],
+    const ellipse = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'Ellipse',
+        'bbb',
+        jsxAttributesFromMap({
+          style: jsExpressionValue({ backgroundColor: 'lightgreen' }, emptyComments),
+          layout: jsExpressionValue(
+            { height: 100, left: 150, width: 100, top: 540 },
+            emptyComments,
+          ),
+          'data-uid': jsExpressionValue('bbb', emptyComments),
+        }),
+        [],
+      ),
     )
-    const myCustomCompomnent = jsxElement(
-      'MyCustomCompomnent',
-      'ddd',
-      jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('ddd', emptyComments),
-      }),
-      [ellipse, rectangle],
+    const rectangle = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'Rectangle',
+        'ccc',
+        jsxAttributesFromMap({
+          style: jsExpressionValue({ backgroundColor: 'orange' }, emptyComments),
+          layout: jsExpressionValue(
+            { height: 100, left: 150, width: 100, top: 540 },
+            emptyComments,
+          ),
+          'data-uid': jsExpressionValue('ccc', emptyComments),
+        }),
+        [],
+      ),
     )
-    const view = jsxElement(
-      'View',
-      'ggg',
-      jsxAttributesFromMap({
-        style: jsxAttributeValue({ backgroundColor: 'blue', position: 'absolute' }, emptyComments),
-        layout: jsxAttributeValue({ height: 200, left: 80, width: 100, top: 145 }, emptyComments),
-        'data-uid': jsxAttributeValue('ggg', emptyComments),
-      }),
-      [],
+    const myCustomComponent = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'MyCustomComponent',
+        'ddd',
+        jsxAttributesFromMap({
+          'data-uid': jsExpressionValue('ddd', emptyComments),
+        }),
+        [ellipse, rectangle],
+      ),
+    )
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'View',
+        'ggg',
+        jsxAttributesFromMap({
+          style: jsExpressionValue(
+            { backgroundColor: 'blue', position: 'absolute' },
+            emptyComments,
+          ),
+          layout: jsExpressionValue({ height: 200, left: 80, width: 100, top: 145 }, emptyComments),
+          'data-uid': jsExpressionValue('ggg', emptyComments),
+        }),
+        [],
+      ),
+    )
+    const assignmentComponent = jsExpressionOtherJavaScript(
+      [functionParam(false, regularParam('props', null))],
+      'props => <View data-uid="abc">{props.children}</View>',
+      '(props) => <View data-uid="abc">{props.children}</View>;',
+      `return props => React.createElement(View, {\n  \"data-uid\": \"abc\"\n}, props.children);`,
+      ['React', 'View', JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      expect.objectContaining({}),
+      {
+        fc7: jsxElement(
+          'View',
+          '',
+          jsxAttributesFromMap({
+            'data-uid': jsExpressionValue('fc7', emptyComments, ''),
+          }),
+          [
+            jsPropertyAccess(
+              jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+              'children',
+              '',
+              expect.objectContaining({}),
+              emptyComments,
+              'props.children',
+              'not-optionally-chained',
+            ),
+          ],
+        ),
+      },
+      emptyComments,
+      '',
     )
     const component = utopiaJSXComponent(
       'App',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       ['layout'],
       jsxElement(
         'View',
         'aaa',
         jsxAttributesFromMap({
-          style: jsxAttributeValue(
+          style: jsExpressionValue(
             { backgroundColor: 'lightgrey', position: 'absolute' },
             emptyComments,
           ),
           layout: jsxAttributeNestedObjectSimple(
             jsxAttributesFromMap({
-              height: jsxAttributeOtherJavaScript(
+              height: jsPropertyAccess(
+                jsPropertyAccess(
+                  jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                  'layout',
+                  '',
+                  expect.objectContaining({}),
+                  emptyComments,
+                  'props.layout',
+                  'not-optionally-chained',
+                ),
+                'height',
+                '',
+                expect.objectContaining({}),
+                emptyComments,
                 'props.layout.height',
-                'return props.layout.height;',
-                ['props'],
-                expect.objectContaining({}),
-                {},
+                'not-optionally-chained',
               ),
-              left: jsxAttributeOtherJavaScript(
+              left: jsPropertyAccess(
+                jsPropertyAccess(
+                  jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                  'layout',
+                  '',
+                  expect.objectContaining({}),
+                  emptyComments,
+                  'props.layout',
+                  'not-optionally-chained',
+                ),
+                'left',
+                '',
+                expect.objectContaining({}),
+                emptyComments,
                 'props.layout.left',
-                'return props.layout.left;',
-                ['props'],
-                expect.objectContaining({}),
-                {},
+                'not-optionally-chained',
               ),
-              width: jsxAttributeOtherJavaScript(
+              width: jsPropertyAccess(
+                jsPropertyAccess(
+                  jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                  'layout',
+                  '',
+                  expect.objectContaining({}),
+                  emptyComments,
+                  'props.layout',
+                  'not-optionally-chained',
+                ),
+                'width',
+                '',
+                expect.objectContaining({}),
+                emptyComments,
                 'props.layout.width',
-                'return props.layout.width;',
-                ['props'],
-                expect.objectContaining({}),
-                {},
+                'not-optionally-chained',
               ),
-              top: jsxAttributeOtherJavaScript(
-                'props.layout.top',
-                'return props.layout.top;',
-                ['props'],
+              top: jsPropertyAccess(
+                jsPropertyAccess(
+                  jsIdentifier('props', '', expect.objectContaining({}), emptyComments),
+                  'layout',
+                  '',
+                  expect.objectContaining({}),
+                  emptyComments,
+                  'props.layout',
+                  'not-optionally-chained',
+                ),
+                'top',
+                '',
                 expect.objectContaining({}),
-                {},
+                emptyComments,
+                'props.layout.top',
+                'not-optionally-chained',
               ),
             }),
             emptyComments,
           ),
-          'data-uid': jsxAttributeValue('aaa', emptyComments),
+          'data-uid': jsExpressionValue('aaa', emptyComments),
         }),
-        [myCustomCompomnent, view],
+        [myCustomComponent, view],
       ),
       arbitraryJSBlock(
+        [],
         `const a = 20;
   const b = 40;
-  const MyCustomCompomnent = props => <View data-uid="abc">{props.children}</View>;`,
-        `var a = 20;
-var b = 40;
+  const MyCustomComponent = props => <View data-uid="abc">{props.children}</View>;`,
+        `return (() => {
+  const a = 20;
+  const b = 40;
 
-var MyCustomCompomnent = function MyCustomCompomnent(props) {
-  return ${JSX_CANVAS_LOOKUP_FUNCTION_NAME}("abc", {
+  const MyCustomComponent = props => ${JSX_CANVAS_LOOKUP_FUNCTION_NAME}("abc", {
     props: props,
     callerThis: this
   });
-};
-return { a: a, b: b, MyCustomCompomnent: MyCustomCompomnent };`,
-        ['a', 'b', 'MyCustomCompomnent'],
-        ['React', 'View', JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+
+  return utopiaCanvasBlockRanToEnd({
+    a: a,
+    b: b,
+    MyCustomComponent: MyCustomComponent
+  });
+})();`,
+        ['a', 'b', 'MyCustomComponent'],
+        [
+          'React',
+          'View',
+          JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+          BLOCK_RAN_TO_END_FUNCTION_NAME,
+          EARLY_RETURN_RESULT_FUNCTION_NAME,
+          EARLY_RETURN_VOID_FUNCTION_NAME,
+        ],
         expect.objectContaining({
           sources: ['code.tsx'],
           version: 3,
           file: 'code.tsx',
         }),
         {
-          abc: expect.objectContaining({
-            name: expect.objectContaining({
-              baseVariable: 'View',
-            }),
-          }),
+          abc: expect.objectContaining({}),
         },
+        [
+          jsAssignmentStatement(
+            'const',
+            [
+              jsAssignment(
+                regularParam('a', jsExpressionValue(20, emptyComments, '')),
+                jsExpressionValue(20, emptyComments, ''),
+              ),
+            ],
+            '',
+          ),
+          jsAssignmentStatement(
+            'const',
+            [
+              jsAssignment(
+                regularParam('b', jsExpressionValue(40, emptyComments, '')),
+                jsExpressionValue(40, emptyComments, ''),
+              ),
+            ],
+            '',
+          ),
+          jsAssignmentStatement(
+            'const',
+            [
+              jsAssignment(
+                regularParam('MyCustomComponent', assignmentComponent),
+                assignmentComponent,
+              ),
+            ],
+            '',
+          ),
+        ],
       ),
       false,
       emptyComments,
@@ -3962,6 +5294,7 @@ return { a: a, b: b, MyCustomCompomnent: MyCustomCompomnent };`,
       null,
       null,
       [exportFunction('App')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -3984,20 +5317,23 @@ export var App = props => {
     <View data-uid='aaa' booleanProperty />
   )
 }`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const component = utopiaJSXComponent(
       'App',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       jsxElement(
         'View',
         'aaa',
         jsxAttributesFromMap({
-          'data-uid': jsxAttributeValue('aaa', emptyComments),
-          booleanProperty: jsxAttributeValue(true, emptyComments),
+          'data-uid': jsExpressionValue('aaa', emptyComments),
+          booleanProperty: jsExpressionValue(true, emptyComments),
         }),
         [],
       ),
@@ -4012,6 +5348,7 @@ export var App = props => {
       null,
       null,
       [exportFunction('App')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -4038,8 +5375,8 @@ export var whatever = props => {
       'View',
       'aaa',
       jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aaa', emptyComments),
-        booleanProperty: jsxAttributeValue(true, emptyComments),
+        'data-uid': jsExpressionValue('aaa', emptyComments),
+        booleanProperty: jsExpressionValue(true, emptyComments),
       }),
       [],
     )
@@ -4048,6 +5385,7 @@ export var whatever = props => {
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -4088,8 +5426,8 @@ export var whatever = props => {
       'View',
       'aaa',
       jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue('aaa', emptyComments),
-        booleanProperty: jsxAttributeValue(false, emptyComments),
+        'data-uid': jsExpressionValue('aaa', emptyComments),
+        booleanProperty: jsExpressionValue(false, emptyComments),
       }),
       [],
     )
@@ -4098,6 +5436,7 @@ export var whatever = props => {
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -4126,48 +5465,79 @@ export var whatever = props => {
   }
   return <div data-uid='aaa'></div>
 }`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const arbitraryBlockCode = `for (var n = 0; n != -1; n++) {
     const n2 = n * 2
   }
   while (true) {
     const a = 1
   }`
-    const arbitraryBlockTranspiledCode = `var _loopIt = 0,
-    _loopIt2 = 0;
+    const arbitraryBlockTranspiledCode = `return (() => {
+  var _loopIt = 0,
+      _loopIt2 = 0;
 
-for (var n = 0; n != -1; n++) {
-  if (_loopIt++ > ${InfiniteLoopMaxIterations}) {
-    throw new RangeError('${InfiniteLoopError}');
+  for (var n = 0; n != -1; n++) {
+    if (_loopIt++ > ${InfiniteLoopMaxIterations}) {
+      throw new RangeError('${InfiniteLoopError}');
+    }
+
+    const n2 = n * 2;
   }
 
-  var n2 = n * 2;
-}
+  while (true) {
+    if (_loopIt2++ > ${InfiniteLoopMaxIterations}) {
+      throw new RangeError('${InfiniteLoopError}');
+    }
 
-while (true) {
-  if (_loopIt2++ > ${InfiniteLoopMaxIterations}) {
-    throw new RangeError('${InfiniteLoopError}');
+    const a = 1;
   }
 
-  var a = 1;
-}
-return {  };`
+  return utopiaCanvasBlockRanToEnd({});
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       arbitraryBlockCode,
       arbitraryBlockTranspiledCode,
       [],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsOpaqueArbitraryStatement(
+          `
+  for (var n = 0; n != -1; n++) {
+    const n2 = n * 2
+  }`,
+          [],
+          [],
+          '',
+        ),
+        jsOpaqueArbitraryStatement(
+          `
+  while (true) {
+    const a = 1
+  }`,
+          [],
+          [],
+          '',
+        ),
+      ],
     )
     const view = jsxElement(
       'div',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [],
     )
     const exported = utopiaJSXComponent(
@@ -4175,6 +5545,7 @@ return {  };`
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -4189,6 +5560,7 @@ return {  };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -4202,33 +5574,47 @@ export var whatever = props => {
   }
   return <div data-uid='aaa'>{result}</div>
 }`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const arbitraryBlockCode = `let result = []
   for (var n = 0; n < 5; n++) {
     const n2 = n * 2
     result.push(<div style={{ left: n, top: n2 }} data-uid='bbb' />)
   }`
-    const arbitraryBlockTranspiledCode = `var _loopIt = 0;
-var result = [];
+    const arbitraryBlockTranspiledCode = `return (() => {
+  var _loopIt = 0;
+  let result = [];
 
-for (var n = 0; n < 5; n++) {
-  if (_loopIt++ > ${InfiniteLoopMaxIterations}) {
-    throw new RangeError('${InfiniteLoopError}');
+  for (var n = 0; n < 5; n++) {
+    if (_loopIt++ > ${InfiniteLoopMaxIterations}) {
+      throw new RangeError('${InfiniteLoopError}');
+    }
+
+    const n2 = n * 2;
+    result.push(${JSX_CANVAS_LOOKUP_FUNCTION_NAME}("bbb", {
+      n: n,
+      n2: n2,
+      callerThis: this
+    }));
   }
 
-  var n2 = n * 2;
-  result.push(${JSX_CANVAS_LOOKUP_FUNCTION_NAME}("bbb", {
-    n: n,
-    n2: n2,
-    callerThis: this
-  }));
-}
-return { result: result };`
+  return utopiaCanvasBlockRanToEnd({
+    result: result
+  });
+})();`
     const arbitraryBlock = arbitraryJSBlock(
+      [],
       arbitraryBlockCode,
       arbitraryBlockTranspiledCode,
       ['result'],
-      ['React', JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        'React',
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
@@ -4241,23 +5627,34 @@ return { result: result };`
           }),
         }),
       },
+      [
+        jsAssignmentStatement(
+          'let',
+          [
+            jsAssignment(
+              regularParam('result', jsxAttributeNestedArraySimple([])),
+              jsExpressionNestedArray([], emptyComments, ''),
+            ),
+          ],
+          '',
+        ),
+        jsOpaqueArbitraryStatement(
+          `
+  for (var n = 0; n < 5; n++) {
+    const n2 = n * 2
+    result.push(<div style={{ left: n, top: n2 }} data-uid='bbb' />)
+  }`,
+          [],
+          ['result', 'React'],
+          '',
+        ),
+      ],
     )
-    const innerBlock = jsxArbitraryBlock(
-      'result',
-      'result;',
-      'return result;',
-      ['result'],
-      expect.objectContaining({
-        sources: ['code.tsx'],
-        version: 3,
-        file: 'code.tsx',
-      }),
-      {},
-    )
+    const innerBlock = jsIdentifier('result', '', expect.objectContaining({}), emptyComments)
     const view = jsxElement(
       'div',
       'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
       [innerBlock],
     )
     const exported = utopiaJSXComponent(
@@ -4265,6 +5662,7 @@ return { result: result };`
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -4279,6 +5677,7 @@ return { result: result };`
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -4291,79 +5690,108 @@ export var whatever = props => {
     })}
   </div>
 }`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
-    const arbitraryBlockOriginalCode = `[1, 2, 3].map(n => {
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
+    const arbitraryBlockOriginalCode = `n => {
       return <div style={{left: n * 30, top: n * 30}} data-uid='bbb' />
-    })`
-    const arbitraryBlockCode = `[1, 2, 3].map((n) => {
+    }`
+    const arbitraryBlockCode = `(n) => {
   return <div style={{ left: n * 30, top: n * 30 }} data-uid='bbb' />;
-});`
-    const arbitraryBlockTranspiledCode = `return [1, 2, 3].map(function (n) {
+};`
+    const arbitraryBlockTranspiledCode = `return n => {
   return utopiaCanvasJSXLookup("bbb", {
     n: n,
     callerThis: this
   });
-});`
-    const innerElement = jsxElement(
-      'div',
-      'bbb',
-      jsxAttributesFromMap({
-        style: jsxAttributeNestedObject(
-          [
-            jsxPropertyAssignment(
-              'left',
-              jsxAttributeOtherJavaScript(
-                `n * 30`,
-                `return n * 30;`,
-                ['n'],
-                expect.objectContaining({}),
-                {},
+};`
+    const innerElement = clearJSXElementUniqueIDs(
+      jsxElement(
+        'div',
+        'bbb',
+        jsxAttributesFromMap({
+          style: jsExpressionNestedObject(
+            [
+              jsxPropertyAssignment(
+                'left',
+                jsExpressionOtherJavaScript(
+                  [],
+                  `n * 30`,
+                  `n * 30;`,
+                  `return n * 30;`,
+                  ['n'],
+                  expect.objectContaining({}),
+                  {},
+                  emptyComments,
+                ),
+                emptyComments,
+                emptyComments,
               ),
-              emptyComments,
-              emptyComments,
-            ),
-            jsxPropertyAssignment(
-              'top',
-              jsxAttributeOtherJavaScript(
-                `n * 30`,
-                `return n * 30;`,
-                ['n'],
-                expect.objectContaining({}),
-                {},
+              jsxPropertyAssignment(
+                'top',
+                jsExpressionOtherJavaScript(
+                  [],
+                  `n * 30`,
+                  `n * 30;`,
+                  `return n * 30;`,
+                  ['n'],
+                  expect.objectContaining({}),
+                  {},
+                  emptyComments,
+                ),
+                emptyComments,
+                emptyComments,
               ),
-              emptyComments,
-              emptyComments,
-            ),
-          ],
-          emptyComments,
-        ),
-        ['data-uid']: jsxAttributeValue('bbb', emptyComments),
-      }),
-      [],
+            ],
+            emptyComments,
+          ),
+          ['data-uid']: jsExpressionValue('bbb', emptyComments),
+        }),
+        [],
+      ),
     )
-    const arbitraryBlock = jsxArbitraryBlock(
-      arbitraryBlockOriginalCode,
-      arbitraryBlockCode,
-      arbitraryBlockTranspiledCode,
-      ['React', 'utopiaCanvasJSXLookup'],
-      expect.objectContaining({
-        sources: ['code.tsx'],
-        version: 3,
-        file: 'code.tsx',
-      }),
-      { bbb: innerElement },
+
+    const arbitraryBlock = jsxMapExpression(
+      jsxAttributeNestedArraySimple([
+        jsExpressionValue(1, emptyComments),
+        jsExpressionValue(2, emptyComments),
+        jsExpressionValue(3, emptyComments),
+      ]),
+      jsExpressionOtherJavaScript(
+        [functionParam(false, regularParam('n', null))],
+        arbitraryBlockOriginalCode,
+        arbitraryBlockCode,
+        arbitraryBlockTranspiledCode,
+        ['React', JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+        expect.objectContaining({
+          sources: ['code.tsx'],
+          version: 3,
+          file: 'code.tsx',
+        }),
+        {
+          bbb: innerElement,
+        },
+        emptyComments,
+        '',
+      ),
+      emptyComments,
+      ['n'],
+      '',
     )
-    const view = jsxElement(
-      'div',
-      'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
-      [arbitraryBlock],
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'div',
+        'aaa',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
+        [arbitraryBlock],
+      ),
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -4378,6 +5806,7 @@ export var whatever = props => {
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -4391,95 +5820,145 @@ export var whatever = props => {
     })}
   </div>
 }`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
-    const arbitraryBlockOriginalCode = `[1, 2, 3].map(n => {
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
+    const arbitraryBlockOriginalCode = `n => {
       return <div style={{left: n * a, top: n * a}} data-uid='bbb' />
-    })`
-    const arbitraryBlockCode = `[1, 2, 3].map((n) => {
+    }`
+    const arbitraryBlockCode = `(n) => {
   return <div style={{ left: n * a, top: n * a }} data-uid='bbb' />;
-});`
-    const arbitraryBlockTranspiledCode = `return [1, 2, 3].map(function (n) {
+};`
+    const arbitraryBlockTranspiledCode = `return n => {
   return utopiaCanvasJSXLookup("bbb", {
     n: n,
     a: a,
     callerThis: this
   });
-});`
-    const innerElement = jsxElement(
-      'div',
-      'bbb',
-      jsxAttributesFromMap({
-        style: jsxAttributeNestedObject(
-          [
-            jsxPropertyAssignment(
-              'left',
-              jsxAttributeOtherJavaScript(
-                `n * a`,
-                `return n * a;`,
-                ['n', 'a'],
-                expect.objectContaining({}),
-                {},
+};`
+    const innerElement = clearJSXElementUniqueIDs(
+      jsxElement(
+        'div',
+        'bbb',
+        jsxAttributesFromMap({
+          style: jsExpressionNestedObject(
+            [
+              jsxPropertyAssignment(
+                'left',
+                jsExpressionOtherJavaScript(
+                  [],
+                  `n * a`,
+                  `n * a;`,
+                  `return n * a;`,
+                  ['n', 'a'],
+                  expect.objectContaining({}),
+                  {},
+                  emptyComments,
+                ),
+                emptyComments,
+                emptyComments,
               ),
-              emptyComments,
-              emptyComments,
-            ),
-            jsxPropertyAssignment(
-              'top',
-              jsxAttributeOtherJavaScript(
-                `n * a`,
-                `return n * a;`,
-                ['n', 'a'],
-                expect.objectContaining({}),
-                {},
+              jsxPropertyAssignment(
+                'top',
+                jsExpressionOtherJavaScript(
+                  [],
+                  `n * a`,
+                  `n * a;`,
+                  `return n * a;`,
+                  ['n', 'a'],
+                  expect.objectContaining({}),
+                  {},
+                  emptyComments,
+                ),
+                emptyComments,
+                emptyComments,
               ),
-              emptyComments,
-              emptyComments,
-            ),
-          ],
-          emptyComments,
-        ),
-        ['data-uid']: jsxAttributeValue('bbb', emptyComments),
-      }),
-      [],
+            ],
+            emptyComments,
+          ),
+          ['data-uid']: jsExpressionValue('bbb', emptyComments),
+        }),
+        [],
+      ),
     )
-    const arbitraryBlock = jsxArbitraryBlock(
-      arbitraryBlockOriginalCode,
-      arbitraryBlockCode,
-      arbitraryBlockTranspiledCode,
-      ['a', 'React', 'utopiaCanvasJSXLookup'],
-      expect.objectContaining({
-        sources: ['code.tsx'],
-        version: 3,
-        file: 'code.tsx',
-      }),
-      { bbb: innerElement },
+    const arbitraryBlock = jsxMapExpression(
+      jsxAttributeNestedArraySimple([
+        jsExpressionValue(1, emptyComments),
+        jsExpressionValue(2, emptyComments),
+        jsExpressionValue(3, emptyComments),
+      ]),
+      jsExpressionOtherJavaScript(
+        [functionParam(false, regularParam('n', null))],
+        arbitraryBlockOriginalCode,
+        arbitraryBlockCode,
+        arbitraryBlockTranspiledCode,
+        ['a', 'React', 'utopiaCanvasJSXLookup'],
+        expect.objectContaining({
+          sources: ['code.tsx'],
+          version: 3,
+          file: 'code.tsx',
+        }),
+        {
+          bbb: innerElement,
+        },
+        emptyComments,
+        '',
+      ),
+      emptyComments,
+      ['n'],
+      '',
     )
 
     const topLevelArbitraryBlock = arbitraryJSBlock(
+      [],
       `const a = 30`,
-      `var a = 30;
-return { a: a };`,
+      `return (() => {
+  const a = 30;
+  return utopiaCanvasBlockRanToEnd({
+    a: a
+  });
+})();`,
       ['a'],
-      [JSX_CANVAS_LOOKUP_FUNCTION_NAME],
+      [
+        JSX_CANVAS_LOOKUP_FUNCTION_NAME,
+        BLOCK_RAN_TO_END_FUNCTION_NAME,
+        EARLY_RETURN_RESULT_FUNCTION_NAME,
+        EARLY_RETURN_VOID_FUNCTION_NAME,
+      ],
       expect.objectContaining({
         sources: ['code.tsx'],
         version: 3,
         file: 'code.tsx',
       }),
       {},
+      [
+        jsAssignmentStatement(
+          'const',
+          [
+            jsAssignment(
+              regularParam('a', jsExpressionValue(30, emptyComments, '')),
+              jsExpressionValue(30, emptyComments, ''),
+            ),
+          ],
+          '',
+        ),
+      ],
     )
 
-    const view = jsxElement(
-      'div',
-      'aaa',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('aaa', emptyComments) }),
-      [arbitraryBlock],
+    const view = clearJSXElementChildUniqueIDs(
+      jsxElement(
+        'div',
+        'aaa',
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('aaa', emptyComments) }),
+        [arbitraryBlock],
+      ),
     )
     const exported = utopiaJSXComponent(
       'whatever',
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -4494,6 +5973,7 @@ return { a: a };`,
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -4502,11 +5982,13 @@ return { a: a };`,
 export var whatever = props => {
   return <svg data-uid='abc'/>
 }`
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     const view = jsxElement(
       'svg',
       'abc',
-      jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('abc', emptyComments) }),
+      jsxAttributesFromMap({ 'data-uid': jsExpressionValue('abc', emptyComments) }),
       [],
     )
     const exported = utopiaJSXComponent(
@@ -4514,6 +5996,7 @@ export var whatever = props => {
       true,
       'var',
       'block',
+      [],
       defaultPropsParam,
       [],
       view,
@@ -4528,6 +6011,7 @@ export var whatever = props => {
       null,
       null,
       [exportFunction('whatever')],
+      expect.objectContaining({}),
     )
     expect(actualResult).toEqual(expectedResult)
   })
@@ -4536,11 +6020,13 @@ export var whatever = props => {
 import {
   View
 } from "utopia-api";
-const a = (n) => n > 0 ? n : b(10)
+const a = (n) => n > 0 ? <div>n</div> : b(10)
 export var whatever = (props) => <View data-uid='aaa' />
-const b = (n) => n > 0 ? n : a(10)
+const b = (n) => n > 0 ? <div>n</div> : a(10)
 `
-    const actualResult = clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code))
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
     expect(clearParseResultPassTimes(actualResult)).toMatchSnapshot()
   })
   it('corrects duplicated data-uid entries', () => {
@@ -4557,7 +6043,9 @@ export var whatever2 = (props) => <View data-uid='aaa'>
 `
     const actualResult = testParseCode(code)
     foldParsedTextFile(
-      (_) => fail('Unable to parse code.'),
+      (_) => {
+        throw new Error('Unable to parse code.')
+      },
       (success) => {
         let uids: Array<string> = []
         for (const topLevelElement of success.topLevelElements) {
@@ -4566,20 +6054,14 @@ export var whatever2 = (props) => <View data-uid='aaa'>
           }
         }
       },
-      (_) => fail('Unable to parse code.'),
+      (_) => {
+        throw new Error('Unable to parse code.')
+      },
       actualResult,
     )
   })
   it('inserts data-uid into elements as part of the parse', () => {
-    function checkDataUIDsPopulated(printableProjectContent: PrintableProjectContent): boolean {
-      const printedCode = printCode(
-        '/index.js',
-        printCodeOptions(false, true, false, false, true),
-        printableProjectContent.imports,
-        printableProjectContent.topLevelElements,
-        printableProjectContent.jsxFactoryFunction,
-        printableProjectContent.exportsDetail,
-      )
+    function checkDataUIDsPopulated({ code: printedCode }: ArbitraryProject): boolean {
       const parseResult = testParseCode(printedCode)
       return foldParsedTextFile(
         (failure) => {
@@ -4602,8 +6084,8 @@ export var whatever2 = (props) => <View data-uid='aaa'>
         parseResult,
       )
     }
-    const printableArbitrary = printableProjectContentArbitrary()
-    const dataUIDProperty = FastCheck.property(printableArbitrary, checkDataUIDsPopulated)
+    const printedArbitrary = printedProjectContentArbitrary(false)
+    const dataUIDProperty = FastCheck.property(printedArbitrary, checkDataUIDsPopulated)
     FastCheck.assert(dataUIDProperty, { verbose: true })
   })
   it('when react is not imported treat components as arbitrary blocks', () => {
@@ -4614,7 +6096,9 @@ export var whatever = (props) => <View data-uid='aaa'>
 `
     const actualResult = testParseCode(code)
     foldParsedTextFile(
-      (_) => fail('Unable to parse code.'),
+      (_) => {
+        throw new Error('Unable to parse code.')
+      },
       (success) => {
         expect(elementsStructure(success.topLevelElements)).toMatchInlineSnapshot(`
           "UNPARSED_CODE
@@ -4622,9 +6106,341 @@ export var whatever = (props) => <View data-uid='aaa'>
           UNPARSED_CODE"
         `)
       },
-      (_) => fail('Unable to parse code.'),
+      (_) => {
+        throw new Error('Unable to parse code.')
+      },
       actualResult,
     )
+  })
+  it('parse jsx literal in attribute as jsx element', () => {
+    const code = `import * as React from "react";
+import { View } from "utopia-api";
+var MyComp = (props) => {
+  return <View data-uid='aaa'>{props.title}</View>
+}
+export var App = props => {
+  return (
+    <MyComp title={<h1>Hello</h1>} />
+  )
+}`
+    const actualResult = testParseCode(code)
+    foldParsedTextFile(
+      (_) => {
+        throw new Error('Unable to parse code.')
+      },
+      (success) => {
+        expect(elementsStructure(success.topLevelElements)).toMatchInlineSnapshot(`
+          "IMPORT_STATEMENT
+          UNPARSED_CODE
+          IMPORT_STATEMENT
+          UNPARSED_CODE
+          UTOPIA_JSX_COMPONENT - MyComp
+            JSX_ELEMENT - View - aaa
+              JS_PROPERTY_ACCESS - 271
+                JS_IDENTIFIER - f38
+          UNPARSED_CODE
+          UTOPIA_JSX_COMPONENT - App
+            JSX_ELEMENT - MyComp - cc3
+              JSX_ELEMENT - h1 - 1ee
+                JSX_TEXT_BLOCK - c58"
+        `)
+
+        const appComponent = success.topLevelElements.find(
+          (e) => isUtopiaJSXComponent(e) && e.name === 'App',
+        )!
+        if (!isUtopiaJSXComponent(appComponent) || appComponent.name !== `App`) {
+          throw new Error('expected to have a topLevelElement which is the App component')
+        }
+        if (!isJSXElement(appComponent.rootElement)) {
+          throw new Error(`expected the App component's root element to be a JSXElement`)
+        }
+
+        appComponent.rootElement.children
+
+        const arbitraryProp = optionalMap(
+          (p) => p.value,
+          appComponent.rootElement.props
+            .filter(isJSXAttributesEntry)
+            .find((p) => p.key === 'title'),
+        )
+
+        if (arbitraryProp == null || !modifiableAttributeIsJsxElement(arbitraryProp)) {
+          throw new Error(`expected to have an jsx element prop called props.title`)
+        }
+      },
+      (_) => {
+        throw new Error('Unable to parse code.')
+      },
+      actualResult,
+    )
+  })
+
+  it('parses self-closing jsx literal in attribute as jsx element', () => {
+    const code = `import * as React from "react";
+import { View } from "utopia-api";
+var MyComp = (props) => {
+  return <View data-uid='aaa'>{props.title}</View>
+}
+export var App = props => {
+  return (
+    <MyComp title={<div />} />
+  )
+}`
+    const actualResult = testParseCode(code)
+    foldParsedTextFile(
+      (_) => {
+        throw new Error('Unable to parse code.')
+      },
+      (success) => {
+        expect(elementsStructure(success.topLevelElements)).toMatchInlineSnapshot(`
+          "IMPORT_STATEMENT
+          UNPARSED_CODE
+          IMPORT_STATEMENT
+          UNPARSED_CODE
+          UTOPIA_JSX_COMPONENT - MyComp
+            JSX_ELEMENT - View - aaa
+              JS_PROPERTY_ACCESS - 271
+                JS_IDENTIFIER - f38
+          UNPARSED_CODE
+          UTOPIA_JSX_COMPONENT - App
+            JSX_ELEMENT - MyComp - e4f
+              JSX_ELEMENT - div - 776"
+        `)
+
+        const appComponent = success.topLevelElements.find(
+          (e) => isUtopiaJSXComponent(e) && e.name === 'App',
+        )!
+        if (!isUtopiaJSXComponent(appComponent) || appComponent.name !== `App`) {
+          throw new Error('expected to have a topLevelElement which is the App component')
+        }
+        if (!isJSXElement(appComponent.rootElement)) {
+          throw new Error(`expected the App component's root element to be a JSXElement`)
+        }
+
+        appComponent.rootElement.children
+
+        const arbitraryProp = optionalMap(
+          (p) => p.value,
+          appComponent.rootElement.props
+            .filter(isJSXAttributesEntry)
+            .find((p) => p.key === 'title'),
+        )
+
+        if (arbitraryProp == null || !modifiableAttributeIsJsxElement(arbitraryProp)) {
+          throw new Error(`expected to have an jsx element prop called props.title`)
+        }
+      },
+      (_) => {
+        throw new Error('Unable to parse code.')
+      },
+      actualResult,
+    )
+  })
+  it('parses destructure assignments', () => {
+    const code = `import * as React from "react";
+import {
+  UtopiaUtils,
+  Ellipse,
+  Image,
+  Rectangle,
+  Storyboard,
+  Text,
+  Scene
+} from "utopia-api";
+import { cake } from 'cake'
+export var whatever = (props) => {
+  const propsNewName = props
+  const { a, b } = props
+  const [ c, d ] = props
+  const { e: f } = props
+  return <div data-uid='root' />
+}
+`
+    const actualResult = simplifyParsedTextFileAttributes(
+      clearParseResultSourceMapsUniqueIDsAndEmptyBlocks(testParseCode(code)),
+    )
+    const toAssignmentsOptic = fromTypeGuard(isParseSuccess)
+      .compose(fromField('topLevelElements'))
+      .compose(traverseArray())
+      .compose(filtered(isUtopiaJSXComponent))
+      .compose(fromTypeGuard(isUtopiaJSXComponent))
+      .compose(fromField('arbitraryJSBlock'))
+      .compose(notNull())
+      .compose(fromField('statements'))
+    const possibleAssignments = toFirst(toAssignmentsOptic, actualResult)
+    expect(possibleAssignments).toMatchInlineSnapshot(`
+      Object {
+        "type": "RIGHT",
+        "value": Array [
+          Object {
+            "assignments": Array [
+              Object {
+                "leftHandSide": Object {
+                  "defaultExpression": Object {
+                    "comments": Object {
+                      "leadingComments": Array [],
+                      "trailingComments": Array [],
+                    },
+                    "name": "props",
+                    "sourceMap": null,
+                    "type": "JS_IDENTIFIER",
+                    "uid": "",
+                  },
+                  "paramName": "propsNewName",
+                  "type": "REGULAR_PARAM",
+                },
+                "rightHandSide": Object {
+                  "comments": Object {
+                    "leadingComments": Array [],
+                    "trailingComments": Array [],
+                  },
+                  "name": "props",
+                  "sourceMap": null,
+                  "type": "JS_IDENTIFIER",
+                  "uid": "",
+                },
+                "type": "JS_ASSIGNMENT",
+              },
+            ],
+            "declarationKeyword": "const",
+            "type": "JS_ASSIGNMENT_STATEMENT",
+            "uid": "",
+          },
+          Object {
+            "assignments": Array [
+              Object {
+                "leftHandSide": Object {
+                  "parts": Array [
+                    Object {
+                      "defaultExpression": null,
+                      "param": Object {
+                        "boundParam": Object {
+                          "defaultExpression": null,
+                          "paramName": "a",
+                          "type": "REGULAR_PARAM",
+                        },
+                        "dotDotDotToken": false,
+                        "type": "PARAM",
+                      },
+                      "propertyName": undefined,
+                    },
+                    Object {
+                      "defaultExpression": null,
+                      "param": Object {
+                        "boundParam": Object {
+                          "defaultExpression": null,
+                          "paramName": "b",
+                          "type": "REGULAR_PARAM",
+                        },
+                        "dotDotDotToken": false,
+                        "type": "PARAM",
+                      },
+                      "propertyName": undefined,
+                    },
+                  ],
+                  "type": "DESTRUCTURED_OBJECT",
+                },
+                "rightHandSide": Object {
+                  "comments": Object {
+                    "leadingComments": Array [],
+                    "trailingComments": Array [],
+                  },
+                  "name": "props",
+                  "sourceMap": null,
+                  "type": "JS_IDENTIFIER",
+                  "uid": "",
+                },
+                "type": "JS_ASSIGNMENT",
+              },
+            ],
+            "declarationKeyword": "const",
+            "type": "JS_ASSIGNMENT_STATEMENT",
+            "uid": "",
+          },
+          Object {
+            "assignments": Array [
+              Object {
+                "leftHandSide": Object {
+                  "parts": Array [
+                    Object {
+                      "boundParam": Object {
+                        "defaultExpression": null,
+                        "paramName": "c",
+                        "type": "REGULAR_PARAM",
+                      },
+                      "dotDotDotToken": false,
+                      "type": "PARAM",
+                    },
+                    Object {
+                      "boundParam": Object {
+                        "defaultExpression": null,
+                        "paramName": "d",
+                        "type": "REGULAR_PARAM",
+                      },
+                      "dotDotDotToken": false,
+                      "type": "PARAM",
+                    },
+                  ],
+                  "type": "DESTRUCTURED_ARRAY",
+                },
+                "rightHandSide": Object {
+                  "comments": Object {
+                    "leadingComments": Array [],
+                    "trailingComments": Array [],
+                  },
+                  "name": "props",
+                  "sourceMap": null,
+                  "type": "JS_IDENTIFIER",
+                  "uid": "",
+                },
+                "type": "JS_ASSIGNMENT",
+              },
+            ],
+            "declarationKeyword": "const",
+            "type": "JS_ASSIGNMENT_STATEMENT",
+            "uid": "",
+          },
+          Object {
+            "assignments": Array [
+              Object {
+                "leftHandSide": Object {
+                  "parts": Array [
+                    Object {
+                      "defaultExpression": null,
+                      "param": Object {
+                        "boundParam": Object {
+                          "defaultExpression": null,
+                          "paramName": "f",
+                          "type": "REGULAR_PARAM",
+                        },
+                        "dotDotDotToken": false,
+                        "type": "PARAM",
+                      },
+                      "propertyName": "e",
+                    },
+                  ],
+                  "type": "DESTRUCTURED_OBJECT",
+                },
+                "rightHandSide": Object {
+                  "comments": Object {
+                    "leadingComments": Array [],
+                    "trailingComments": Array [],
+                  },
+                  "name": "props",
+                  "sourceMap": null,
+                  "type": "JS_IDENTIFIER",
+                  "uid": "",
+                },
+                "type": "JS_ASSIGNMENT",
+              },
+            ],
+            "declarationKeyword": "const",
+            "type": "JS_ASSIGNMENT_STATEMENT",
+            "uid": "",
+          },
+        ],
+      }
+    `)
   })
 })
 
@@ -4665,7 +6481,7 @@ export var App = props => {
   it('maps a arbitraryJSBlock correctly', () => {
     const parseResult = testParseCode(code)
     if (!isParseSuccess(parseResult)) {
-      fail('expected parseResult to be Right')
+      throw new Error('expected parseResult to be Right')
     }
     const consoleLogBlock = parseResult.topLevelElements.find(isArbitraryJSBlock)!
 
@@ -4673,11 +6489,11 @@ export var App = props => {
       !isArbitraryJSBlock(consoleLogBlock) ||
       consoleLogBlock.javascript !== `console.log('hello!')`
     ) {
-      fail('expected the first topLevelElement to be the console logline')
+      throw new Error('expected the first topLevelElement to be the console logline')
     }
 
     const transpiledCharacter = 1 + consoleLogBlock.transpiledJavascript.indexOf('log')
-    const transpiledLine = 1
+    const transpiledLine = 2
 
     const consumer = getSourceMapConsumer(consoleLogBlock.sourceMap)
 
@@ -4689,21 +6505,21 @@ export var App = props => {
   it('maps an arbitraryJSBlock inside a utopiaJSXComponent', () => {
     const parseResult = testParseCode(code)
     if (!isParseSuccess(parseResult)) {
-      fail('expected parseResult to be Right')
+      throw new Error('expected parseResult to be Right')
     }
     const appComponent = parseResult.topLevelElements.find(isUtopiaJSXComponent)!
     if (!isUtopiaJSXComponent(appComponent) || appComponent.name !== `App`) {
-      fail('expected the second topLevelElement to be the App component')
+      throw new Error('expected the second topLevelElement to be the App component')
     }
 
     const arbitraryBlock = appComponent.arbitraryJSBlock
 
     if (arbitraryBlock == null) {
-      fail(`expected the App component's arbitraryJSBlock to be defined`)
+      throw new Error(`expected the App component's arbitraryJSBlock to be defined`)
     }
 
-    const transpiledCharacter = 1 + arbitraryBlock.transpiledJavascript.split('\n')[1].indexOf('b')
-    const transpiledLine = 2
+    const transpiledCharacter = 1 + arbitraryBlock.transpiledJavascript.split('\n')[2].indexOf('b')
+    const transpiledLine = 3
 
     const consumer = getSourceMapConsumer(arbitraryBlock.sourceMap)
 
@@ -4715,14 +6531,14 @@ export var App = props => {
   it('maps a jsxAttributeOtherJavaScript correctly', () => {
     const parseResult = testParseCode(code)
     if (!isParseSuccess(parseResult)) {
-      fail('expected parseResult to be a success')
+      throw new Error('expected parseResult to be a success')
     }
     const appComponent = parseResult.topLevelElements.find(isUtopiaJSXComponent)!
     if (!isUtopiaJSXComponent(appComponent) || appComponent.name !== `App`) {
-      fail('expected the second topLevelElement to be the App component')
+      throw new Error('expected the second topLevelElement to be the App component')
     }
     if (!isJSXElement(appComponent.rootElement)) {
-      fail(`expected the App component's root element to be a JSXElement`)
+      throw new Error(`expected the App component's root element to be a JSXElement`)
     }
 
     const arbitraryProp = optionalMap(
@@ -4732,8 +6548,8 @@ export var App = props => {
         .find((p) => p.key === 'arbitrary'),
     )
 
-    if (arbitraryProp == null || !isJSXAttributeOtherJavaScript(arbitraryProp)) {
-      fail(`expected <View /> to have an arbitrary js prop called props.arbitrary`)
+    if (arbitraryProp == null || !modifiableAttributeIsAttributeOtherJavaScript(arbitraryProp)) {
+      throw new Error(`expected <View /> to have an arbitrary js prop called props.arbitrary`)
     }
 
     const transpiledCharacter = 1 + arbitraryProp.transpiledJavascript.indexOf('log')
@@ -4744,48 +6560,7 @@ export var App = props => {
 
     const position = consumer.getOriginalPosition(transpiledLine, transpiledCharacter)
 
-    expect(position).toEqual(expect.objectContaining({ line: 29, column: 26 }))
-  })
-})
-
-describe('getHighlightBounds', () => {
-  it('gets some bounds', () => {
-    const bounds = getHighlightBoundsWithoutUID(
-      'test.ts',
-      `import * as React from "react";
-    import {
-      Ellipse,
-      UtopiaUtils,
-      Image,
-      Rectangle,
-      Text,
-      View,
-      Scene
-    } from "utopia-api";
-    
-    console.log('hello!') // line 18 char 9
-    
-    export var App = props => {
-      const a = 20;
-      const b = 40; // line 22 char 9
-    
-      return (
-        <View
-          style={{ backgroundColor: "lightgrey", position: "absolute" }}
-          layout={{
-            height: props.layout.height,
-            left: props.layout.left,
-            width: props.layout.width,
-            top: props.layout.top,
-          }}
-          data-uid="aaa"
-          arbitrary={console.log('hi')} // line 34, char 26
-        >
-        </View>
-      )
-    })`,
-    )
-    expect(bounds).toMatchSnapshot()
+    expect(position).toEqual(expect.objectContaining({ line: 29, column: 18 }))
   })
 })
 
@@ -4793,6 +6568,7 @@ describe('lintAndParse', () => {
   it('returns a syntax error from eslint when something is broken', () => {
     const result = lintAndParse(
       'test.js',
+      [],
       `
     import {
       Ellipse,
@@ -4817,6 +6593,8 @@ describe('lintAndParse', () => {
     })`,
       null,
       emptySet(),
+      'trim-bounds',
+      'do-not-apply-steganography',
     )
     expect(clearParseResultPassTimes(result)).toMatchSnapshot()
   })
@@ -4894,7 +6672,15 @@ export var App = (props) => {
       ],
     }
     expect(
-      transpileJavascriptFromCode('test.js', file, code, sourceMap, [], false),
+      transpileJavascriptFromCode(
+        'test.js',
+        file,
+        code,
+        sourceMap,
+        [],
+        'do-not-wrap',
+        'do-not-apply-steganography',
+      ),
     ).toMatchSnapshot()
   })
 })

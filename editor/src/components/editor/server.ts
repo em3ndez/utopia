@@ -1,25 +1,53 @@
-import { UTOPIA_BACKEND } from '../../common/env-vars'
+import { isBackendBFF, UTOPIA_BACKEND, UTOPIA_BACKEND_BASE_URL } from '../../common/env-vars'
 import {
   assetURL,
   getLoginState,
   HEADERS,
   MODE,
+  newProjectURL,
   projectURL,
   thumbnailURL,
   userConfigURL,
 } from '../../common/server'
-import { assetFile, imageFile, isImageFile } from '../../core/model/project-file-utils'
-import { AssetFile, ImageFile, isAssetFile } from '../../core/shared/project-file-types'
-import { PersistentModel, UserConfiguration, emptyUserConfiguration } from './store/editor-state'
-import { LoginState } from '../../uuiui-deps'
-const urljoin = require('url-join')
+import type {
+  GithubRepo,
+  PersistentModel,
+  UserConfiguration,
+  UserPermissions,
+} from './store/editor-state'
+import { emptyUserConfiguration, emptyUserPermissions } from './store/editor-state'
+import type { LoginState } from '../../uuiui-deps'
+import urljoin from 'url-join'
 import JSZip from 'jszip'
-import { addFileToProjectContents, AssetFileWithFileName, walkContentsTree } from '../assets'
-import { isLoginLost, isNotLoggedIn } from '../../common/user'
+import type { AssetFileWithFileName } from '../assets'
+import { gitBlobChecksumFromBuffer } from '../../core/shared/file-utils'
+import { isLoginLost } from '../../common/user'
 import { notice } from '../common/notice'
-import { EditorDispatch, isLoggedIn } from './action-types'
-import { setLoginState, showToast, removeToast } from './actions/action-creators'
-import { getFileExtension } from '../../core/shared/file-utils'
+import type { EditorDispatch } from './action-types'
+import { isLoggedIn } from './action-types'
+import {
+  setLoginState,
+  showToast,
+  removeToast,
+  setUserConfiguration,
+  setGithubState,
+} from './actions/action-creators'
+import type { GetBranchContentResponse } from '../../core/shared/github/helpers'
+import {
+  githubAPIErrorDataFromResponse,
+  updateUserDetailsWhenAuthenticated,
+} from '../../core/shared/github/helpers'
+import { GithubAuth } from '../../utils/github-auth'
+import type { User } from '../../../liveblocks.config'
+import { liveblocksClient } from '../../../liveblocks.config'
+import type { Collaborator } from '../../core/shared/multiplayer'
+import type { LiveObject } from '@liveblocks/client'
+import { projectIdToRoomId } from '../../utils/room-id'
+import { assertNever } from '../../core/shared/utils'
+import { checkOnlineState } from './online-status'
+import type { GithubOperationContext } from '../../core/shared/github/operations/github-operation-context'
+import { GithubEndpoints } from '../../core/shared/github/endpoints'
+import type { DiscordEndpointPayload } from 'utopia-shared/src/types'
 
 export { fetchProjectList, fetchShowcaseProjects, getLoginState } from '../../common/server'
 
@@ -53,7 +81,15 @@ interface ProjectNotFound {
   type: 'ProjectNotFound'
 }
 
-export type LoadProjectResponse = ProjectLoaded | ProjectUnchanged | ProjectNotFound
+interface ProjectNotAuthorized {
+  type: 'ProjectNotAuthorized'
+}
+
+export type LoadProjectResponse =
+  | ProjectLoaded
+  | ProjectUnchanged
+  | ProjectNotFound
+  | ProjectNotAuthorized
 
 interface SaveAssetResponse {
   id: string
@@ -62,6 +98,12 @@ interface SaveAssetResponse {
 interface SaveProjectRequest {
   name: string | null
   content: PersistentModel | null
+}
+
+interface CreateProjectRequest {
+  name: string | null
+  content: PersistentModel | null
+  accessLevel: string | null
 }
 
 interface RequestFailure {
@@ -119,6 +161,34 @@ export async function createNewProjectID(): Promise<string> {
   }
 }
 
+export async function createNewProject(
+  persistentModel: PersistentModel | null,
+  name: string,
+  accessLevel: string | null,
+): Promise<SaveProjectResponse> {
+  // PUTs the persistent model as JSON body.
+  const url = newProjectURL()
+  const bodyValue: CreateProjectRequest = {
+    name: name,
+    content: persistentModel,
+    accessLevel: accessLevel ?? '',
+  }
+  const postBody = JSON.stringify(bodyValue)
+  const response = await fetch(url, {
+    method: 'PUT',
+    credentials: 'include',
+    body: postBody,
+    headers: HEADERS,
+    mode: MODE,
+  })
+  if (response.ok) {
+    return response.json()
+  } else {
+    // FIXME Client should show an error if server requests fail
+    throw new Error(`New project creation failed (${response.status}): ${response.statusText}`)
+  }
+}
+
 export async function updateSavedProject(
   projectId: string,
   persistentModel: PersistentModel | null,
@@ -163,6 +233,8 @@ export async function loadProject(
     return response.json()
   } else if (response.status === 404) {
     return { type: 'ProjectNotFound' }
+  } else if (response.status === 403) {
+    return { type: 'ProjectNotAuthorized' }
   } else {
     // FIXME Client should show an error if server requests fail
     throw new Error(`server responded with ${response.status} ${response.statusText}`)
@@ -225,7 +297,7 @@ async function saveAssetRequest(
   fileType: string,
   base64: string,
   fileName: string,
-): Promise<void> {
+): Promise<string> {
   const mimeStrippedBase64 = getMimeStrippedBase64(base64)
   const asset = Buffer.from(mimeStrippedBase64, 'base64')
   const url = assetURL(projectId, fileName)
@@ -238,7 +310,7 @@ async function saveAssetRequest(
     body: asset,
   })
   if (response.ok) {
-    return
+    return gitBlobChecksumFromBuffer(asset)
   } else {
     throw new Error(`Save asset request failed (${response.status}): ${response.statusText}`)
   }
@@ -249,13 +321,13 @@ export async function saveAsset(
   fileType: string,
   base64: string,
   imageId: string,
-): Promise<void> {
+): Promise<string | null> {
   try {
-    return saveAssetRequest(projectId, fileType, base64, imageId)
+    return await saveAssetRequest(projectId, fileType, base64, imageId)
   } catch (e) {
     // FIXME Client should show an error if server requests fail
     console.error(e)
-    return
+    return null
   }
 }
 
@@ -273,12 +345,14 @@ export function assetToSave(fileType: string, base64: string, fileName: string):
   }
 }
 
-export async function saveAssets(projectId: string, assets: Array<AssetToSave>): Promise<void> {
+export async function saveAssets(
+  projectId: string,
+  assets: Array<AssetToSave>,
+): Promise<Array<string | null>> {
   const promises = assets.map((asset) =>
     saveAsset(projectId, asset.fileType, asset.base64, asset.fileName),
   )
-  await Promise.all(promises)
-  return
+  return Promise.all(promises)
 }
 
 export async function saveThumbnail(thumbnail: Buffer, projectId: string): Promise<void> {
@@ -297,6 +371,42 @@ export async function saveThumbnail(thumbnail: Buffer, projectId: string): Promi
     // FIXME Client should show an error if server requests fail
     console.error(`Save thumbnail request failed (${response.status}): ${response.statusText}`)
     return
+  }
+}
+
+export async function getUserPermissions(
+  loginState: LoginState,
+  projectId: string | null,
+): Promise<UserPermissions> {
+  if (!isBackendBFF()) {
+    return emptyUserPermissions(true)
+  }
+  switch (loginState.type) {
+    case 'LOGGED_IN':
+      if (projectId == null) {
+        return emptyUserPermissions(false)
+      }
+      const permissionsUrl = UTOPIA_BACKEND_BASE_URL + `internal/projects/${projectId}/permissions`
+      const response = await fetch(permissionsUrl, {
+        method: 'GET',
+        credentials: 'include',
+        headers: HEADERS,
+        mode: MODE,
+      })
+      if (response.ok) {
+        return response.json()
+      } else {
+        // FIXME Client should show an error if server requests fail
+        throw new Error(`server responded with ${response.status} ${response.statusText}`)
+      }
+    case 'LOGIN_NOT_YET_KNOWN':
+    case 'NOT_LOGGED_IN':
+    case 'LOGIN_LOST':
+    case 'OFFLINE_STATE':
+    case 'COOKIES_OR_LOCALFORAGE_UNAVAILABLE':
+      return emptyUserPermissions(false)
+    default:
+      assertNever(loginState)
   }
 }
 
@@ -349,7 +459,7 @@ export async function downloadGithubRepo(
   owner: string,
   repo: string,
 ): Promise<ServerResponse<JSZip>> {
-  const url = urljoin(UTOPIA_BACKEND, 'github', owner, repo)
+  const url = urljoin(UTOPIA_BACKEND, 'github', 'import', owner, repo)
   const response = await fetch(url, {
     method: 'GET',
     credentials: 'include',
@@ -375,30 +485,51 @@ export function startPollingLoginState(
 ): void {
   let previousLoginState: LoginState = initialLoginState
   setInterval(async () => {
-    const loginState = await getLoginState('no-cache')
-    if (previousLoginState.type !== loginState.type) {
-      dispatch([setLoginState(loginState)])
-      if (isLoginLost(loginState)) {
-        dispatch([
-          showToast(
-            notice(
-              `You have been logged out. You can continue working, but your work won't be saved until you log in again.`,
-              'ERROR',
-              true,
-              loginLostNoticeID,
-            ),
-          ),
-        ])
-      }
+    const isOnline = await checkOnlineState()
+    if (isOnline) {
+      const loginState = await getLoginState('no-cache')
+      if (previousLoginState.type !== loginState.type) {
+        if (isLoggedIn(loginState)) {
+          // Fetch the user configuration
+          void getUserConfiguration(loginState).then((userConfig) =>
+            dispatch([setUserConfiguration(userConfig)]),
+          )
 
-      if (isLoggedIn(loginState)) {
-        if (isLoginLost(previousLoginState)) {
-          // Login was lost and subsequently regained so remove the persistent toast.
-          dispatch([removeToast(loginLostNoticeID)])
+          // Fetch the github auth status
+          void updateUserDetailsWhenAuthenticated(
+            dispatch,
+            GithubAuth.isAuthenticatedWithGithub(loginState),
+          ).then((authenticatedWithGithub) =>
+            dispatch([
+              setGithubState({
+                authenticated: authenticatedWithGithub,
+              }),
+            ]),
+          )
+
+          if (isLoginLost(previousLoginState)) {
+            // Login was lost and subsequently regained so remove the persistent toast.
+            dispatch([removeToast(loginLostNoticeID)])
+          }
+        }
+
+        dispatch([setLoginState(loginState)])
+
+        if (isLoginLost(loginState)) {
+          dispatch([
+            showToast(
+              notice(
+                `You have been logged out. You can continue working, but your work won't be saved until you log in again.`,
+                'ERROR',
+                true,
+                loginLostNoticeID,
+              ),
+            ),
+          ])
         }
       }
+      previousLoginState = loginState
     }
-    previousLoginState = loginState
   }, 5000)
 }
 
@@ -423,6 +554,9 @@ async function downloadAssetFromProject(
   if (fileWithName.file.base64 != undefined) {
     return fileWithName
   } else {
+    if (window.top == null) {
+      throw new Error(`Failed downloading asset: window.top is null`)
+    }
     const baseUrl = window.top.location.origin
     const assetUrl = urljoin(baseUrl, 'p', projectId, fileWithName.fileName)
     const assetResponse = await fetch(assetUrl, {
@@ -458,5 +592,189 @@ export async function downloadAssetsFromProject(
   } else {
     const allPromises = allProjectAssets.map((asset) => downloadAssetFromProject(projectId, asset))
     return Promise.all(allPromises)
+  }
+}
+
+export async function updateCollaborators(projectId: string) {
+  if (!isBackendBFF()) {
+    return
+  }
+  const response = await fetch(
+    UTOPIA_BACKEND_BASE_URL + `internal/projects/${projectId}/collaborators`,
+    {
+      method: 'POST',
+      credentials: 'include',
+      mode: MODE,
+    },
+  )
+  if (!response.ok) {
+    throw new Error(`Update collaborators failed (${response.status}): ${response.statusText}`)
+  }
+}
+
+export async function getCollaborators(projectId: string): Promise<Collaborator[]> {
+  if (!isBackendBFF()) {
+    return getCollaboratorsFromLiveblocks(projectId)
+  }
+
+  const response = await fetch(
+    UTOPIA_BACKEND_BASE_URL + `internal/projects/${projectId}/collaborators`,
+    {
+      method: 'GET',
+      credentials: 'include',
+      mode: MODE,
+    },
+  )
+  if (response.ok) {
+    const result: Collaborator[] = await response.json()
+    return result
+  } else {
+    throw new Error(`Load collaborators failed (${response.status}): ${response.statusText}`)
+  }
+}
+
+// TODO remove this once the BFF is on
+async function getCollaboratorsFromLiveblocks(projectId: string): Promise<Collaborator[]> {
+  const room = liveblocksClient.getRoom(projectIdToRoomId(projectId))
+  if (room == null) {
+    return []
+  }
+  const storage = await room.getStorage()
+  const collabs = storage.root.get('collaborators') as LiveObject<{ [userId: string]: User }>
+  if (collabs == null) {
+    return []
+  }
+  return Object.values(collabs.toObject()).map((u) => u.toObject())
+}
+
+export async function requestProjectAccess(projectId: string): Promise<void> {
+  if (!isBackendBFF()) {
+    return
+  }
+  const response = await fetch(`/internal/projects/${projectId}/access/request`, {
+    method: 'POST',
+    credentials: 'include',
+    mode: MODE,
+  })
+  if (!response.ok) {
+    throw new Error(`Request project access failed (${response.status}): ${response.statusText}`)
+  }
+}
+
+export async function updateGithubRepository(
+  projectId: string,
+  githubRepository: (GithubRepo & { branch: string | null }) | null,
+): Promise<void> {
+  if (!isBackendBFF()) {
+    return
+  }
+  const url = urljoin(`/internal/projects/${projectId}/github/repository/update`)
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: HEADERS,
+    mode: MODE,
+    body: JSON.stringify({ githubRepository: githubRepository }),
+  })
+  if (!response.ok) {
+    throw new Error(`Update Github repository failed (${response.status}): ${response.statusText}`)
+  }
+}
+
+export async function requestSearchPublicGithubRepository(
+  operationContext: GithubOperationContext,
+  params: {
+    owner: string
+    repo: string
+  },
+): Promise<Response> {
+  const url = GithubEndpoints.searchRepository()
+
+  return operationContext.fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: HEADERS,
+    mode: MODE,
+    body: JSON.stringify({ owner: params.owner, repo: params.repo }),
+  })
+}
+
+export type ExistingAsset = {
+  gitBlobSha?: string
+  path: string
+  type: string
+}
+
+type GetBranchProjectContentsRequest = {
+  type: 'GET_BRANCH_PROJECT_CONTENTS_REQUEST'
+  existingAssets: ExistingAsset[] | null
+  uploadAssets: boolean
+  previousCommitSha: string | null
+  specificCommitSha: string | null
+}
+
+function getBranchProjectContentsRequest(
+  params: Omit<GetBranchProjectContentsRequest, 'type'>,
+): GetBranchProjectContentsRequest {
+  return {
+    type: 'GET_BRANCH_PROJECT_CONTENTS_REQUEST',
+    ...params,
+  }
+}
+
+export function getBranchProjectContents(operationContext: GithubOperationContext) {
+  return async function (params: {
+    projectId: string
+    owner: string
+    repo: string
+    branch: string
+    previousCommitSha: string | null
+    specificCommitSha: string | null
+    existingAssets: ExistingAsset[]
+  }): Promise<GetBranchContentResponse> {
+    const url = GithubEndpoints.getBranchProjectContents({
+      projectId: params.projectId,
+      owner: params.owner,
+      repo: params.repo,
+      branch: params.branch,
+    })
+    const response = await operationContext.fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: HEADERS,
+      mode: MODE,
+      body: JSON.stringify(
+        getBranchProjectContentsRequest({
+          existingAssets: params.existingAssets,
+          uploadAssets: true,
+          previousCommitSha: params.previousCommitSha,
+          specificCommitSha: params.specificCommitSha,
+        }),
+      ),
+    })
+    if (!response.ok) {
+      const reason = await githubAPIErrorDataFromResponse(response)
+      return {
+        type: 'FAILURE',
+        failureReason: reason ?? `Github operation failed: ${response.status}`,
+      }
+    }
+    return response.json()
+  }
+}
+
+export async function sendDiscordMessage(payload: DiscordEndpointPayload) {
+  try {
+    const response = await fetch(`/internal/discord/webhook`, {
+      method: 'POST',
+      credentials: 'include',
+      mode: MODE,
+      body: JSON.stringify(payload),
+    })
+    if (!response.ok) {
+      console.error(`Send Discord message failed (${response.status}): ${response.statusText}`)
+    }
+  } catch (e) {
+    console.error(`Send Discord message failed: ${e}`)
   }
 }

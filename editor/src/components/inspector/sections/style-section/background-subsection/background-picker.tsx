@@ -1,5 +1,7 @@
 import fastDeepEquals from 'fast-deep-equal'
 import React from 'react'
+import { jsExpressionValue, emptyComments } from '../../../../../core/shared/element-template'
+import { create } from '../../../../../core/shared/property-path'
 import {
   useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue,
   useColorTheme,
@@ -7,13 +9,16 @@ import {
   Icn,
   NumberInput,
   PopupList,
-  UtopiaTheme,
   UtopiaStyles,
-  UIRow,
   Icons,
+  UtopiaTheme,
+  SquareButton,
 } from '../../../../../uuiui'
-import { ControlStatus } from '../../../common/control-status'
-import {
+import { pickColorWithEyeDropper } from '../../../../canvas/canvas-utils'
+import { useDispatch } from '../../../../editor/store/dispatch-context'
+import { Substores, useEditorState } from '../../../../editor/store/store-hook'
+import type { ControlStatus } from '../../../common/control-status'
+import type {
   CSSBackgroundLayer,
   CSSBackgroundLayers,
   CSSBackgroundLayerType,
@@ -26,10 +31,12 @@ import {
   CSSRadialGradientBackgroundLayer,
   CSSSolidBackgroundLayer,
   CSSURLFunctionBackgroundLayer,
+  EmptyInputValue,
+} from '../../../common/css-utils'
+import {
   defaultConicGradientBackgroundLayer,
   defaultCSSColor,
   defaultCSSRadialGradientSize,
-  EmptyInputValue,
   fallbackOnEmptyInputValueToCSSDefaultEmptyValue,
   isCSSBackgroundImageLayer,
   isCSSBackgroundLayerWithBGSize,
@@ -40,21 +47,21 @@ import {
   isCSSSolidBackgroundLayer,
   orderStops,
 } from '../../../common/css-utils'
+import type { TransformedStateAndPropsEqualityTest } from '../../../common/inspector-utils'
 import {
-  TransformedStateAndPropsEqualityTest,
   stopPropagation,
   useHandleCloseOnESCOrEnter,
   useModelControlledTransformableState,
 } from '../../../common/inspector-utils'
-import { UseSubmitValueFactory } from '../../../common/property-path-hooks'
+import type { UseSubmitValueFactory } from '../../../common/property-path-hooks'
 import { BGSizeMetadataControl } from '../../../controls/bg-size-metadata-control'
 import { ColorPickerInner, colorPickerWidth } from '../../../controls/color-picker'
 import { URLBackgroundLayerMetadataControls } from '../../../controls/url-background-layer-metadata-controls'
 import { InspectorModal } from '../../../widgets/inspector-modal'
+import type { CSSBackgroundLayerTypeSelectOption } from './background-layer-helpers'
 import {
   backgroundLayerTypeSelectOptions,
   conicGradientSelectOption,
-  CSSBackgroundLayerTypeSelectOption,
   getIndexedOnCSSBackgroundLayerTypeSelectSubmitValue,
   getIndexedUpdateRadialOrConicGradientCenterX,
   getIndexedUpdateRadialOrConicGradientCenterY,
@@ -66,6 +73,10 @@ import {
 import { GradientStopsEditor } from './gradient-stop-editor'
 import { getIndexedUpdateCSSBackgroundLayerLinearGradientAngle } from './linear-gradient-layer'
 import { PickerImagePreview } from './picker-image-preview'
+import { setProp_UNSAFE } from '../../../../editor/actions/action-creators'
+import { useIsMyProject } from '../../../../editor/store/collaborative-editing'
+import { useControlsDisabledInSubtree } from '../../../../../uuiui/utilities/disable-subtree'
+import { UIGridRow } from '../../../widgets/ui-grid-row'
 
 const backgroundLayerOptionsByValue: {
   [key in CSSBackgroundLayerType]: CSSBackgroundLayerTypeSelectOption
@@ -135,15 +146,17 @@ export const MetadataControlsStyle: React.CSSProperties = {
   gridRowGap: 8,
 }
 
-const LinearGradientControls: React.FunctionComponent<LinearGradientControlsProps> = (props) => {
-  const [
-    gradientAngleSubmitValue,
-    gradientAngleTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateCSSBackgroundLayerLinearGradientAngle(props.index)),
-  )
+const LinearGradientControls: React.FunctionComponent<
+  React.PropsWithChildren<LinearGradientControlsProps>
+> = (props) => {
+  const [gradientAngleSubmitValue, gradientAngleTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(
+        getIndexedUpdateCSSBackgroundLayerLinearGradientAngle(props.index),
+      ),
+    )
   return (
-    <div style={MetadataControlsStyle}>
+    <UIGridRow padded variant='<--1fr--><--1fr-->'>
       <NumberInput
         id='background-layer-gradient-angle'
         testId='background-layer-gradient-angle'
@@ -151,19 +164,12 @@ const LinearGradientControls: React.FunctionComponent<LinearGradientControlsProp
         onSubmitValue={gradientAngleSubmitValue}
         onTransientSubmitValue={gradientAngleTransientSubmitValue}
         controlStatus={props.controlStatus}
-        labelInner={{
-          category: 'layout/systems',
-          type: 'transform-rotate',
-          color: 'secondary',
-          width: 10,
-          height: 10,
-        }}
-        DEPRECATED_labelBelow='angle'
+        innerLabel={<Icons.Degree color='on-highlight-secondary' />}
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='AnglePercent'
         defaultUnitToHide={null}
       />
-    </div>
+    </UIGridRow>
   )
 }
 
@@ -207,98 +213,80 @@ function getIndexedUpdateRadialGradientHeight(index: number) {
   }
 }
 
-const RadialGradientControls: React.FunctionComponent<RadialGradientControlsProps> = (props) => {
-  const [
-    gradientWidthSubmitValue,
-    gradientWidthTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateRadialGradientWidth(props.index)),
-  )
-  const [
-    gradientHeightSubmitValue,
-    gradientHeightTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateRadialGradientHeight(props.index)),
-  )
-  const [
-    gradientCenterXSubmitValue,
-    gradientCenterXTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateRadialOrConicGradientCenterX(props.index)),
-  )
-  const [
-    gradientCenterYSubmitValue,
-    gradientCenterYTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateRadialOrConicGradientCenterY(props.index)),
-  )
+const RadialGradientControls: React.FunctionComponent<
+  React.PropsWithChildren<RadialGradientControlsProps>
+> = (props) => {
+  const [gradientWidthSubmitValue, gradientWidthTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateRadialGradientWidth(props.index)),
+    )
+  const [gradientHeightSubmitValue, gradientHeightTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateRadialGradientHeight(props.index)),
+    )
+  const [gradientCenterXSubmitValue, gradientCenterXTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateRadialOrConicGradientCenterX(props.index)),
+    )
+  const [gradientCenterYSubmitValue, gradientCenterYTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateRadialOrConicGradientCenterY(props.index)),
+    )
 
   const radialBackgroundLayerWidth = props.value.gradientSize.width.value
   const radialBackgroundLayerHeight = props.value.gradientSize.height.value
 
   return (
-    <div style={MetadataControlsStyle}>
+    <UIGridRow padded variant='<--1fr--><--1fr--><--1fr--><--1fr-->'>
       <NumberInput
-        style={{
-          gridColumn: '1 / span 1',
-        }}
         id='background-gradient-center-x'
         testId='background-gradient-center-x'
         value={props.value.center.x.value}
         onSubmitValue={gradientCenterXSubmitValue}
         onTransientSubmitValue={gradientCenterXTransientSubmitValue}
         controlStatus={props.controlStatus}
-        DEPRECATED_labelBelow='center x'
+        innerLabel='X'
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='LengthPercent'
         defaultUnitToHide={null}
       />
       <NumberInput
-        style={{
-          gridColumn: '3 / span 1',
-        }}
         id='background-gradient-center-y'
         testId='background-gradient-center-y'
         value={props.value.center.y.value}
         onSubmitValue={gradientCenterYSubmitValue}
         onTransientSubmitValue={gradientCenterYTransientSubmitValue}
         controlStatus={props.controlStatus}
-        DEPRECATED_labelBelow='center y'
+        innerLabel='Y'
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='LengthPercent'
         defaultUnitToHide={null}
       />
       <NumberInput
-        style={{
-          gridColumn: '5 / span 1',
-        }}
         id='background-gradient-width'
         testId='background-gradient-width'
         value={radialBackgroundLayerWidth}
         onSubmitValue={gradientWidthSubmitValue}
         onTransientSubmitValue={gradientWidthTransientSubmitValue}
         controlStatus={props.controlStatus}
-        DEPRECATED_labelBelow='width'
+        innerLabel='W'
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='LengthPercent'
         defaultUnitToHide={null}
       />
       <NumberInput
-        style={{
-          gridColumn: '7 / span 1',
-        }}
         id='background-gradient-height'
         testId='background-gradient-height'
         value={radialBackgroundLayerHeight}
         onSubmitValue={gradientHeightSubmitValue}
         onTransientSubmitValue={gradientHeightTransientSubmitValue}
         controlStatus={props.controlStatus}
-        DEPRECATED_labelBelow='height'
+        innerLabel='H'
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='LengthPercent'
         defaultUnitToHide={null}
       />
-    </div>
+    </UIGridRow>
   )
 }
 
@@ -324,69 +312,62 @@ function getIndexedUpdateConicGradientFromAngle(index: number) {
   }
 }
 
-const ConicGradientControls: React.FunctionComponent<ConicGradientControlsProps> = (props) => {
-  const [
-    gradientCenterXSubmitValue,
-    gradientCenterXTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateRadialOrConicGradientCenterX(props.index)),
-  )
-  const [
-    gradientCenterYSubmitValue,
-    gradientCenterYTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateRadialOrConicGradientCenterY(props.index)),
-  )
+const ConicGradientControls: React.FunctionComponent<
+  React.PropsWithChildren<ConicGradientControlsProps>
+> = (props) => {
+  const [gradientCenterXSubmitValue, gradientCenterXTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateRadialOrConicGradientCenterX(props.index)),
+    )
+  const [gradientCenterYSubmitValue, gradientCenterYTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateRadialOrConicGradientCenterY(props.index)),
+    )
 
-  const [
-    gradientFromAngleSubmitValue,
-    gradientFromAngleTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateConicGradientFromAngle(props.index)),
-  )
+  const [gradientFromAngleSubmitValue, gradientFromAngleTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateConicGradientFromAngle(props.index)),
+    )
 
   return (
-    <div style={MetadataControlsStyle}>
+    <UIGridRow padded variant='<--1fr--><--1fr--><--1fr-->'>
       <NumberInput
-        style={{ gridColumn: '1 / span 1' }}
         id='background-gradient-center-x'
         testId='background-gradient-center-x'
         value={props.value.center.x.value}
         onSubmitValue={gradientCenterXSubmitValue}
         onTransientSubmitValue={gradientCenterXTransientSubmitValue}
         controlStatus={props.controlStatus}
-        DEPRECATED_labelBelow='x'
+        innerLabel='X'
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='LengthPercent'
         defaultUnitToHide={null}
       />
       <NumberInput
-        style={{ gridColumn: '3 / span 1' }}
         id='background-gradient-center-y'
         testId='background-gradient-center-y'
         value={props.value.center.y.value}
         onSubmitValue={gradientCenterYSubmitValue}
         onTransientSubmitValue={gradientCenterYTransientSubmitValue}
         controlStatus={props.controlStatus}
-        DEPRECATED_labelBelow='y'
+        innerLabel='Y'
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='LengthPercent'
         defaultUnitToHide={null}
       />
       <NumberInput
-        style={{ gridColumn: '5 / span 1' }}
         id='background-gradient-from-angle'
         testId='background-gradient-from-angle'
         value={props.value.fromAngle.value}
         onSubmitValue={gradientFromAngleSubmitValue}
         onTransientSubmitValue={gradientFromAngleTransientSubmitValue}
         controlStatus={props.controlStatus}
-        DEPRECATED_labelBelow='angle'
+        innerLabel={<Icons.Degree color='on-highlight-secondary' />}
         inputProps={{ onMouseDown: stopPropagation }}
         numberType='AnglePercent'
         defaultUnitToHide={null}
       />
-    </div>
+    </UIGridRow>
   )
 }
 
@@ -407,14 +388,23 @@ function setColor(
   return workingStops
 }
 
-export const BackgroundPicker: React.FunctionComponent<BackgroundPickerProps> = (props) => {
+export const BackgroundPicker: React.FunctionComponent<
+  React.PropsWithChildren<BackgroundPickerProps>
+> = (props) => {
   const colorTheme = useColorTheme()
   useHandleCloseOnESCOrEnter(props.closePopup)
   const [showSettings, setShowSettings] = React.useState(false)
-  const toggleSettings = React.useCallback(() => setShowSettings((value) => !value), [
-    setShowSettings,
-  ])
+  const toggleSettings = React.useCallback(
+    () => setShowSettings((value) => !value),
+    [setShowSettings],
+  )
   const [selectedStopUnorderedIndex, setSelectedStopUnorderedIndex] = React.useState(0)
+  const dispatch = useDispatch()
+  const selectedViewsFromStore = useEditorState(
+    Substores.selectedViews,
+    (store) => store.editor.selectedViews,
+    'BackgroundPicker selectedViews',
+  )
 
   const [onSubmitColorValue, onTransientSubmitColorValue] = props.useSubmitValueFactory(
     getIndexedUpdateCSSBackgroundLayerStop(selectedStopUnorderedIndex, props.backgroundLayerIndex),
@@ -457,16 +447,42 @@ export const BackgroundPicker: React.FunctionComponent<BackgroundPickerProps> = 
     (newValue: CSSColor) =>
       onSubmitValueAndUpdateLocalStops(
         setColor(selectedStopUnorderedIndex, newValue, stops),
-        false,
+        'dragEnd',
       ),
     [stops, onSubmitValueAndUpdateLocalStops, selectedStopUnorderedIndex],
   )
 
   const onTransientSubmitValueAndUpdateLocalColor = React.useCallback(
     (newValue: CSSColor) =>
-      onSubmitValueAndUpdateLocalStops(setColor(selectedStopUnorderedIndex, newValue, stops), true),
+      onSubmitValueAndUpdateLocalStops(
+        setColor(selectedStopUnorderedIndex, newValue, stops),
+        'drag',
+      ),
     [stops, onSubmitValueAndUpdateLocalStops, selectedStopUnorderedIndex],
   )
+
+  const closePopup = props.closePopup
+
+  const dispatchEyeDropper = React.useCallback(() => {
+    const selectedViews = selectedViewsFromStore
+    if (selectedViews.length === 0) {
+      return
+    }
+    closePopup()
+    void pickColorWithEyeDropper()
+      .then(({ sRGBHex }) => {
+        dispatch(
+          selectedViews.map((view) =>
+            setProp_UNSAFE(
+              view,
+              create('style', 'backgroundColor'),
+              jsExpressionValue(sRGBHex, emptyComments),
+            ),
+          ),
+        )
+      })
+      .catch((e) => console.error(e))
+  }, [dispatch, closePopup, selectedViewsFromStore])
 
   const MetadataControls: React.ReactNode = (() => {
     switch (props.value.type) {
@@ -511,6 +527,9 @@ export const BackgroundPicker: React.FunctionComponent<BackgroundPickerProps> = 
     }
   })()
 
+  const controlsDisabled = useControlsDisabledInSubtree()
+  const disabled = controlsDisabled
+
   return (
     <InspectorModal
       offsetX={props.offsetX - colorPickerWidth}
@@ -520,6 +539,7 @@ export const BackgroundPicker: React.FunctionComponent<BackgroundPickerProps> = 
         zIndex: 1,
       }}
       closePopupOnUnmount={false}
+      outsideClickIgnoreClass={`ignore-react-onclickoutside-${props.id}`}
     >
       <div
         id={props.id}
@@ -534,35 +554,33 @@ export const BackgroundPicker: React.FunctionComponent<BackgroundPickerProps> = 
         }}
         onMouseDown={stopPropagation}
       >
-        <UIRow
+        <UIGridRow
           padded={true}
-          style={{
-            borderBottom: `1px solid ${colorTheme.neutralBorder.value}`,
-          }}
+          variant='<-auto-><----------1fr--------->'
+          style={{ paddingBottom: 4 }}
         >
-          <div
-            style={{
-              flexGrow: 1,
-            }}
-          >
-            <PopupList
-              id='colorPicker-background-layer-type-selector'
-              value={backgroundLayerOptionsByValue[props.value.type]}
-              options={backgroundLayerTypeSelectOptions}
-              onSubmitValue={onSubmitBackgroundLayerType}
-              containerMode='noBorder'
-            />
-          </div>
-          {isCSSBackgroundImageLayer(props.value) ? <Icons.Gear onClick={toggleSettings} /> : null}
-          <Icn
-            type='cross-large'
-            color='secondary'
-            width={16}
-            height={16}
-            onClick={props.closePopup}
-            style={{ marginLeft: 8 }}
+          <PopupList
+            id='colorPicker-background-layer-type-selector'
+            value={backgroundLayerOptionsByValue[props.value.type]}
+            options={backgroundLayerTypeSelectOptions}
+            onSubmitValue={onSubmitBackgroundLayerType}
+            containerMode='noBorder'
+            style={{ borderRadius: UtopiaTheme.inputBorderRadius, marginLeft: -4, width: 80 }}
           />
-        </UIRow>
+          <FlexRow style={{ justifyContent: 'flex-end', gap: 2 }}>
+            {isCSSBackgroundImageLayer(props.value) ? (
+              <SquareButton highlight spotlight={showSettings === true} onClick={toggleSettings}>
+                <Icons.Gear />
+              </SquareButton>
+            ) : null}
+            <SquareButton highlight onClick={dispatchEyeDropper}>
+              <Icons.SmallPipette />
+            </SquareButton>
+            <SquareButton highlight onClick={props.closePopup}>
+              <Icons.SmallCross />
+            </SquareButton>
+          </FlexRow>
+        </UIGridRow>
         {isCSSImageURLBackgroundLayer(props.value) ? (
           <PickerImagePreview value={props.value} />
         ) : (
@@ -586,6 +604,7 @@ export const BackgroundPicker: React.FunctionComponent<BackgroundPickerProps> = 
                   offsetY={props.offsetY}
                   id={props.id}
                   testId={props.testId}
+                  disabled={disabled}
                 />
               ) : (
                 <ColorPickerInner
@@ -596,6 +615,7 @@ export const BackgroundPicker: React.FunctionComponent<BackgroundPickerProps> = 
                   offsetY={props.offsetY}
                   id={props.id}
                   testId={props.testId}
+                  disabled={disabled}
                 />
               )
             ) : null}

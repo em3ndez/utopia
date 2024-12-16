@@ -5,8 +5,10 @@ import {
   testPrintCodeFromEditorState,
   getEditorState,
 } from './ui-jsx.test-utils'
-import { singleResizeChange, EdgePosition, pinMoveChange } from './canvas-types'
-import { CanvasVector, canvasRectangle } from '../../core/shared/math-utils'
+import type { EdgePosition } from './canvas-types'
+import { singleResizeChange, pinMoveChange, pinFrameChange } from './canvas-types'
+import type { CanvasVector } from '../../core/shared/math-utils'
+import { canvasRectangle } from '../../core/shared/math-utils'
 import { updateFramesOfScenesAndComponents } from './canvas-utils'
 import { NO_OP } from '../../core/shared/utils'
 import { editorModelFromPersistentModel } from '../editor/store/editor-state'
@@ -18,7 +20,7 @@ describe('updateFramesOfScenesAndComponents - multi-file', () => {
     const targetPath = EP.elementPath([
       ['storyboard-entity', 'scene-1-entity', 'app-entity'],
       ['app-outer-div', 'card-instance'],
-      ['card-outer-div', 'card-inner-rectangle'],
+      ['card-outer-div', 'card-inner-spring'],
     ])
 
     const pinChange = singleResizeChange(
@@ -31,7 +33,7 @@ describe('updateFramesOfScenesAndComponents - multi-file', () => {
 
     expect(testPrintCodeFromEditorState(updatedProject, '/src/card.js')).toMatchInlineSnapshot(`
       "import * as React from 'react'
-      import { Rectangle } from 'utopia-api'
+      import { Spring } from 'non-existant-dummy-library'
       export var Card = (props) => {
         return (
           <div
@@ -40,6 +42,7 @@ describe('updateFramesOfScenesAndComponents - multi-file', () => {
           >
             <div
               data-uid='card-inner-div'
+              data-testid='card-inner-div'
               style={{
                 position: 'absolute',
                 left: 0,
@@ -49,8 +52,9 @@ describe('updateFramesOfScenesAndComponents - multi-file', () => {
                 backgroundColor: 'red',
               }}
             />
-            <Rectangle
-              data-uid='card-inner-rectangle'
+            <Spring
+              data-uid='card-inner-spring'
+              data-testid='spring'
               style={{
                 position: 'absolute',
                 left: 100,
@@ -72,7 +76,7 @@ describe('updateFramesOfScenesAndComponents - multi-file', () => {
     const targetPath = EP.elementPath([
       ['storyboard-entity', 'scene-1-entity', 'app-entity'],
       ['app-outer-div', 'card-instance'],
-      ['card-outer-div', 'card-inner-rectangle'],
+      ['card-outer-div', 'card-inner-spring'],
     ])
 
     const pinChange = pinMoveChange(targetPath, { x: 60, y: 40 } as CanvasVector)
@@ -81,7 +85,7 @@ describe('updateFramesOfScenesAndComponents - multi-file', () => {
 
     expect(testPrintCodeFromEditorState(updatedProject, '/src/card.js')).toMatchInlineSnapshot(`
       "import * as React from 'react'
-      import { Rectangle } from 'utopia-api'
+      import { Spring } from 'non-existant-dummy-library'
       export var Card = (props) => {
         return (
           <div
@@ -90,6 +94,7 @@ describe('updateFramesOfScenesAndComponents - multi-file', () => {
           >
             <div
               data-uid='card-inner-div'
+              data-testid='card-inner-div'
               style={{
                 position: 'absolute',
                 left: 0,
@@ -99,8 +104,9 @@ describe('updateFramesOfScenesAndComponents - multi-file', () => {
                 backgroundColor: 'red',
               }}
             />
-            <Rectangle
-              data-uid='card-inner-rectangle'
+            <Spring
+              data-uid='card-inner-spring'
+              data-testid='spring'
               style={{
                 position: 'absolute',
                 left: 160,
@@ -124,7 +130,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(`
     <View style={{ ...(props.style || {}) }} data-uid='aaa'>
       <View
-        style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 50, top: 50, width: 250, height: 300 }}
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 50, top: 50, width: 250, height: 300 }}
         data-uid='bbb'
       />
     </View>
@@ -147,7 +153,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(
         `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
         <View
-          style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 50, top: 50, width: 310, height: 340 }}
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 50, top: 50, width: 310, height: 340 }}
           data-uid='bbb'
         />
       </View>`,
@@ -159,7 +165,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(`
     <View style={{ ...(props.style || {}) }} data-uid='aaa'>
       <View
-        style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 52, top: 61, width: 256 }}
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 52, top: 61, width: 256 }}
         data-uid='bbb'
       />
     </View>
@@ -182,7 +188,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(
         `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
         <View
-          style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 52, top: 61, width: 296, height: 30 }}
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 52, top: 61, width: 296, height: 30 }}
           data-uid='bbb'
         />
       </View>`,
@@ -194,7 +200,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(`
     <View style={{ ...(props.style || {}) }} data-uid='aaa'>
       <View
-        style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 52, top: 61, width: 256, height: 202, bottom: 137, right: 93 }}
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 52, top: 61, width: 256, height: 202, bottom: 137, right: 93 }}
         data-uid='bbb'
       />
     </View>
@@ -218,7 +224,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
         `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
         <View
           style={{
-            backgroundColor: '#0091FFAA',
+            backgroundColor: '#aaaaaa33',
             position: 'absolute',
             left: 52,
             top: 61,
@@ -237,17 +243,17 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
   it('TLRB pin change works, dragged from topleft point', async () => {
     const testProject = getEditorState(
       makeTestProjectCodeWithSnippet(`
-    <View style={{ ...(props.style || {}) }} data-uid='aaa'>
+    <View style={{ ...(props.style || {}) }} data-uid='outer-view'>
       <View
-        style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 52, top: 61, right: 50, bottom: 20 }}
-        data-uid='bbb'
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 52, top: 61, right: 50, bottom: 20 }}
+        data-uid='inner-view'
       />
     </View>
     `),
     )
 
     const pinChange = singleResizeChange(
-      EP.appendNewElementPath(TestScenePath, ['aaa', 'bbb']),
+      EP.appendNewElementPath(TestScenePath, ['outer-view', 'inner-view']),
       { x: 0, y: 0 } as EdgePosition,
       { x: 50, y: 20 } as CanvasVector,
     )
@@ -260,10 +266,10 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
 
     expect(testPrintCodeFromEditorState(updatedProject)).toEqual(
       makeTestProjectCodeWithSnippet(
-        `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
+        `<View style={{ ...(props.style || {}) }} data-uid='outer-view'>
         <View
-          style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 2, top: 41, right: 50, bottom: 20 }}
-          data-uid='bbb'
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 2, top: 41, right: 50, bottom: 20 }}
+          data-uid='inner-view'
         />
       </View>`,
       ),
@@ -272,17 +278,17 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
   it('TLRB pin change works, dragged from bottom right point', async () => {
     const testProject = getEditorState(
       makeTestProjectCodeWithSnippet(`
-    <View style={{ ...(props.style || {}) }} data-uid='aaa'>
+    <View style={{ ...(props.style || {}) }} data-uid='outer-view'>
       <View
-        style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 52, top: 61, right: 50, bottom: 20 }}
-        data-uid='bbb'
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 52, top: 61, right: 50, bottom: 20 }}
+        data-uid='inner-view'
       />
     </View>
     `),
     )
 
     const pinChange = singleResizeChange(
-      EP.appendNewElementPath(TestScenePath, ['aaa', 'bbb']),
+      EP.appendNewElementPath(TestScenePath, ['outer-view', 'inner-view']),
       { x: 1, y: 1 } as EdgePosition,
       { x: 80, y: -10 } as CanvasVector,
     )
@@ -295,10 +301,10 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
 
     expect(testPrintCodeFromEditorState(updatedProject)).toEqual(
       makeTestProjectCodeWithSnippet(
-        `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
+        `<View style={{ ...(props.style || {}) }} data-uid='outer-view'>
         <View
-          style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 52, top: 61, right: -30, bottom: 30 }}
-          data-uid='bbb'
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 52, top: 61, right: -30, bottom: 30 }}
+          data-uid='inner-view'
         />
       </View>`,
       ),
@@ -309,7 +315,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(`
     <View style={{ ...(props.style || {}) }} data-uid='aaa'>
       <View
-        style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: '50px', top: '50px', width: '250px', height: '350px' }}
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: '50px', top: '50px', width: '250px', height: '350px' }}
         data-uid='bbb'
       />
     </View>
@@ -332,7 +338,42 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(
         `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
         <View
-          style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: '50px', top: '50px', width: 310, height: 390 }}
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: '50px', top: '50px', width: 310, height: 390 }}
+          data-uid='bbb'
+        />
+      </View>`,
+      ),
+    )
+  })
+  it('a simple TLWH pin change with values in percentages', async () => {
+    const testProject = getEditorState(
+      makeTestProjectCodeWithSnippet(`
+    <View style={{ ...(props.style || {}) }} data-uid='aaa'>
+      <View
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: '50px', top: '50px', width: '30%', height: '40%' }}
+        data-uid='bbb'
+      />
+    </View>
+    `),
+    )
+
+    const pinChange = singleResizeChange(
+      EP.appendNewElementPath(TestScenePath, ['aaa', 'bbb']),
+      { x: 1, y: 1 } as EdgePosition,
+      { x: 60, y: 40 } as CanvasVector,
+    )
+
+    const updatedProject = updateFramesOfScenesAndComponents(
+      testProject,
+      [pinChange],
+      canvasRectangle({ x: 0, y: 0, width: 400, height: 400 }),
+    )
+
+    expect(testPrintCodeFromEditorState(updatedProject)).toEqual(
+      makeTestProjectCodeWithSnippet(
+        `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
+        <View
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: '50px', top: '50px', width: '45%', height: '50%' }}
           data-uid='bbb'
         />
       </View>`,
@@ -344,7 +385,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(`
     <View style={{ ...(props.style || {}) }} data-uid='aaa'>
       <View
-        style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 50, top: 50, width: 200 + 50, height: 300 }}
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 50, top: 50, width: 200 + 50, height: 300 }}
         data-uid='bbb'
       />
     </View>
@@ -367,7 +408,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(
         `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
         <View
-          style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: 50, top: 50, width: 200 + 50, height: 340 }}
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 50, top: 50, width: 200 + 50, height: 340 }}
           data-uid='bbb'
         />
       </View>`,
@@ -379,7 +420,7 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(`
     <View style={{ ...(props.style || {}) }} data-uid='aaa'>
       <View
-        style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: '50pt', top: '5em', width: '50vw', height: '10cm' }}
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: '50pt', top: '5em', width: '50vw', height: '10cm' }}
         data-uid='bbb'
       />
     </View>
@@ -402,7 +443,45 @@ describe('updateFramesOfScenesAndComponents - singleResizeChange -', () => {
       makeTestProjectCodeWithSnippet(
         `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
         <View
-          style={{ backgroundColor: '#0091FFAA', position: 'absolute', left: '50pt', top: '5em', width: '50vw', height: '10cm' }}
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: '50pt', top: '5em', width: '50vw', height: '10cm' }}
+          data-uid='bbb'
+        />
+      </View>`,
+      ),
+    )
+  })
+})
+
+describe('updateFramesOfScenesAndComponents - pinFrameChange -', () => {
+  it('a simple TLWH pin change with values in percentages', async () => {
+    const testProject = getEditorState(
+      makeTestProjectCodeWithSnippet(`
+    <View style={{ ...(props.style || {}) }} data-uid='aaa'>
+      <View
+        style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: '50px', top: '50px', width: '30%', height: '40%' }}
+        data-uid='bbb'
+      />
+    </View>
+    `),
+    )
+
+    const pinChange = pinFrameChange(
+      EP.appendNewElementPath(TestScenePath, ['aaa', 'bbb']),
+      canvasRectangle({ x: 50, y: 50, width: 200, height: 300 }),
+      { x: 1, y: 1 } as EdgePosition,
+    )
+
+    const updatedProject = updateFramesOfScenesAndComponents(
+      testProject,
+      [pinChange],
+      canvasRectangle({ x: 0, y: 0, width: 400, height: 400 }),
+    )
+
+    expect(testPrintCodeFromEditorState(updatedProject)).toEqual(
+      makeTestProjectCodeWithSnippet(
+        `<View style={{ ...(props.style || {}) }} data-uid='aaa'>
+        <View
+          style={{ backgroundColor: '#aaaaaa33', position: 'absolute', left: 50, top: 50, width: '50%', height: '75%' }}
           data-uid='bbb'
         />
       </View>`,

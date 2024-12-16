@@ -1,5 +1,6 @@
 import React from 'react'
-import { animated, SpringValue } from 'react-spring'
+import type { SpringValue } from 'react-spring'
+import { animated } from 'react-spring'
 import utils from '../../../../../utils/utils'
 import {
   UtopiaTheme,
@@ -10,32 +11,31 @@ import {
   FlexRow,
   SquareButton,
   Icn,
-  InspectorSectionIcons,
+  Icons,
 } from '../../../../../uuiui'
-import { betterReactMemo } from '../../../../../uuiui-deps'
-import { ContextMenuItem } from '../../../../context-menu-items'
+import type { ContextMenuItem } from '../../../../context-menu-items'
 import { InspectorContextMenuWrapper } from '../../../../context-menu-wrapper'
 import { addOnUnsetValues, removeRow } from '../../../common/context-menu-items'
-import { ControlStatus, ControlStyles } from '../../../common/control-status'
-import {
+import type { ControlStatus } from '../../../common/control-status'
+import { type ControlStyles } from '../../../common/control-styles'
+import type {
   CSSBoxShadow,
   CSSBoxShadows,
   CSSColor,
   CSSNumber,
-  defaultBoxShadow,
   EmptyInputValue,
+} from '../../../common/css-utils'
+import {
+  defaultBoxShadow,
   fallbackOnEmptyInputValueToCSSDefaultEmptyValue,
   fallbackOnEmptyInputValueToCSSEmptyValue,
   cssPixelLength,
   cssDefault,
   toggleShadowEnabled,
 } from '../../../common/css-utils'
-import { useGetSubsectionHeaderStyle } from '../../../common/inspector-utils'
-import {
-  useInspectorStyleInfo,
-  useIsSubSectionVisible,
-  UseSubmitValueFactory,
-} from '../../../common/property-path-hooks'
+import { RemovePropertyButton, useGetSubsectionHeaderStyle } from '../../../common/inspector-utils'
+import type { UseSubmitValueFactory } from '../../../common/property-path-hooks'
+import { useInspectorStyleInfo, useIsSubSectionVisible } from '../../../common/property-path-hooks'
 import { useArraySuperControl } from '../../../controls/array-supercontrol'
 import { ColorControl } from '../../../controls/color-control'
 import { UIGridRow } from '../../../widgets/ui-grid-row'
@@ -143,39 +143,31 @@ interface ShadowItemProps {
   contextMenuItems: Array<ContextMenuItem<null>>
 }
 
-const rowHeight = UtopiaTheme.layout.rowHeight.normal
+const rowHeight = UtopiaTheme.layout.rowHeight.max
 
-const ShadowItem = betterReactMemo<ShadowItemProps>('ShadowItem', (props) => {
+const ShadowItem = React.memo<ShadowItemProps>((props) => {
   const [enabledSubmitValueToggle] = props.useSubmitValueFactory(
     getIndexedToggleShadowEnabled(props.index),
   )
   const [colorSubmitValue, colorTransientSubmitValue] = props.useSubmitValueFactory(
     getIndexedUpdateShadowColor(props.index),
   )
-  const [
-    offsetXSubmitValue,
-    offsetXTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateShadowOffsetX(props.index)),
-  )
-  const [
-    offsetYSubmitValue,
-    offsetYTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateShadowOffsetY(props.index)),
-  )
-  const [
-    blurRadiusSubmitValue,
-    blurRadiusTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateShadowBlurRadius(props.index)),
-  )
-  const [
-    spreadRadiusSubmitValue,
-    spreadRadiusTransientSubmitValue,
-  ] = useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
-    props.useSubmitValueFactory(getIndexedUpdateShadowSpreadRadius(props.index)),
-  )
+  const [offsetXSubmitValue, offsetXTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateShadowOffsetX(props.index)),
+    )
+  const [offsetYSubmitValue, offsetYTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateShadowOffsetY(props.index)),
+    )
+  const [blurRadiusSubmitValue, blurRadiusTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateShadowBlurRadius(props.index)),
+    )
+  const [spreadRadiusSubmitValue, spreadRadiusTransientSubmitValue] =
+    useWrappedSubmitFactoryEmptyOrUnknownOnSubmitValue(
+      props.useSubmitValueFactory(getIndexedUpdateShadowSpreadRadius(props.index)),
+    )
   const [onSubmitIndexedSpliceValue] = props.useSubmitValueFactory(
     getIndexedSpliceShadow(props.index),
   )
@@ -231,43 +223,51 @@ const ShadowItem = betterReactMemo<ShadowItemProps>('ShadowItem', (props) => {
           propsArray={[
             {
               value: props.value.offsetX,
-              DEPRECATED_labelBelow: 'x',
+              innerLabel: 'X',
               onSubmitValue: offsetXSubmitValue,
               onTransientSubmitValue: offsetXTransientSubmitValue,
               controlStatus: props.controlStatus,
               numberType: 'Length',
               defaultUnitToHide: 'px',
               testId: 'boxShadow-x',
+              stepSize: 0.1,
+              incrementControls: false,
             },
             {
               value: props.value.offsetY,
-              DEPRECATED_labelBelow: 'y',
+              innerLabel: 'Y',
               onSubmitValue: offsetYSubmitValue,
               onTransientSubmitValue: offsetYTransientSubmitValue,
               controlStatus: props.controlStatus,
               numberType: 'Length',
               defaultUnitToHide: 'px',
               testId: 'boxShadow-y',
+              stepSize: 0.1,
+              incrementControls: false,
             },
             {
               value: props.value.blurRadius.value,
-              DEPRECATED_labelBelow: 'blur',
+              innerLabel: 'B',
               onSubmitValue: blurRadiusSubmitValue,
               onTransientSubmitValue: blurRadiusTransientSubmitValue,
               controlStatus: props.controlStatus,
               numberType: 'Length',
               defaultUnitToHide: 'px',
               testId: 'boxShadow-blur',
+              stepSize: 0.1,
+              incrementControls: false,
             },
             {
               value: props.value.spreadRadius.value,
-              DEPRECATED_labelBelow: 'spread',
+              innerLabel: 'S',
               onSubmitValue: spreadRadiusSubmitValue,
               onTransientSubmitValue: spreadRadiusTransientSubmitValue,
               controlStatus: props.controlStatus,
               numberType: 'Length',
               defaultUnitToHide: 'px',
               testId: 'boxShadow-spread',
+              stepSize: 0.1,
+              incrementControls: false,
             },
           ]}
         />
@@ -276,7 +276,7 @@ const ShadowItem = betterReactMemo<ShadowItemProps>('ShadowItem', (props) => {
   )
 })
 
-export const ShadowSubsection = betterReactMemo('ShadowSubsection', () => {
+export const ShadowSubsection = React.memo(() => {
   const isVisible = useIsSubSectionVisible('shadow')
   const {
     value,
@@ -313,21 +313,19 @@ export const ShadowSubsection = betterReactMemo('ShadowSubsection', () => {
             gap: 8,
           }}
         >
-          <InspectorSectionIcons.Shadow />
           <span>Shadow</span>
         </FlexRow>
         {propertyStatus.overwritable ? (
-          <SquareButton highlight onMouseDown={insertShadowValue}>
-            <Icn
-              onMouseDown={insertShadowValue}
-              style={{ paddingTop: 1 }}
-              category='semantic'
-              type='plus'
-              color={propertyStatus.controlled ? 'primary' : 'secondary'}
-              width={16}
-              height={16}
+          <FlexRow>
+            <RemovePropertyButton
+              testId='inspector-shadow-remove-all'
+              onUnsetValues={onUnsetValues}
+              propertySet={propertyStatus.set}
             />
-          </SquareButton>
+            <SquareButton highlight onMouseDown={insertShadowValue}>
+              <Icons.SmallPlus />
+            </SquareButton>
+          </FlexRow>
         ) : null}
       </InspectorSubsectionHeader>
       <div

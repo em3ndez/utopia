@@ -2,14 +2,14 @@ import { BakedInStoryboardVariableName } from '../../model/scene-utils'
 
 export const AwkwardFragmentsCode = `
 import * as React from 'react'
-import { Scene, Storyboard, View } from 'utopia-api'
+import { Scene, Storyboard, View, Group } from 'utopia-api'
 export var App = (props) => {
   return (
     <View
       style={{ ...props.style, position: 'relative', backgroundColor: '#FFFFFF' }}
       data-uid={'aaa'}
     >
-      <React.Fragment>
+      <React.Fragment data-uid={'ggg'}>
         <div data-label="random-div" style={{ width: 100, height: 100 }} data-uid={'bbb'}>Hello<>
           <div data-label="some-other-div" style={{ width: 100, height: 100 }} data-uid={'ccc'} />
         </></div>

@@ -1,16 +1,17 @@
-import { KrazyGeorgeTestUrl } from 'utopia-api'
-import { createLayoutPropertyPathString } from '../layout/layout-helpers-new'
-import { Imports, importAlias } from '../shared/project-file-types'
+import { KrazyGeorgeTestUrl } from 'utopia-api/core'
+import type { Imports } from '../shared/project-file-types'
+import { importAlias } from '../shared/project-file-types'
 import {
   jsxAttributeNestedObjectSimple,
-  jsxAttributeOtherJavaScript,
-  jsxAttributeValue,
+  jsExpressionOtherJavaScript,
+  jsExpressionValue,
   jsxElement,
   utopiaJSXComponent,
   defaultPropsParam,
   jsxFragment,
   jsxAttributesFromMap,
   emptyComments,
+  jsOpaqueArbitraryStatement,
 } from '../shared/element-template'
 import { addImport, emptyImports, mergeImports } from '../workers/common/project-file-utils'
 import { BakedInStoryboardUID, BakedInStoryboardVariableName } from './scene-utils'
@@ -35,23 +36,25 @@ export const onlyImportReact: Imports = {
   },
 }
 
-export const sampleDefaultImports: Imports = mergeImports('/code.js', onlyImportReact, {
+export const sampleDefaultImports: Imports = mergeImports('/code.js', [], onlyImportReact, {
   'utopia-api': {
     importedWithName: null,
     importedFromWithin: [importAlias('UtopiaUtils')],
     importedAs: null,
   },
-})
+}).imports
 
 export const sampleImportsForTests: Imports = mergeImports(
   '/code.js',
+  [],
   sampleDefaultImports,
   sampleIncludedElementTypes.reduce<Imports>(
     (working, elementType) =>
-      addImport('/code.js', 'utopia-api', null, [importAlias(elementType)], null, working),
+      addImport('/code.js', [], 'utopia-api', null, [importAlias(elementType)], null, working)
+        .imports,
     emptyImports(),
   ),
-)
+).imports
 
 const MainComponentForTestsName = 'Test'
 
@@ -60,6 +63,7 @@ const mainComponentForTests = utopiaJSXComponent(
   true,
   'var',
   'block',
+  [],
   defaultPropsParam,
   [],
   jsxElement(
@@ -68,54 +72,67 @@ const mainComponentForTests = utopiaJSXComponent(
     jsxAttributesFromMap({
       layout: jsxAttributeNestedObjectSimple(
         jsxAttributesFromMap({
-          left: jsxAttributeOtherJavaScript(
-            `props.${createLayoutPropertyPathString('PinnedLeft')}`,
-            `return props.${createLayoutPropertyPathString('PinnedLeft')}`,
+          left: jsExpressionOtherJavaScript(
+            [],
+            `props.style.left`,
+            `props.style.left`,
+            `return props.style.left`,
             ['props'],
             null,
             {},
+            emptyComments,
           ),
-          top: jsxAttributeOtherJavaScript(
-            `props.${createLayoutPropertyPathString('PinnedTop')}`,
-            `return props.${createLayoutPropertyPathString('PinnedTop')}`,
+          top: jsExpressionOtherJavaScript(
+            [],
+            `props.style.top`,
+            `props.style.top`,
+            `return props.style.top`,
             ['props'],
             null,
             {},
+            emptyComments,
           ),
-          width: jsxAttributeOtherJavaScript(
-            `props.${createLayoutPropertyPathString('Width')}`,
-            `return props.${createLayoutPropertyPathString('Width')}`,
+          width: jsExpressionOtherJavaScript(
+            [],
+            `props.style.width`,
+            `props.style.width`,
+            `return props.style.width`,
             ['props'],
             null,
             {},
+            emptyComments,
           ),
-          height: jsxAttributeOtherJavaScript(
-            `props.${createLayoutPropertyPathString('Height')}`,
-            `return props.${createLayoutPropertyPathString('Height')}`,
+          height: jsExpressionOtherJavaScript(
+            [],
+            `props.style.height`,
+            `props.style.height`,
+            `return props.style.height`,
             ['props'],
             null,
             {},
+            emptyComments,
           ),
         }),
         emptyComments,
       ),
-      style: jsxAttributeValue(
+      style: jsExpressionValue(
         {
           position: 'absolute',
           backgroundColor: 'lightgrey',
         },
         emptyComments,
       ),
-      'data-uid': jsxAttributeValue('aaa', emptyComments),
+      'data-uid': jsExpressionValue('aaa', emptyComments),
     }),
     [
       jsxFragment(
+        'mmm',
         [
           jsxElement(
             'Ellipse',
             'bbb',
             jsxAttributesFromMap({
-              layout: jsxAttributeValue(
+              layout: jsExpressionValue(
                 {
                   left: 150,
                   top: 25,
@@ -126,11 +143,11 @@ const mainComponentForTests = utopiaJSXComponent(
               ),
               style: jsxAttributeNestedObjectSimple(
                 jsxAttributesFromMap({
-                  backgroundColor: jsxAttributeValue('lightgreen', emptyComments),
+                  backgroundColor: jsExpressionValue('lightgreen', emptyComments),
                 }),
                 emptyComments,
               ),
-              'data-uid': jsxAttributeValue('bbb', emptyComments),
+              'data-uid': jsExpressionValue('bbb', emptyComments),
             }),
             [],
           ),
@@ -138,7 +155,7 @@ const mainComponentForTests = utopiaJSXComponent(
             'Rectangle',
             'ccc',
             jsxAttributesFromMap({
-              layout: jsxAttributeValue(
+              layout: jsExpressionValue(
                 {
                   left: 25,
                   top: 25,
@@ -149,22 +166,22 @@ const mainComponentForTests = utopiaJSXComponent(
               ),
               style: jsxAttributeNestedObjectSimple(
                 jsxAttributesFromMap({
-                  backgroundColor: jsxAttributeValue('orange', emptyComments),
+                  backgroundColor: jsExpressionValue('orange', emptyComments),
                 }),
                 emptyComments,
               ),
-              'data-uid': jsxAttributeValue('ccc', emptyComments),
+              'data-uid': jsExpressionValue('ccc', emptyComments),
             }),
             [],
           ),
         ],
-        false,
+        true,
       ),
       jsxElement(
         'View',
         'ddd',
         jsxAttributesFromMap({
-          layout: jsxAttributeValue(
+          layout: jsExpressionValue(
             {
               left: 150,
               top: 150,
@@ -176,20 +193,20 @@ const mainComponentForTests = utopiaJSXComponent(
           ),
           style: jsxAttributeNestedObjectSimple(
             jsxAttributesFromMap({
-              position: jsxAttributeValue('absolute', emptyComments),
-              backgroundColor: jsxAttributeValue('red', emptyComments),
-              boxShadow: jsxAttributeValue('10px 10px 8px #888888', emptyComments),
+              position: jsExpressionValue('absolute', emptyComments),
+              backgroundColor: jsExpressionValue('red', emptyComments),
+              boxShadow: jsExpressionValue('10px 10px 8px #888888', emptyComments),
             }),
             emptyComments,
           ),
-          'data-uid': jsxAttributeValue('ddd', emptyComments),
+          'data-uid': jsExpressionValue('ddd', emptyComments),
         }),
         [
           jsxElement(
             'Rectangle',
             'eee',
             jsxAttributesFromMap({
-              layout: jsxAttributeValue(
+              layout: jsExpressionValue(
                 {
                   left: 220,
                   top: 220,
@@ -200,11 +217,11 @@ const mainComponentForTests = utopiaJSXComponent(
               ),
               style: jsxAttributeNestedObjectSimple(
                 jsxAttributesFromMap({
-                  backgroundColor: jsxAttributeValue('orange', emptyComments),
+                  backgroundColor: jsExpressionValue('orange', emptyComments),
                 }),
                 emptyComments,
               ),
-              'data-uid': jsxAttributeValue('eee', emptyComments),
+              'data-uid': jsExpressionValue('eee', emptyComments),
             }),
             [],
           ),
@@ -212,7 +229,7 @@ const mainComponentForTests = utopiaJSXComponent(
             'Rectangle',
             'fff',
             jsxAttributesFromMap({
-              layout: jsxAttributeValue(
+              layout: jsExpressionValue(
                 {
                   left: 90,
                   top: 90,
@@ -223,11 +240,11 @@ const mainComponentForTests = utopiaJSXComponent(
               ),
               style: jsxAttributeNestedObjectSimple(
                 jsxAttributesFromMap({
-                  backgroundColor: jsxAttributeValue('orange', emptyComments),
+                  backgroundColor: jsExpressionValue('orange', emptyComments),
                 }),
                 emptyComments,
               ),
-              'data-uid': jsxAttributeValue('fff', emptyComments),
+              'data-uid': jsExpressionValue('fff', emptyComments),
             }),
             [],
           ),
@@ -239,21 +256,21 @@ const mainComponentForTests = utopiaJSXComponent(
         jsxAttributesFromMap({
           layout: jsxAttributeNestedObjectSimple(
             jsxAttributesFromMap({
-              left: jsxAttributeValue(50, emptyComments),
-              top: jsxAttributeValue(250, emptyComments),
-              width: jsxAttributeValue(100, emptyComments),
-              height: jsxAttributeValue(200, emptyComments),
+              left: jsExpressionValue(50, emptyComments),
+              top: jsExpressionValue(250, emptyComments),
+              width: jsExpressionValue(100, emptyComments),
+              height: jsExpressionValue(200, emptyComments),
             }),
             emptyComments,
           ),
-          style: jsxAttributeValue(
+          style: jsExpressionValue(
             {
               position: 'absolute',
               backgroundColor: 'blue',
             },
             emptyComments,
           ),
-          'data-uid': jsxAttributeValue('ggg', emptyComments),
+          'data-uid': jsExpressionValue('ggg', emptyComments),
         }),
         [],
       ),
@@ -261,7 +278,7 @@ const mainComponentForTests = utopiaJSXComponent(
         'Text',
         'hhh',
         jsxAttributesFromMap({
-          layout: jsxAttributeValue(
+          layout: jsExpressionValue(
             {
               left: 200,
               top: 200,
@@ -270,14 +287,14 @@ const mainComponentForTests = utopiaJSXComponent(
             },
             emptyComments,
           ),
-          text: jsxAttributeValue('TEST', emptyComments),
-          style: jsxAttributeValue(
+          text: jsExpressionValue('TEST', emptyComments),
+          style: jsExpressionValue(
             {
               fontSize: 16,
             },
             emptyComments,
           ),
-          'data-uid': jsxAttributeValue('hhh', emptyComments),
+          'data-uid': jsExpressionValue('hhh', emptyComments),
         }),
         [],
       ),
@@ -285,7 +302,7 @@ const mainComponentForTests = utopiaJSXComponent(
         'Image',
         'iii',
         jsxAttributesFromMap({
-          layout: jsxAttributeValue(
+          layout: jsExpressionValue(
             {
               left: 200,
               top: 300,
@@ -294,16 +311,16 @@ const mainComponentForTests = utopiaJSXComponent(
             },
             emptyComments,
           ),
-          src: jsxAttributeValue(KrazyGeorgeTestUrl, emptyComments),
-          fillType: jsxAttributeValue('fill', emptyComments),
-          'data-uid': jsxAttributeValue('iii', emptyComments),
+          src: jsExpressionValue(KrazyGeorgeTestUrl, emptyComments),
+          fillType: jsExpressionValue('fill', emptyComments),
+          'data-uid': jsExpressionValue('iii', emptyComments),
         }),
         [],
       ),
       jsxElement(
         'MyComponent',
         'mycomponent',
-        jsxAttributesFromMap({ 'data-uid': jsxAttributeValue('mycomponent', emptyComments) }),
+        jsxAttributesFromMap({ 'data-uid': jsExpressionValue('mycomponent', emptyComments) }),
         [],
       ),
     ],
@@ -318,14 +335,15 @@ const scene = utopiaJSXComponent(
   true,
   'var',
   'block',
+  [],
   defaultPropsParam,
   [],
   jsxElement(
     'View',
     'jjj',
     jsxAttributesFromMap({
-      style: jsxAttributeValue({ backgroundColor: 'green' }, emptyComments),
-      'data-uid': jsxAttributeValue('jjj', emptyComments),
+      style: jsExpressionValue({ backgroundColor: 'green' }, emptyComments),
+      'data-uid': jsExpressionValue('jjj', emptyComments),
     }),
     [],
   ),
@@ -336,11 +354,15 @@ const scene = utopiaJSXComponent(
 
 export const TestScene0UID = 'scene-0'
 export const TestMainComponentUID = 'main-component-0'
-const ElementPathForTestUiJsFile = [BakedInStoryboardUID, TestScene0UID, TestMainComponentUID]
+export const ElementPathForTestUiJsFile = [
+  BakedInStoryboardUID,
+  TestScene0UID,
+  TestMainComponentUID,
+]
 export const ScenePathForTestUiJsFile = testStaticElementPath([ElementPathForTestUiJsFile])
-const Scene1UID = 'scene-1'
-const TestMainComponent1UID = 'main-component-1'
-const ElementPath1ForTestUiJsFile = [BakedInStoryboardUID, Scene1UID, TestMainComponent1UID]
+export const Scene1UID = 'scene-1'
+export const TestMainComponent1UID = 'main-component-1'
+export const ElementPath1ForTestUiJsFile = [BakedInStoryboardUID, Scene1UID, TestMainComponent1UID]
 export const ScenePath1ForTestUiJsFile = testStaticElementPath([ElementPath1ForTestUiJsFile])
 
 const Scene1 = defaultSceneElement(
@@ -352,8 +374,8 @@ const Scene1 = defaultSceneElement(
       MainComponentForTestsName,
       TestMainComponentUID,
       jsxAttributesFromMap({
-        'data-uid': jsxAttributeValue(TestMainComponentUID, emptyComments),
-        style: jsxAttributeValue(
+        'data-uid': jsExpressionValue(TestMainComponentUID, emptyComments),
+        style: jsExpressionValue(
           {
             position: 'absolute',
             left: 0,
@@ -380,12 +402,13 @@ const TestStoryboard = utopiaJSXComponent(
   false,
   'var',
   'block',
+  [],
   null,
   [],
   jsxElement(
     'Storyboard',
     BakedInStoryboardUID,
-    jsxAttributesFromMap({ 'data-uid': jsxAttributeValue(BakedInStoryboardUID, emptyComments) }),
+    jsxAttributesFromMap({ 'data-uid': jsExpressionValue(BakedInStoryboardUID, emptyComments) }),
     [Scene1, Scene2],
   ),
   null,

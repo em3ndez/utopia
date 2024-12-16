@@ -1,65 +1,177 @@
-/** @jsx jsx */
-import { jsx } from '@emotion/react'
 import React from 'react'
-import { ElementPath } from '../../../core/shared/project-file-types'
-import { EditorDispatch } from '../../editor/action-types'
+import { type ElementPath } from '../../../core/shared/project-file-types'
+import type { EditorDispatch } from '../../editor/action-types'
 import * as EditorActions from '../../editor/actions/action-creators'
 import * as EP from '../../../core/shared/element-path'
-import { useColorTheme, Button, Icons, SectionActionSheet } from '../../../uuiui'
-import { betterReactMemo } from '../../../uuiui-deps'
+import type { IcnProps } from '../../../uuiui'
+import { useColorTheme, Button, FlexRow, Icn } from '../../../uuiui'
+import { stopPropagation } from '../../inspector/common/inspector-utils'
+import { unless, when } from '../../../utils/react-conditionals'
+import { Substores, useEditorState } from '../../editor/store/store-hook'
+import { MetadataUtils } from '../../../core/model/element-metadata-utils'
+import type { NavigatorEntry } from '../../editor/store/editor-state'
+import {
+  isConditionalClauseNavigatorEntry,
+  isRegularNavigatorEntry,
+  navigatorEntryToKey,
+  varSafeNavigatorEntryToKey,
+} from '../../editor/store/editor-state'
+import type { SelectionLocked } from '../../canvas/canvas-types'
+import type { InsertionTarget } from './component-picker-context-menu'
+import {
+  conditionalTarget,
+  renderPropTarget,
+  useCreateCallbackToShowComponentPicker,
+} from './component-picker-context-menu'
+import type { ConditionalCase } from '../../../core/model/conditionals'
+import { useConditionalCaseCorrespondingToBranchPath } from '../../../core/model/conditionals'
+import {
+  getJSXElementNameAsString,
+  isIntrinsicHTMLElement,
+} from '../../../core/shared/element-template'
+import { getRegisteredComponent } from '../../../core/property-controls/property-controls-utils'
+import { intrinsicHTMLElementNamesThatSupportChildren } from '../../../core/shared/dom-utils'
+import { ExpandableIndicator } from './expandable-indicator'
+import { elementSupportsChildrenFromPropertyControls } from '../../editor/element-children'
+
+export const NavigatorHintCircleDiameter = 8
+
+const outletAwareBackgroundColor = (
+  colorTheme: ReturnType<typeof useColorTheme>,
+  isOutlet: boolean,
+) => colorTheme.navigatorResizeHintBorder.value
 
 interface NavigatorHintProps {
+  testId: string
   shouldBeShown: boolean
-  getMarginForHint: () => number
+  shouldAcceptMouseEvents: boolean
+  margin: number
+  isOutletOrDescendantOfOutlet: boolean
 }
 
-export const NavigatorHintTop: React.FunctionComponent<NavigatorHintProps> = betterReactMemo(
-  'NavigatorHintTop',
-  (props) => {
+export const NavigatorHintTop = React.forwardRef<HTMLDivElement, NavigatorHintProps>(
+  (props, ref) => {
     const colorTheme = useColorTheme()
-    if (props.shouldBeShown) {
-      return (
+    return (
+      <div
+        data-testid={props.testId}
+        ref={ref}
+        style={{
+          position: 'relative',
+          opacity: props.shouldBeShown ? 1 : 0,
+          zIndex: 1,
+          pointerEvents: props.shouldAcceptMouseEvents ? 'inherit' : 'none',
+        }}
+      >
         <div
           style={{
-            marginLeft: props.getMarginForHint(),
-            backgroundColor: colorTheme.navigatorResizeHintBorder.value,
-            height: 2,
             position: 'absolute',
-            top: 0,
+            top: -8,
             width: '100%',
-            borderRadius: '2px',
-            overflow: 'hidden',
+            height: 16,
           }}
-        />
-      )
-    } else {
-      return null
-    }
+        >
+          <div
+            style={{
+              marginLeft: props.margin,
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: outletAwareBackgroundColor(
+                  colorTheme,
+                  props.isOutletOrDescendantOfOutlet,
+                ),
+                height: 2,
+                flexGrow: 1,
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                backgroundColor: colorTheme.bg0.value,
+                width: NavigatorHintCircleDiameter,
+                height: NavigatorHintCircleDiameter,
+                contain: 'layout',
+                border: `2px solid ${outletAwareBackgroundColor(
+                  colorTheme,
+                  props.isOutletOrDescendantOfOutlet,
+                )}`,
+                borderRadius: '50%',
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    )
   },
 )
 
-export const NavigatorHintBottom: React.FunctionComponent<NavigatorHintProps> = betterReactMemo(
-  'NavigatorHintBottom',
-  (props) => {
+export const NavigatorHintBottom = React.forwardRef<HTMLDivElement, NavigatorHintProps>(
+  (props, ref) => {
     const colorTheme = useColorTheme()
-    if (props.shouldBeShown) {
-      return (
+    return (
+      <div
+        data-testid={props.testId}
+        ref={ref}
+        style={{
+          opacity: props.shouldBeShown ? 1 : 0,
+          position: 'relative',
+          zIndex: 1,
+          pointerEvents: props.shouldAcceptMouseEvents ? 'inherit' : 'none',
+        }}
+      >
         <div
           style={{
-            marginLeft: props.getMarginForHint(),
-            backgroundColor: colorTheme.navigatorResizeHintBorder.value,
-            height: 2,
             position: 'absolute',
-            bottom: 0,
+            bottom: -8,
             width: '100%',
-            borderRadius: '2px',
-            overflow: 'hidden',
+            height: 16,
           }}
-        />
-      )
-    } else {
-      return null
-    }
+        >
+          <div
+            style={{
+              marginLeft: props.margin,
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: outletAwareBackgroundColor(
+                  colorTheme,
+                  props.isOutletOrDescendantOfOutlet,
+                ),
+                height: 2,
+                flexGrow: 1,
+              }}
+            />
+            <div
+              style={{
+                position: 'absolute',
+                backgroundColor: colorTheme.bg0.value,
+                width: NavigatorHintCircleDiameter,
+                height: NavigatorHintCircleDiameter,
+                contain: 'layout',
+                border: `2px solid ${outletAwareBackgroundColor(
+                  colorTheme,
+                  props.isOutletOrDescendantOfOutlet,
+                )}`,
+                borderRadius: '50%',
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    )
   },
 )
 
@@ -67,91 +179,396 @@ interface VisiblityIndicatorProps {
   shouldShow: boolean
   visibilityEnabled: boolean
   selected: boolean
-  onClick: () => void
+  iconColor: IcnProps['color']
+  onMouseDown: () => void
 }
 
-export const VisibilityIndicator: React.FunctionComponent<VisiblityIndicatorProps> = betterReactMemo(
-  'VisibilityIndicator',
-  (props) => {
-    const color = props.selected ? 'on-highlight-main' : 'subdued'
+export const VisibilityIndicator: React.FunctionComponent<
+  React.PropsWithChildren<VisiblityIndicatorProps>
+> = React.memo((props) => {
+  const color = props.iconColor
 
-    return (
-      <Button
-        onClick={props.onClick}
-        style={{
-          marginRight: 4,
-          height: 18,
-          width: 18,
-          opacity: props.shouldShow ? 1 : 0,
-        }}
-      >
-        {props.visibilityEnabled ? (
-          <Icons.EyeOpen color={color} style={{ transform: 'scale(.85)' }} />
-        ) : (
-          <Icons.EyeStrikethrough color={color} />
-        )}
-      </Button>
-    )
-  },
-)
+  return (
+    <Button
+      onMouseDown={props.onMouseDown}
+      style={{
+        height: 12,
+        width: 12,
+        opacity: props.shouldShow ? 1 : 0,
+      }}
+    >
+      {props.visibilityEnabled ? (
+        <Icn category='semantic' type='eyeopen' color={color} width={12} height={12} />
+      ) : (
+        <Icn category='semantic' type='eye-strikethrough' color={color} width={12} height={12} />
+      )}
+    </Button>
+  )
+})
+
+interface AddChildButtonProps {
+  target: ElementPath
+  iconColor: IcnProps['color']
+}
+
+export function addChildButtonTestId(target: ElementPath): string {
+  return `add-child-button-${EP.toString(target)}`
+}
+
+const AddChildButton = React.memo((props: AddChildButtonProps) => {
+  const { target, iconColor } = props
+  const supportsChildren = useEditorState(
+    Substores.metadataAndPropertyControlsInfo,
+    (store) =>
+      elementSupportsChildrenFromPropertyControls(
+        store.editor.jsxMetadata,
+        store.editor.propertyControlsInfo,
+        target,
+      ),
+    'AddChildButton supportsChildren',
+  )
+
+  const onMouseDown = useCreateCallbackToShowComponentPicker()(
+    [target],
+    EditorActions.insertAsChildTarget(),
+  )
+
+  if (!supportsChildren) {
+    return null
+  }
+
+  return (
+    <Button
+      onMouseDown={onMouseDown}
+      style={{
+        height: 12,
+        width: 12,
+      }}
+      data-testid={addChildButtonTestId(target)}
+    >
+      <Icn
+        category='semantic'
+        type='plus-in-white-translucent-circle'
+        color={iconColor}
+        width={12}
+        height={12}
+      />
+    </Button>
+  )
+})
+
+export const ReplaceElementButtonTestId = (path: ElementPath, prop: string | null) =>
+  `replace-element-button-${EP.toString(path)}${prop == null ? '' : `-${prop}`}`
+
+interface ReplaceElementButtonProps {
+  target: ElementPath
+  iconColor: IcnProps['color']
+  prop: string | null
+  conditionalCase: ConditionalCase | null
+}
+
+const ReplaceElementButton = React.memo((props: ReplaceElementButtonProps) => {
+  const { target, prop, iconColor, conditionalCase } = props
+
+  const { target: realTarget, insertionTarget } = ((): {
+    target: ElementPath
+    insertionTarget: InsertionTarget
+  } => {
+    if (prop != null) {
+      return {
+        target: EP.parentPath(target),
+        insertionTarget: renderPropTarget(prop),
+      }
+    }
+    if (conditionalCase != null) {
+      return {
+        target: EP.parentPath(target),
+        insertionTarget: conditionalTarget(conditionalCase),
+      }
+    }
+    return {
+      target: target,
+      insertionTarget: EditorActions.replaceTarget,
+    }
+  })()
+
+  const onMouseDown = useCreateCallbackToShowComponentPicker()([realTarget], insertionTarget)
+
+  return (
+    <Button
+      data-testid={ReplaceElementButtonTestId(target, prop)}
+      onMouseDown={onMouseDown}
+      style={{
+        height: 12,
+        width: 12,
+      }}
+    >
+      <Icn
+        category='navigator-element'
+        type='convert-action'
+        color={iconColor}
+        width={12}
+        height={12}
+      />
+    </Button>
+  )
+})
+
+interface SelectionLockedIndicatorProps {
+  shouldShow: boolean
+  value: SelectionLocked
+  selected: boolean
+  iconColor: IcnProps['color']
+  isDescendantOfLocked: boolean
+  onMouseDown: (value: SelectionLocked) => void
+}
+
+export const SelectionLockedIndicator: React.FunctionComponent<
+  React.PropsWithChildren<SelectionLockedIndicatorProps>
+> = React.memo((props) => {
+  const { shouldShow, value, iconColor, isDescendantOfLocked, onMouseDown } = props
+  const color = iconColor
+
+  const handleMouseDown = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      event.stopPropagation()
+      switch (value) {
+        case 'selectable':
+          onMouseDown('locked-hierarchy')
+          break
+        case 'locked-hierarchy':
+          onMouseDown('locked')
+          break
+        case 'locked':
+        default:
+          onMouseDown('selectable')
+          break
+      }
+    },
+    [onMouseDown, value],
+  )
+  return (
+    <Button
+      onMouseDown={handleMouseDown}
+      style={{
+        height: 12,
+        width: 12,
+        display: shouldShow ? 'block' : 'none',
+      }}
+    >
+      {when(
+        value === 'locked',
+        <Icn category='semantic' type='lockclosed' color={color} width={12} height={12} />,
+      )}
+      {when(
+        value === 'locked-hierarchy',
+        <Icn category='semantic' type='lockcloseddot' color={color} width={12} height={12} />,
+      )}
+      {when(
+        value === 'selectable' && !isDescendantOfLocked,
+        <Icn category='semantic' type='lockopen' color={color} width={12} height={12} />,
+      )}
+      {when(
+        value === 'selectable' && isDescendantOfLocked,
+        <Icn category='semantic' type='dot' color={color} width={12} height={12} />,
+      )}
+    </Button>
+  )
+})
 
 interface OriginalComponentNameLabelProps {
   selected: boolean
   instanceOriginalComponentName: string | null
 }
 
-export const OriginalComponentNameLabel: React.FunctionComponent<OriginalComponentNameLabelProps> = betterReactMemo(
-  'OriginalComponentNameLabel',
-  (props) => {
-    const colorTheme = useColorTheme()
-    return (
-      <div
-        style={{
-          fontStyle: 'normal',
-          paddingRight: 4,
-          paddingLeft: 4,
-          fontSize: 10,
-          color: props.selected ? colorTheme.white.value : colorTheme.navigatorComponentName.value,
-          display: props.instanceOriginalComponentName == null ? 'none' : undefined,
-        }}
-      >
-        {props.instanceOriginalComponentName}
-      </div>
-    )
-  },
-)
+export const OriginalComponentNameLabel: React.FunctionComponent<
+  React.PropsWithChildren<OriginalComponentNameLabelProps>
+> = React.memo((props) => {
+  const colorTheme = useColorTheme()
+  return (
+    <div
+      style={{
+        fontStyle: 'normal',
+        paddingRight: 4,
+        paddingLeft: 4,
+        fontSize: 10,
+        color: props.selected ? colorTheme.white.value : colorTheme.navigatorComponentName.value,
+        display: props.instanceOriginalComponentName == null ? 'none' : undefined,
+      }}
+    >
+      {props.instanceOriginalComponentName}
+    </div>
+  )
+})
 
 interface NavigatorItemActionSheetProps {
   selected: boolean
   highlighted: boolean
-  elementPath: ElementPath
+  navigatorEntry: NavigatorEntry
   isVisibleOnCanvas: boolean // TODO FIXME bad name, also, use state
   instanceOriginalComponentName: string | null
+  isSlot: boolean
+  isScene: boolean
+  collapsed: boolean
+  iconColor: IcnProps['color']
+  background?: string | any
   dispatch: EditorDispatch
 }
 
-export const NavigatorItemActionSheet: React.FunctionComponent<NavigatorItemActionSheetProps> = betterReactMemo(
-  'NavigatorItemActionSheet',
-  (props) => {
-    const { elementPath, dispatch } = props
+export const NavigatorItemActionSheet: React.FunctionComponent<
+  React.PropsWithChildren<NavigatorItemActionSheetProps>
+> = React.memo((props) => {
+  const { navigatorEntry, dispatch } = props
 
-    const toggleHidden = React.useCallback(() => {
-      dispatch([EditorActions.toggleHidden([elementPath])], 'everyone')
-    }, [dispatch, elementPath])
-    return (
-      <SectionActionSheet>
-        <OriginalComponentNameLabel
+  const toggleHidden = React.useCallback(() => {
+    if (isRegularNavigatorEntry(navigatorEntry)) {
+      dispatch([EditorActions.toggleHidden([navigatorEntry.elementPath])], 'everyone')
+    }
+  }, [dispatch, navigatorEntry])
+
+  const toggleSelectable = React.useCallback(
+    (newValue: SelectionLocked) => {
+      if (isRegularNavigatorEntry(navigatorEntry)) {
+        dispatch(
+          [EditorActions.toggleSelectionLock([navigatorEntry.elementPath], newValue)],
+          'everyone',
+        )
+      }
+    },
+    [dispatch, navigatorEntry],
+  )
+  const isLockedElement = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return store.editor.lockedElements.simpleLock.some((path) =>
+        EP.pathsEqual(navigatorEntry.elementPath, path),
+      )
+    },
+    'NavigatorItemActionSheet isLockedElement',
+  )
+  const isLockedHierarchy = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return store.editor.lockedElements.hierarchyLock.some((path) =>
+        EP.pathsEqual(navigatorEntry.elementPath, path),
+      )
+    },
+    'NavigatorItemActionSheet isLockedHierarchy',
+  )
+
+  const isDescendantOfLocked = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return MetadataUtils.isDescendantOfHierarchyLockedElement(
+        navigatorEntry.elementPath,
+        store.editor.lockedElements,
+      )
+    },
+    'NavigatorItemActionSheet descendant of locked',
+  )
+
+  const isConditionalClauseTitle = isConditionalClauseNavigatorEntry(props.navigatorEntry)
+
+  const conditionalCase = useConditionalCaseCorrespondingToBranchPath(
+    props.navigatorEntry.elementPath,
+  )
+
+  const toggleCollapse = React.useCallback(
+    (event: React.MouseEvent<HTMLDivElement, MouseEvent>) => {
+      event.stopPropagation()
+      dispatch([EditorActions.toggleCollapse(navigatorEntry.elementPath)])
+    },
+    [dispatch, navigatorEntry.elementPath],
+  )
+
+  return (
+    <FlexRow
+      style={{
+        padding: '4px 5px 4px 4px',
+        borderRadius: '0 5px 5px 0',
+        position: 'fixed',
+        gap: 4,
+        right: 0,
+        background:
+          props.highlighted ||
+          props.selected ||
+          !props.isVisibleOnCanvas ||
+          isLockedElement ||
+          isLockedHierarchy ||
+          isDescendantOfLocked
+            ? props.background
+            : 'transparent',
+      }}
+    >
+      {unless(
+        props.isScene,
+        <>
+          <OriginalComponentNameLabel
+            selected={props.selected}
+            instanceOriginalComponentName={props.instanceOriginalComponentName}
+          />
+          {when(
+            (navigatorEntry.type === 'REGULAR' || navigatorEntry.type === 'RENDER_PROP_VALUE') &&
+              (props.highlighted || props.selected),
+            <>
+              <AddChildButton target={navigatorEntry.elementPath} iconColor={props.iconColor} />
+              <ReplaceElementButton
+                target={navigatorEntry.elementPath}
+                iconColor={props.iconColor}
+                prop={navigatorEntry.type === 'RENDER_PROP_VALUE' ? navigatorEntry.prop : null}
+                conditionalCase={conditionalCase}
+              />
+            </>,
+          )}
+          <SelectionLockedIndicator
+            key={`selection-locked-indicator-${varSafeNavigatorEntryToKey(navigatorEntry)}`}
+            shouldShow={
+              !props.isScene &&
+              (props.highlighted ||
+                props.selected ||
+                isLockedElement ||
+                isLockedHierarchy ||
+                isDescendantOfLocked) &&
+              !props.isSlot &&
+              !isConditionalClauseTitle
+            }
+            value={
+              isLockedElement ? 'locked' : isLockedHierarchy ? 'locked-hierarchy' : 'selectable'
+            }
+            isDescendantOfLocked={isDescendantOfLocked}
+            selected={props.selected}
+            iconColor={props.iconColor}
+            onMouseDown={toggleSelectable}
+          />
+          <VisibilityIndicator
+            key={`visibility-indicator-${varSafeNavigatorEntryToKey(navigatorEntry)}`}
+            shouldShow={
+              !props.isSlot && (props.highlighted || props.selected || !props.isVisibleOnCanvas)
+            }
+            visibilityEnabled={props.isVisibleOnCanvas}
+            selected={props.selected}
+            iconColor={props.iconColor}
+            onMouseDown={toggleHidden}
+          />
+        </>,
+      )}
+      {when(
+        props.isScene,
+        <ExpandableIndicator
+          key='expandable-indicator'
+          visible={true}
+          collapsed={props.collapsed}
           selected={props.selected}
-          instanceOriginalComponentName={props.instanceOriginalComponentName}
-        />
-        <VisibilityIndicator
-          key={`visibility-indicator-${EP.toVarSafeComponentId(elementPath)}`}
-          shouldShow={props.highlighted || props.selected || !props.isVisibleOnCanvas}
-          visibilityEnabled={props.isVisibleOnCanvas}
-          selected={props.selected}
-          onClick={toggleHidden}
-        />
-      </SectionActionSheet>
-    )
-  },
-)
+          onMouseDown={toggleCollapse}
+          style={{
+            opacity: 'var(--paneHoverOpacity)',
+          }}
+          testId={`navigator-item-action-sheet-collapse-${navigatorEntryToKey(
+            props.navigatorEntry,
+          )}`}
+          iconColor={props.selected ? 'white' : 'main'}
+        />,
+      )}
+    </FlexRow>
+  )
+})

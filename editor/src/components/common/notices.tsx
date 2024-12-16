@@ -1,10 +1,13 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx } from '@emotion/react'
 import * as EditorActions from '../editor/actions/action-creators'
 import React from 'react'
 import { UtopiaStyles, SimpleFlexRow, UtopiaTheme, SimpleFlexColumn } from '../../uuiui'
-import { useEditorState } from '../editor/store/store-hook'
-import { Notice, NoticeLevel } from './notice'
+import type { Notice, NoticeLevel } from './notice'
+import { useDispatch } from '../editor/store/dispatch-context'
+import { assertNever } from '../../core/shared/utils'
+import { when } from '../../utils/react-conditionals'
 
 interface NoticeProps extends Notice {
   style?: React.CSSProperties
@@ -14,16 +17,35 @@ interface NoticeProps extends Notice {
 export const getStylesForLevel = (level: NoticeLevel): React.CSSProperties => {
   let resultingStyle = UtopiaStyles.noticeStyles.info
 
-  if (level === 'WARNING') {
-    resultingStyle = UtopiaStyles.noticeStyles.warning
-  } else if (level === 'ERROR') {
-    resultingStyle = UtopiaStyles.noticeStyles.error
-  } else if (level === 'SUCCESS') {
-    resultingStyle = UtopiaStyles.noticeStyles.success
-  } else if (level === 'PRIMARY') {
-    resultingStyle = UtopiaStyles.noticeStyles.primary
+  switch (level) {
+    case 'WARNING':
+      return UtopiaStyles.noticeStyles.warning
+    case 'ERROR':
+      return UtopiaStyles.noticeStyles.error
+    case 'SUCCESS':
+      return UtopiaStyles.noticeStyles.success
+    case 'PRIMARY':
+      return UtopiaStyles.noticeStyles.primary
+    case 'INFO':
+      return UtopiaStyles.noticeStyles.info
+    case 'NOTICE':
+      return UtopiaStyles.noticeStyles.notice
+    default:
+      assertNever(level)
   }
-  return resultingStyle
+}
+
+export const getPrefixForLevel = (level: NoticeLevel): string => {
+  switch (level) {
+    case 'WARNING':
+      return '﹗'
+    case 'ERROR':
+      return '⚠️'
+    case 'SUCCESS':
+      return '✓'
+    default:
+      return ''
+  }
 }
 
 const ToastTimeout = 5500
@@ -34,8 +56,8 @@ const ToastTimeout = 5500
  * **Layout**: use as flex child with fixed height
  * **Level**: see NoticeLevel jsdoc
  */
-export const Toast: React.FunctionComponent<NoticeProps> = (props) => {
-  const dispatch = useEditorState((store) => store.dispatch, 'Toast dispatch')
+export const Toast: React.FunctionComponent<React.PropsWithChildren<NoticeProps>> = (props) => {
+  const dispatch = useDispatch()
   const deleteToast = React.useCallback(() => {
     dispatch([EditorActions.removeToast(props.id)])
   }, [dispatch, props.id])
@@ -53,48 +75,50 @@ export const Toast: React.FunctionComponent<NoticeProps> = (props) => {
       key={'toast-item'}
       style={{
         ...getStylesForLevel(props.level ?? 'INFO'),
-        boxShadow: UtopiaStyles.shadowStyles.medium.boxShadow,
-        borderRadius: 3,
-        width: 270,
-        minHeight: 27,
-        overflow: 'hidden',
-        overflowWrap: 'break-word',
-        wordWrap: 'break-word',
-        hyphens: 'auto',
-        whiteSpace: 'normal',
-        margin: '5px',
+        borderRadius: 6,
+        boxShadow: UtopiaStyles.shadowStyles.mid.boxShadow,
+        color: 'white',
+        maxWidth: 300,
+        fontSize: 11,
+        fontWeight: 400,
+        fontFamily: 'utopian-Inter',
         display: 'flex',
         alignItems: 'stretch',
+        gap: 10,
+        padding: 8,
       }}
     >
       <div
-        style={{ flexGrow: 1, fontWeight: 500, padding: 8, display: 'flex', alignItems: 'center' }}
         id='toast-message'
+        style={{
+          overflowWrap: 'break-word',
+          wordWrap: 'break-word',
+          hyphens: 'auto',
+          whiteSpace: 'pre-wrap',
+          width: 280,
+        }}
       >
+        {getPrefixForLevel(props.level)}&nbsp;
         {props.message}
       </div>
-
-      <div
-        css={{
-          backgroundColor: 'hsl(0,0%,0%,3%)',
-          display: 'flex',
-          flex: '0 0 24px',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 14,
-          cursor: 'pointer',
-          '&:hover': {
-            backgroundColor: 'hsl(0,0%,0%,5%)',
-          },
-          '&:active': {
-            backgroundColor: 'hsl(0,0%,0%,6%)',
-          },
-        }}
-        onClick={deleteToast}
-        id='toast-button'
-      >
-        ×
-      </div>
+      {when(
+        props.persistent,
+        <div
+          css={{
+            width: 10,
+            fontSize: 14,
+            cursor: 'pointer',
+            opacity: 0.3,
+            '&:hover': {
+              opacity: 1,
+            },
+          }}
+          onClick={deleteToast}
+          id='toast-button'
+        >
+          ×
+        </div>,
+      )}
     </div>
   )
 }
@@ -111,7 +135,9 @@ interface NotificationBarProps {
  * **Layout**: use as flex child with fixed height
  * **Level**: see NoticeLevel jsdoc
  */
-export const NotificationBar: React.FunctionComponent<NotificationBarProps> = (props) => (
+export const NotificationBar: React.FunctionComponent<
+  React.PropsWithChildren<NotificationBarProps>
+> = (props) => (
   <SimpleFlexRow
     style={{
       flexGrow: 0,
@@ -141,7 +167,7 @@ interface InfoBoxProps {
  * **Layout**: takes full width, sizes itself to height
  * **Level**: see NoticeLevel jsdoc
  */
-export const InfoBox: React.FunctionComponent<InfoBoxProps> = (props) => (
+export const InfoBox: React.FunctionComponent<React.PropsWithChildren<InfoBoxProps>> = (props) => (
   <SimpleFlexColumn
     style={{
       padding: 8,

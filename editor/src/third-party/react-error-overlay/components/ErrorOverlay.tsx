@@ -8,6 +8,7 @@
 /* @flow */
 import React from 'react'
 import { Component, ReactNode } from 'react'
+import { colorTheme } from '../../../uuiui'
 import { black } from '../styles'
 
 const overlayStyle = {
@@ -27,7 +28,7 @@ const overlayStyle = {
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
   lineHeight: 1.5,
-  color: black,
+  color: colorTheme.fg2.value,
 } as const
 
 type Props = {
@@ -73,7 +74,7 @@ class ErrorOverlay extends Component<Props, State> {
   render() {
     return (
       <div
-        style={overlayStyle}
+        style={{ ...overlayStyle, backgroundColor: colorTheme.neutralBackground.value }}
         className='react-error-overlay-allow-text-selection'
         ref={this.getIframeWindow}
       >

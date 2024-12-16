@@ -1,24 +1,33 @@
 import localforage from 'localforage'
-import { UTOPIA_BACKEND, THUMBNAIL_ENDPOINT, ASSET_ENDPOINT, BASE_URL } from './env-vars'
-import { ProjectListing } from './persistence'
+import {
+  UTOPIA_BACKEND,
+  THUMBNAIL_ENDPOINT,
+  ASSET_ENDPOINT,
+  BASE_URL,
+  IS_TEST_ENVIRONMENT,
+  DEVELOPMENT_ENV,
+  UTOPIA_BACKEND_BASE_URL,
+} from './env-vars'
+import type { ProjectListing } from './persistence'
+import type { LoginState } from './user'
+import { loggedInUser } from './user'
 import {
   cookiesOrLocalForageUnavailable,
   isLoggedIn,
   isLoginLost,
   loginLost,
-  LoginState,
   offlineState,
 } from './user'
 // Stupid style of import because the website and editor are different
 // and so there's no style of import which works with both projects.
-const urljoin = require('url-join')
+import urljoin from 'url-join'
 
 export const PROJECT_ENDPOINT = UTOPIA_BACKEND + 'project/'
 export const PROJECT_EDITOR = BASE_URL + 'project'
 
 // if we want to enable CORS, we need the server to be able to answer to preflight OPTION requests with the proper Allow-Access headers
 // until then, this is keeping us safe from attempting a CORS request that results in cryptic error messages
-export const MODE = 'same-origin'
+export const MODE = !DEVELOPMENT_ENV ? 'same-origin' : undefined
 
 export const HEADERS = {
   Accept: 'application/json',
@@ -27,6 +36,7 @@ export const HEADERS = {
 
 export interface ProjectOwnerResponse {
   isOwner: boolean
+  ownerId: string | null
 }
 
 export type ProjectOwnerState = ProjectOwnerResponse | 'unowned'
@@ -53,6 +63,10 @@ export function projectURL(projectId: string): string {
   return urljoin(PROJECT_ENDPOINT, projectId)
 }
 
+export function newProjectURL(): string {
+  return urljoin(PROJECT_ENDPOINT)
+}
+
 export function projectEditorURL(projectId: string): string {
   return urljoin(PROJECT_EDITOR, projectId)
 }
@@ -76,12 +90,16 @@ export function userConfigURL(): string {
 let CachedLoginStatePromise: Promise<LoginState> | null = null
 
 export async function getLoginState(useCache: 'cache' | 'no-cache'): Promise<LoginState> {
-  if (useCache === 'cache' && CachedLoginStatePromise != null) {
-    return CachedLoginStatePromise
+  if (IS_TEST_ENVIRONMENT) {
+    return Promise.resolve(loggedInUser({ userId: '1' }))
   } else {
-    const promise = createGetLoginStatePromise(CachedLoginStatePromise)
-    CachedLoginStatePromise = promise
-    return promise
+    if (useCache === 'cache' && CachedLoginStatePromise != null) {
+      return CachedLoginStatePromise
+    } else {
+      const promise = createGetLoginStatePromise(CachedLoginStatePromise)
+      CachedLoginStatePromise = promise
+      return promise
+    }
   }
 }
 
@@ -152,22 +170,30 @@ function getLoginStateFromResponse(
 }
 
 export async function checkProjectOwnership(projectId: string): Promise<ProjectOwnerState> {
-  const url = `${projectURL(projectId)}/owner`
-  const response = await fetch(url, {
-    method: 'GET',
-    credentials: 'include',
-    headers: HEADERS,
-    mode: MODE,
-  })
-  if (response.ok) {
-    return response.json()
-  } else if (response.status === 404) {
-    return 'unowned'
-  } else {
-    // FIXME Client should show an error if server requests fail
-    console.error(`server responded with ${response.status} ${response.statusText}`)
+  if (IS_TEST_ENVIRONMENT) {
     return {
-      isOwner: false,
+      isOwner: true,
+      ownerId: '1',
+    }
+  } else {
+    const url = `${projectURL(projectId)}/owner`
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      headers: HEADERS,
+      mode: MODE,
+    })
+    if (response.ok) {
+      return response.json()
+    } else if (response.status === 404) {
+      return 'unowned'
+    } else {
+      // FIXME Client should show an error if server requests fail
+      console.error(`server responded with ${response.status} ${response.statusText}`)
+      return {
+        isOwner: false,
+        ownerId: null,
+      }
     }
   }
 }
@@ -226,19 +252,23 @@ export async function fetchShowcaseProjects(): Promise<Array<ProjectListing>> {
 }
 
 export async function fetchProjectMetadata(projectId: string): Promise<ProjectListing | null> {
-  // GETs the metadata for a given project ID
-  const url = urljoin(UTOPIA_BACKEND, 'project', projectId, 'metadata')
-  const response = await fetch(url, {
-    method: 'GET',
-    credentials: 'include',
-    headers: HEADERS,
-    mode: MODE,
-  })
-  if (response.ok) {
-    const responseBody: ServerProjectListing = await response.json()
-    return serverProjectListingToProjectListing(responseBody)
-  } else {
+  if (IS_TEST_ENVIRONMENT) {
     return null
+  } else {
+    // GETs the metadata for a given project ID
+    const url = urljoin(UTOPIA_BACKEND, 'project', projectId, 'metadata')
+    const response = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      headers: HEADERS,
+      mode: MODE,
+    })
+    if (response.ok) {
+      const responseBody: ServerProjectListing = await response.json()
+      return serverProjectListingToProjectListing(responseBody)
+    } else {
+      return null
+    }
   }
 }
 
@@ -257,4 +287,8 @@ export async function deleteProjectFromServer(projectId: string): Promise<void> 
       `Failed to delete project ${projectId} (${response.status}): ${response.statusText}`,
     )
   }
+}
+
+export function editorShareDialogIframeUrl(projectId: string): string {
+  return urljoin(UTOPIA_BACKEND_BASE_URL, `/internal/editor/projects/${projectId}/sharing`)
 }

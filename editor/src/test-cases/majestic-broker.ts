@@ -1,12 +1,12 @@
 export const MajesticBrokerTestCaseCode = `
 import React from 'react'
-import { Scene, Storyboard, View } from 'utopia-api'
+import { Scene, Storyboard, View, Group } from 'utopia-api'
 export var User = (props) => {
   return <span style={{ ...props.style, fontWeight: 600 }}>{props.children}</span>
 }
 User.propertyControls = {
   style: {
-    type: 'styleobject',
+    type: 'style-controls',
   },
 }
 export var Comment = (props) => {
@@ -18,7 +18,7 @@ export var Comment = (props) => {
 }
 Comment.propertyControls = {
   style: {
-    type: 'styleobject',
+    type: 'style-controls',
   },
 }
 export var Card = (props) => {
@@ -51,7 +51,7 @@ export var Card = (props) => {
         >
           Zeus
           <View
-            style={{ backgroundColor: '#0091FFAA', left: 46, top: 11, width: 82, height: 62 }}
+            style={{ backgroundColor: '#aaaaaa33', left: 46, top: 11, width: 82, height: 62 }}
             layout={{ layoutSystem: 'pinSystem' }}
           />
         </h3>
@@ -151,7 +151,7 @@ export var Photo = (props) => {
 }
 Photo.propertyControls = {
   style: {
-    type: 'styleobject',
+    type: 'style-controls',
   },
 }
 export var ScrollablePhotoGrid = (props) => {
@@ -171,7 +171,7 @@ export var ScrollablePhotoGrid = (props) => {
           hi
           <div
             style={{
-              backgroundColor: '#0091FFAA',
+              backgroundColor: '#aaaaaa33',
               position: 'absolute',
               top: 8,
               height: 78,
@@ -182,7 +182,7 @@ export var ScrollablePhotoGrid = (props) => {
           >
             <div
               style={{
-                backgroundColor: '#0091FFAA',
+                backgroundColor: '#aaaaaa33',
                 height: 40,
                 width: 76,
                 left: 6,
@@ -244,7 +244,7 @@ export var ScrollablePhotoGrid = (props) => {
 }
 ScrollablePhotoGrid.propertyControls = {
   style: {
-    type: 'styleobject',
+    type: 'style-controls',
   },
 }
 export var Content = (props) => {
@@ -265,7 +265,7 @@ export var Content = (props) => {
 }
 Content.propertyControls = {
   style: {
-    type: 'styleobject',
+    type: 'style-controls',
   },
 }
 export var BottomMenu = (props) => {
@@ -284,7 +284,7 @@ export var BottomMenu = (props) => {
 }
 BottomMenu.propertyControls = {
   style: {
-    type: 'styleobject',
+    type: 'style-controls',
   },
 }
 export var App = () => {

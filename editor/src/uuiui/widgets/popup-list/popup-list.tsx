@@ -1,34 +1,34 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx } from '@emotion/react'
 import styled from '@emotion/styled'
 import useInterval from '@use-it/interval'
 import React from 'react'
 import * as ReactDOM from 'react-dom'
-import Select, {
-  components,
-  createFilter,
+import type {
   InputProps,
+  KeyboardEventHandler,
   MenuListComponentProps,
   OptionProps,
   OptionsType,
   SingleValueProps,
   ValueType,
 } from 'react-select'
-import { IndicatorProps } from 'react-select/src/components/indicators'
-import { MenuPortalProps } from 'react-select/src/components/Menu'
-import { styleFn } from 'react-select/src/styles'
-import { Icn, IcnProps, IcnSpacer } from '../../icn'
+import Select, { components, createFilter } from 'react-select'
+import type { IndicatorProps } from 'react-select/src/components/indicators'
+import type { MenuPortalProps } from 'react-select/src/components/Menu'
+import type { styleFn } from 'react-select/src/styles'
+import type { IcnProps } from '../../icn'
+import { Icn } from '../../icn'
 import { colorTheme, UtopiaStyles, UtopiaTheme } from '../../styles/theme'
 import { FlexRow } from '../layout/flex-row'
 import { isOptionType } from '../../../utils/utils'
-import {
-  betterReactMemo,
-  CommonUtils,
-  ControlStyles,
-  getControlStyles,
-  SelectOption,
-} from '../../../uuiui-deps'
-import { Icons, SmallerIcons } from '../../../uuiui/icons'
+import type { ControlStyles, SelectOption } from '../../../uuiui-deps'
+import { CommonUtils, getControlStyles } from '../../../uuiui-deps'
+import { SmallerIcons } from '../../../uuiui/icons'
+import { Tooltip } from '../../tooltip'
+import { useIsMyProject } from '../../../components/editor/store/collaborative-editing'
+import { useControlsDisabledInSubtree } from '../../utilities/disable-subtree'
 
 type ContainerMode = 'default' | 'showBorderOnHover' | 'noBorder'
 
@@ -46,7 +46,7 @@ interface PopupListProps {
 }
 
 const WindowEdgePadding = 4
-const OptionHeight = UtopiaTheme.layout.inputHeight.default + 2
+const OptionHeight = UtopiaTheme.layout.inputHeight.default
 const CheckboxPadding = 4
 const CheckboxWidth = 16
 const CheckboxInset = CheckboxPadding + CheckboxWidth
@@ -61,7 +61,7 @@ const getValueOfValueType = (value: ValueType<SelectOption>): SelectOption['valu
       return undefined
     }
   } else {
-    return ((value as unknown) as SelectOption).value
+    return (value as unknown as SelectOption).value
   }
 }
 
@@ -91,14 +91,30 @@ const Option = (props: OptionProps<SelectOption>) => {
     selectOption(data)
   }, [data, selectOption])
 
+  const iconShown = props.data.icon != null
+
   return (
-    <FlexRow {...props.innerProps} onMouseUp={onMouseUp} style={props.getStyles('option', props)}>
-      <FlexRow style={{ width: CheckboxWidth, padding: CheckboxPadding, flexShrink: 0 }}>
-        {props.isSelected ? '✓' : ''}
+    <Tooltip
+      title={data.tooltip ?? ''}
+      placement='left'
+      disabled={props.isDisabled !== true || data.tooltip == null}
+    >
+      <FlexRow {...props.innerProps} onMouseUp={onMouseUp} style={props.getStyles('option', props)}>
+        <FlexRow style={{ width: CheckboxWidth, padding: CheckboxPadding, flexShrink: 0 }}>
+          {props.isSelected ? '✓' : ''}
+        </FlexRow>
+        {props.data.icon == null ? null : (
+          <Icn
+            {...props.data.icon}
+            color={'white'}
+            width={16}
+            height={16}
+            style={{ marginLeft: 4 }}
+          />
+        )}
+        <span style={{ paddingLeft: iconShown ? 4 : 8 }}>{props.children}</span>
       </FlexRow>
-      {props.data.icon == null ? null : <Icn {...props.data.icon} />}
-      <span style={{ paddingLeft: 8 }}>{props.children}</span>
-    </FlexRow>
+    </Tooltip>
   )
 }
 
@@ -305,7 +321,7 @@ const MenuPortal = (props: MenuPortalProps<SelectOption>) => {
         setPopupLeft(referenceRect.left)
         setAlignRight(false)
       }
-      setPopupHeight(menuHeight + 20)
+      setPopupHeight(menuHeight + 8)
       setPopupTop(menuTop)
       setCroppedTop(isCroppedTop)
       setCroppedBottom(isCroppedBottom)
@@ -324,57 +340,69 @@ const MenuPortal = (props: MenuPortalProps<SelectOption>) => {
   if (props.selectProps.menuPortalTarget != null) {
     return ReactDOM.createPortal(
       <div
-        className='ignore-react-onclickoutside'
-        onMouseMove={onMouseMove}
-        onMouseUpCapture={onMouseUp}
-        id='menuPortal'
+        // transparent background div so clicks are intercepted and don't spill over
         style={{
-          minWidth: 150,
-          maxWidth: 250,
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
           zIndex: 999999,
-          boxSizing: 'border-box',
-          position: 'absolute',
-          height: popupHeight,
-          top: popupTop,
-          left: alignRight ? undefined : popupLeft - CheckboxInset + ValueContainerLeftPadding,
-          right: alignRight ? ValueContainerLeftPadding : undefined,
-          overflow: 'hidden',
-          ...UtopiaStyles.popup,
+          background: 'transparent',
         }}
       >
         <div
-          ref={ref}
+          className='ignore-react-onclickoutside'
+          onMouseMove={onMouseMove}
+          onMouseUpCapture={onMouseUp}
+          id='menuPortal'
           style={{
             minWidth: 150,
             maxWidth: 250,
+            boxSizing: 'border-box',
+            position: 'absolute',
             height: popupHeight,
+            top: popupTop,
+            left: alignRight ? undefined : popupLeft - CheckboxInset + ValueContainerLeftPadding,
+            right: alignRight ? ValueContainerLeftPadding : undefined,
             overflow: 'hidden',
+            ...UtopiaStyles.popup,
           }}
         >
-          {props.children}
+          <div
+            ref={ref}
+            style={{
+              minWidth: 150,
+              maxWidth: 250,
+              height: popupHeight,
+              overflow: 'hidden',
+            }}
+          >
+            {props.children}
+          </div>
+          {croppedTop ? (
+            <OverflowIndicator
+              style={{
+                top: 0,
+              }}
+              onMouseOver={onCroppedTopMouseOver}
+              onMouseOut={onCroppedTopMouseOut}
+            >
+              …
+            </OverflowIndicator>
+          ) : null}
+          {croppedBottom ? (
+            <OverflowIndicator
+              style={{
+                bottom: 0,
+              }}
+              onMouseOver={onCroppedBottomMouseOver}
+              onMouseOut={onCroppedBottomMouseOut}
+            >
+              …
+            </OverflowIndicator>
+          ) : null}
         </div>
-        {croppedTop ? (
-          <OverflowIndicator
-            style={{
-              top: 0,
-            }}
-            onMouseOver={onCroppedTopMouseOver}
-            onMouseOut={onCroppedTopMouseOut}
-          >
-            …
-          </OverflowIndicator>
-        ) : null}
-        {croppedBottom ? (
-          <OverflowIndicator
-            style={{
-              bottom: 0,
-            }}
-            onMouseOver={onCroppedBottomMouseOver}
-            onMouseOut={onCroppedBottomMouseOut}
-          >
-            …
-          </OverflowIndicator>
-        ) : null}
       </div>,
       props.selectProps.menuPortalTarget,
     )
@@ -382,12 +410,15 @@ const MenuPortal = (props: MenuPortalProps<SelectOption>) => {
     return null
   }
 }
-
+export const MenuListTestID = 'react-select-inspector-menu-list'
 const MenuList = (props: MenuListComponentProps<SelectOption>) => {
   const ref = React.useRef<HTMLDivElement>(null)
   const refCurrent = ref.current
   const propsValue = props.getValue()
   React.useEffect(() => {
+    if (ref.current != null) {
+      ref.current.setAttribute('data-testid', MenuListTestID)
+    }
     if (refCurrent != null) {
       const index = getIndexOfValue(propsValue, [])
       refCurrent.scrollTo({
@@ -399,9 +430,9 @@ const MenuList = (props: MenuListComponentProps<SelectOption>) => {
   return <components.MenuList {...props} innerRef={ref} />
 }
 
-const DropdownIndicator: React.FunctionComponent<IndicatorProps<SelectOption>> = (
-  indicatorProps,
-) => {
+const DropdownIndicator: React.FunctionComponent<
+  React.PropsWithChildren<IndicatorProps<SelectOption>>
+> = (indicatorProps) => {
   return components.DropdownIndicator == null ? null : (
     <components.DropdownIndicator {...indicatorProps}>
       <SmallerIcons.ExpansionArrowDown />
@@ -410,60 +441,89 @@ const DropdownIndicator: React.FunctionComponent<IndicatorProps<SelectOption>> =
 }
 
 const SingleValue = (props: SingleValueProps<SelectOption>) => {
+  const iconShown = props.data.icon != null
+
   return (
-    <components.SingleValue {...props}>
-      {props.data.icon == null ? null : <Icn {...props.data.icon} />}
-      <span style={{ paddingLeft: 4 }}>{props.children}</span>
+    <components.SingleValue
+      {...props}
+      getStyles={(name: string, p: any) => {
+        return { ...props.getStyles(name, p), margin: iconShown ? -4 : 0 }
+      }}
+    >
+      {props.data.icon == null ? null : (
+        <div
+          style={{
+            position: 'absolute',
+            width: 20,
+            height: 20,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Icn
+            {...props.data.icon}
+            color='secondary' // SingleValue is the "closed state" of the popupList, for these we want to show the subtle grey colored icon
+            width={16}
+            height={16}
+            style={{ scale: '80%' }}
+          />
+        </div>
+      )}
+      <span
+        data-testid={props.selectProps.id == null ? undefined : `${props.selectProps.id}-popuplist`}
+        style={{ paddingLeft: iconShown ? 26 : 4 }}
+      >
+        {props.children}
+      </span>
     </components.SingleValue>
   )
 }
+SingleValue.displayName = 'SingleValue'
 
 const displayNone: styleFn = () => ({
   display: 'none',
 })
 
-const getDefaultContainer = (
-  controlStyles: ControlStyles,
-  propsStyle?: React.CSSProperties,
-): styleFn => () => ({
-  width: '100%',
-  height: OptionHeight,
-  borderRadius: UtopiaTheme.inputBorderRadius,
-  boxShadow: `inset 0 0 0 1px ${controlStyles.borderColor}`,
-  backgroundColor: controlStyles.backgroundColor,
-  color: controlStyles.mainColor,
-  textTransform: 'capitalize',
-  ...propsStyle,
-})
-
-const getShowBorderOnHoverContainer = (
-  controlStyles: ControlStyles,
-  propsStyle?: React.CSSProperties,
-): styleFn => () => {
-  return ({
+const getDefaultContainer =
+  (controlStyles: ControlStyles, propsStyle?: React.CSSProperties): styleFn =>
+  () => ({
     width: '100%',
     height: OptionHeight,
     borderRadius: UtopiaTheme.inputBorderRadius,
+    boxShadow: `inset 0 0 0 1px ${controlStyles.borderColor}`,
+    backgroundColor: controlStyles.backgroundColor,
+    color: controlStyles.mainColor,
+    // textTransform: 'capitalize', // BB I am disabling this to be able to write "Left and Width" as an option
+    ...propsStyle,
+  })
+
+const getShowBorderOnHoverContainer =
+  (controlStyles: ControlStyles, propsStyle?: React.CSSProperties): styleFn =>
+  () => {
+    return {
+      width: '100%',
+      height: OptionHeight,
+      borderRadius: UtopiaTheme.inputBorderRadius,
+      color: controlStyles.mainColor,
+      textTransform: 'capitalize',
+      '&:hover': {
+        boxShadow: `inset 0 0 0 1px ${controlStyles.borderColor}`,
+        backgroundColor: controlStyles.backgroundColor,
+      },
+      ...propsStyle,
+    } as unknown as React.CSSProperties // incorrect react-select type. it actually accepts an emotion style object
+  }
+
+const getNoBorderContainer =
+  (controlStyles: ControlStyles, propsStyle?: React.CSSProperties): styleFn =>
+  () => ({
+    width: '100%',
+    height: OptionHeight,
     color: controlStyles.mainColor,
     textTransform: 'capitalize',
-    '&:hover': {
-      boxShadow: `inset 0 0 0 1px ${controlStyles.borderColor}`,
-      backgroundColor: controlStyles.backgroundColor,
-    },
     ...propsStyle,
-  } as unknown) as React.CSSProperties // incorrect react-select type. it actually accepts an emotion style object
-}
-
-const getNoBorderContainer = (
-  controlStyles: ControlStyles,
-  propsStyle?: React.CSSProperties,
-): styleFn => () => ({
-  width: '100%',
-  height: OptionHeight,
-  color: controlStyles.mainColor,
-  textTransform: 'capitalize',
-  ...propsStyle,
-})
+  })
 
 const getContainer = (
   containerMode: ContainerMode,
@@ -517,8 +577,7 @@ const Input = (props: InputProps) => {
   )
 }
 
-export const PopupList = betterReactMemo<PopupListProps>(
-  'PopupList',
+export const PopupList = React.memo<PopupListProps>(
   React.forwardRef(
     (
       {
@@ -529,10 +588,13 @@ export const PopupList = betterReactMemo<PopupListProps>(
         style,
         containerMode = 'default',
         controlStyles = getControlStyles('simple'),
-        disabled = !controlStyles.interactive,
+        disabled: initialDisabled,
       },
       ref,
     ) => {
+      const controlsDisabled = useControlsDisabledInSubtree()
+      const disabled = initialDisabled || !controlStyles.interactive || controlsDisabled
+
       const selectOnSubmitValue = React.useCallback(
         (newValue: ValueType<SelectOption>) => {
           if (isOptionType(newValue)) {
@@ -543,6 +605,17 @@ export const PopupList = betterReactMemo<PopupListProps>(
       )
 
       const container: styleFn = getContainer(containerMode, controlStyles, style)
+
+      const isOptionDisabled = React.useCallback((option: SelectOption) => {
+        return option.disabled === true
+      }, [])
+
+      const stopPropagation: KeyboardEventHandler = React.useCallback((event) => {
+        if (event.key.includes('Arrow')) {
+          // if the user is using the ArrowUp or ArrowDown to navigate the react select, don't trigger keyboard moves on the Canvas
+          event.stopPropagation()
+        }
+      }, [])
 
       return (
         <Select
@@ -556,12 +629,14 @@ export const PopupList = betterReactMemo<PopupListProps>(
           }}
           openMenuOnFocus={true}
           openMenuOnClick={true}
+          onKeyDown={stopPropagation}
           value={value}
           onChange={selectOnSubmitValue}
           options={options}
           menuPortalTarget={document.getElementById(CommonUtils.PortalTargetID)}
           filterOption={createFilter({ ignoreAccents: true })}
           isDisabled={disabled}
+          isOptionDisabled={isOptionDisabled}
           styles={{
             container,
             indicatorsContainer: (base) => ({
@@ -596,6 +671,13 @@ export const PopupList = betterReactMemo<PopupListProps>(
               outline: '0 !important',
               position: 'relative',
               transition: 'all 100ms',
+              paddingRight: 4,
+              '&:hover': {
+                justifyContent: 'space-between',
+              },
+              '&:focus-within': {
+                justifyContent: 'space-between',
+              },
             }),
             singleValue: () => ({
               label: 'singleValue',
@@ -611,6 +693,9 @@ export const PopupList = betterReactMemo<PopupListProps>(
               height: '100%',
               width: '100%',
               padding: `${menuVerticalPadding}px 2px`,
+              backgroundColor: colorTheme.contextMenuBackground.value,
+              position: 'absolute',
+              top: 0,
             }),
             menuList: (_, menuListProps) => {
               return {
@@ -628,6 +713,7 @@ export const PopupList = betterReactMemo<PopupListProps>(
               userSelect: 'none',
               borderRadius: 2,
               fontSize: 11,
+              opacity: optionProps.isDisabled === true ? 0.5 : 1,
               backgroundColor:
                 optionProps.isFocused === true
                   ? colorTheme.contextMenuHighlightBackground.value
@@ -655,16 +741,23 @@ export const PopupList = betterReactMemo<PopupListProps>(
               height: OptionHeight,
               boxSizing: 'border-box',
               overflow: 'hidden',
-              padding: `2px 2px 2px ${ValueContainerLeftPadding}px`,
+              padding: `2px 8px 2px ${ValueContainerLeftPadding}px`,
               position: 'relative',
               borderRadius: UtopiaTheme.inputBorderRadius,
               display: 'flex',
               alignItems: 'center',
-              flexGrow: containerMode === 'noBorder' ? 0 : 1,
             }),
             indicatorSeparator: displayNone,
             clearIndicator: displayNone,
             loadingIndicator: displayNone,
+          }}
+          css={{
+            '&:hover': {
+              boxShadow: `inset 0px 0px 0px 1px ${colorTheme.fg7.value}`,
+            },
+            '&:focus-within': {
+              boxShadow: `inset 0px 0px 0px 1px ${colorTheme.dynamicBlue.value}`,
+            },
           }}
         />
       )

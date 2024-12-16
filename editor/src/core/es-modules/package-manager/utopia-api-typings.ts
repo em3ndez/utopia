@@ -1,4 +1,23 @@
-export const utopiaApiTypings = `declare module 'utopia-api/helpers/helper-functions' {
+export const utopiaApiTypings = `declare module 'utopia-api/core' {
+  export * from 'utopia-api/layout/frame';
+  export * from 'utopia-api/layout/layout';
+  export * from 'utopia-api/layout/flex';
+  export * from 'utopia-api/helpers/helper-functions';
+  export * from 'utopia-api/property-controls/property-controls';
+  export * from 'utopia-api/property-controls/factories';
+
+}
+declare module 'utopia-api/helpers/helper-functions' {
+  import { PropertyControls } from 'utopia-api/property-controls/property-controls';
+  export interface ComponentInsertOption {
+      code: string;
+      additionalImports?: string;
+      label?: string;
+  }
+  export interface ComponentToRegister {
+      properties: PropertyControls;
+      variants: Array<ComponentInsertOption>;
+  }
   export type RawSingleBorderWidth = number | string;
   export type RawSplitBorderWidth = [
       RawSingleBorderWidth,
@@ -30,19 +49,15 @@ declare module 'utopia-api/helpers/test-assets' {
 
 }
 declare module 'utopia-api/index' {
-  export * from 'utopia-api/layout/frame';
-  export * from 'utopia-api/layout/layout';
-  export * from 'utopia-api/layout/flex';
   export * from 'utopia-api/primitives/common';
   export * from 'utopia-api/primitives/view';
   export * from 'utopia-api/primitives/flex-views';
-  export * from 'utopia-api/primitives/text';
   export * from 'utopia-api/primitives/rectangle';
   export * from 'utopia-api/primitives/ellipse';
   export * from 'utopia-api/primitives/scene';
   export * from 'utopia-api/primitives/storyboard';
   export * from 'utopia-api/helpers/helper-functions';
-  export * from 'utopia-api/property-controls/property-controls';
+  export * from 'utopia-api/property-controls/factories';
 
 }
 declare module 'utopia-api/layout/flex' {
@@ -80,8 +95,8 @@ declare module 'utopia-api/layout/flex' {
   type Axis = 'horizontal' | 'vertical';
   export function getMainAxis(props: FlexParentProps): Axis;
   export function getCrossAxis(props: FlexParentProps): Axis;
-  export const flexWidthValueToUse: (crossBasis: FlexLength, stretches: boolean, crossAxis: Axis) => string | number | undefined;
-  export const flexHeightValueToUse: (crossBasis: FlexLength, stretches: boolean, crossAxis: Axis) => string | number | undefined;
+  export const flexWidthValueToUse: (crossBasis: FlexLength, stretches: boolean, crossAxis: Axis) => FlexLength;
+  export const flexHeightValueToUse: (crossBasis: FlexLength, stretches: boolean, crossAxis: Axis) => FlexLength;
   export function getUnstretchedWidthHeight(props: LayoutProps, parentProps: FlexParentProps): {
       width: FlexLength;
       height: FlexLength;
@@ -91,7 +106,7 @@ declare module 'utopia-api/layout/flex' {
   export function getMarginProps(props: FlexElementProps, parentProps: FlexParentProps, index: number, siblingsCount: number): Partial<React.CSSProperties>;
   export interface FlexParentProps {
       flexDirection?: FlexDirection;
-      alignContent?: FlexAlignment;
+      alignContent?: FlexJustifyContent;
       alignItems?: FlexAlignment;
       justifyContent?: FlexJustifyContent;
       flexWrap?: FlexWrap;
@@ -238,7 +253,7 @@ declare module 'utopia-api/layout/layout' {
       flexGrow?: number;
       flexShrink?: number;
       flexDirection?: FlexDirection;
-      alignContent?: FlexAlignment;
+      alignContent?: FlexJustifyContent;
       alignItems?: FlexAlignment;
       justifyContent?: FlexJustifyContent;
       wrap?: FlexWrap;
@@ -328,12 +343,6 @@ declare module 'utopia-api/primitives/storyboard' {
   export const Storyboard: React.MemoExoticComponent<(props: React.PropsWithChildren<any>) => JSX.Element>;
 
 }
-declare module 'utopia-api/primitives/text' {
-  import React from 'react';
-  import { ViewProps } from 'utopia-api/primitives/view';
-  export const Text: React.FunctionComponent<ViewProps>;
-
-}
 declare module 'utopia-api/primitives/view' {
   import { Interpolation, Theme } from '@emotion/react';
   import React from 'react';
@@ -344,137 +353,192 @@ declare module 'utopia-api/primitives/view' {
   export const View: React.FunctionComponent<ViewProps>;
 
 }
+declare module 'utopia-api/property-controls/factories' {
+  import { ArrayControlDescription, BasicControlOptions, CheckboxControlDescription, ColorControlDescription, EulerControlDescription, ExpressionControlOption, ExpressionInputControlDescription, ExpressionPopUpListControlDescription, ImportType, Matrix3ControlDescription, Matrix4ControlDescription, NoneControlDescription, NumberInputControlDescription, ObjectControlDescription, PopUpListControlDescription, PropertyControls, RadioControlDescription, RegularControlDescription, StringInputControlDescription, StyleControlsControlDescription, TupleControlDescription, UnionControlDescription, Vector2ControlDescription, Vector3ControlDescription, Vector4ControlDescription } from 'utopia-api/property-controls/property-controls';
+  export function checkboxControl(): CheckboxControlDescription;
+  export function colorControl(): ColorControlDescription;
+  export function expressionControl(): ExpressionInputControlDescription;
+  export function importStar(source: string, name: string): ImportType;
+  export function importDefault(source: string, name: string): ImportType;
+  export function importNamed(source: string, name: string): ImportType;
+  export function expression<T>(value: T, expressionString: string, requiredImport?: ImportType): ExpressionControlOption<T>;
+  export function expressionPopupListControl(options: ExpressionControlOption<unknown>[]): ExpressionPopUpListControlDescription;
+  export function eulerControl(): EulerControlDescription;
+  export function matrix3Control(): Matrix3ControlDescription;
+  export function matrix4Control(): Matrix4ControlDescription;
+  export function noControl(): NoneControlDescription;
+  export function numberControl(unit?: string): NumberInputControlDescription;
+  export function popupListControl(options: BasicControlOptions<unknown>): PopUpListControlDescription;
+  export function radioControl(options: BasicControlOptions<unknown>): RadioControlDescription;
+  export function sliderControl(min: number, max: number, step: number, unit?: string): NumberInputControlDescription;
+  export function stringControl(placeholder?: string): StringInputControlDescription;
+  export function styleControl(): StyleControlsControlDescription;
+  export function vector2Control(): Vector2ControlDescription;
+  export function vector3Control(): Vector3ControlDescription;
+  export function vector4Control(): Vector4ControlDescription;
+  export function arrayControl(propertyControl: RegularControlDescription): ArrayControlDescription;
+  export function fixedSizeArrayControl(propertyControl: RegularControlDescription, maxCount: number): ArrayControlDescription;
+  export function objectControl(object: {
+      [prop: string]: RegularControlDescription;
+  }): ObjectControlDescription;
+  export function tupleControl(propertyControls: RegularControlDescription[]): TupleControlDescription;
+  export function unionControl(controls: Array<RegularControlDescription>): UnionControlDescription;
+
+}
 declare module 'utopia-api/property-controls/property-controls' {
   import type { CSSProperties } from 'react';
-  export type BaseControlType = 'boolean' | 'color' | 'componentinstance' | 'enum' | 'expression-enum' | 'eventhandler' | 'ignore' | 'image' | 'number' | 'options' | 'popuplist' | 'slider' | 'string' | 'styleobject' | 'vector2' | 'vector3';
-  interface AbstractControlDescription<T extends ControlType> {
-      title?: string;
-      type: T;
-      defaultValue?: unknown;
-  }
-  interface AbstractBaseControlDescription<T extends BaseControlType> extends AbstractControlDescription<T> {
-  }
-  export interface BooleanControlDescription extends AbstractBaseControlDescription<'boolean'> {
-      defaultValue?: boolean;
+  export type BaseControlType = 'checkbox' | 'color' | 'euler' | 'expression-input' | 'expression-popuplist' | 'matrix3' | 'matrix4' | 'none' | 'number-input' | 'popuplist' | 'radio' | 'string-input' | 'style-controls' | 'vector2' | 'vector3' | 'vector4';
+  export interface CheckboxControlDescription {
+      control: 'checkbox';
+      label?: string;
+      visibleByDefault?: boolean;
       disabledTitle?: string;
       enabledTitle?: string;
   }
-  export interface ColorControlDescription extends AbstractBaseControlDescription<'color'> {
-      defaultValue?: string;
-  }
-  export interface ComponentInstanceDescription extends AbstractBaseControlDescription<'componentinstance'> {
-      defaultValue?: never;
+  export interface ColorControlDescription {
+      control: 'color';
+      label?: string;
+      visibleByDefault?: boolean;
   }
   export type AllowedEnumType = string | boolean | number | undefined | null;
-  export interface EnumControlDescription extends AbstractBaseControlDescription<'enum'> {
-      defaultValue?: AllowedEnumType;
-      options: AllowedEnumType[];
-      optionTitles?: string[] | ((props: unknown | null) => string[]);
-      displaySegmentedControl?: boolean;
+  export interface BasicControlOption<T> {
+      value: T;
+      label: string;
+  }
+  export type BasicControlOptions<T> = AllowedEnumType[] | BasicControlOption<T>[];
+  export interface PopUpListControlDescription {
+      control: 'popuplist';
+      label?: string;
+      visibleByDefault?: boolean;
+      options: BasicControlOptions<unknown>;
   }
   export interface ImportType {
       source: string;
-      name: string;
+      name: string | null;
       type: 'star' | 'default' | null;
   }
-  export interface ExpressionEnum {
-      value: AllowedEnumType;
+  export interface ExpressionControlOption<T> {
+      value: T;
       expression: string;
-      import?: ImportType;
+      label?: string;
+      requiredImport?: ImportType;
   }
-  export interface ExpressionEnumControlDescription extends AbstractBaseControlDescription<'expression-enum'> {
-      defaultValue?: ExpressionEnum;
-      options: ExpressionEnum[];
-      optionTitles?: string[] | ((props: unknown | null) => string[]);
+  export interface ExpressionPopUpListControlDescription {
+      control: 'expression-popuplist';
+      label?: string;
+      visibleByDefault?: boolean;
+      options: ExpressionControlOption<unknown>[];
   }
-  export interface EventHandlerControlDescription extends AbstractBaseControlDescription<'eventhandler'> {
-      defaultValue?: never;
+  export interface EulerControlDescription {
+      control: 'euler';
+      label?: string;
+      visibleByDefault?: boolean;
   }
-  export interface IgnoreControlDescription extends AbstractBaseControlDescription<'ignore'> {
-      defaultValue?: never;
+  export interface NoneControlDescription {
+      control: 'none';
+      label?: string;
+      visibleByDefault?: boolean;
   }
-  export interface ImageControlDescription extends AbstractBaseControlDescription<'image'> {
-      defaultValue?: string;
+  export interface Matrix3ControlDescription {
+      control: 'matrix3';
+      label?: string;
+      visibleByDefault?: boolean;
   }
-  export interface NumberControlDescription extends AbstractBaseControlDescription<'number'> {
-      defaultValue?: number | null;
+  export interface Matrix4ControlDescription {
+      control: 'matrix4';
+      label?: string;
+      visibleByDefault?: boolean;
+  }
+  export interface NumberInputControlDescription {
+      control: 'number-input';
+      label?: string;
+      visibleByDefault?: boolean;
       max?: number;
       min?: number;
       unit?: string;
       step?: number;
       displayStepper?: boolean;
   }
-  export interface OptionsControlDescription extends AbstractBaseControlDescription<'options'> {
-      defaultValue?: unknown;
-      options: Array<{
-          value: unknown;
-          label: string;
-      }>;
+  export interface RadioControlDescription {
+      control: 'radio';
+      label?: string;
+      visibleByDefault?: boolean;
+      options: BasicControlOptions<unknown>;
   }
-  export interface PopUpListControlDescription extends AbstractBaseControlDescription<'popuplist'> {
-      defaultValue?: unknown;
-      options: Array<{
-          value: unknown;
-          label: string;
-      }>;
+  export interface ExpressionInputControlDescription {
+      control: 'expression-input';
+      label?: string;
+      visibleByDefault?: boolean;
   }
-  export interface SliderControlDescription extends AbstractBaseControlDescription<'slider'> {
-      defaultValue?: number;
-      max: number;
-      min: number;
-      step: number;
-  }
-  export interface StringControlDescription extends AbstractBaseControlDescription<'string'> {
-      defaultValue?: string;
+  export interface StringInputControlDescription {
+      control: 'string-input';
+      label?: string;
+      visibleByDefault?: boolean;
       placeholder?: string;
       obscured?: boolean;
   }
-  export interface StyleObjectControlDescription extends AbstractBaseControlDescription<'styleobject'> {
-      defaultValue?: CSSProperties;
+  export interface StyleControlsControlDescription {
+      control: 'style-controls';
+      label?: string;
+      visibleByDefault?: boolean;
       placeholder?: CSSProperties;
   }
-  export interface Vector2ControlDescription extends AbstractBaseControlDescription<'vector2'> {
-      defaultValue?: [number, number];
+  export interface Vector2ControlDescription {
+      control: 'vector2';
+      label?: string;
+      visibleByDefault?: boolean;
   }
-  export interface Vector3ControlDescription extends AbstractBaseControlDescription<'vector3'> {
-      defaultValue?: [number, number, number];
+  export interface Vector3ControlDescription {
+      control: 'vector3';
+      label?: string;
+      visibleByDefault?: boolean;
   }
-  export type BaseControlDescription = BooleanControlDescription | ColorControlDescription | ComponentInstanceDescription | EnumControlDescription | ExpressionEnumControlDescription | EventHandlerControlDescription | IgnoreControlDescription | ImageControlDescription | NumberControlDescription | OptionsControlDescription | PopUpListControlDescription | SliderControlDescription | StringControlDescription | StyleObjectControlDescription | Vector2ControlDescription | Vector3ControlDescription;
-  export type HigherLevelControlType = 'array' | 'object' | 'union';
-  export type ControlType = BaseControlType | HigherLevelControlType;
-  interface AbstractHigherLevelControlDescription<T extends HigherLevelControlType> extends AbstractControlDescription<T> {
+  export interface Vector4ControlDescription {
+      control: 'vector4';
+      label?: string;
+      visibleByDefault?: boolean;
   }
-  export interface ArrayControlDescription extends AbstractHigherLevelControlDescription<'array'> {
-      defaultValue?: unknown[];
-      propertyControl: ControlDescription;
+  export type BaseControlDescription = CheckboxControlDescription | ColorControlDescription | ExpressionInputControlDescription | ExpressionPopUpListControlDescription | EulerControlDescription | NoneControlDescription | Matrix3ControlDescription | Matrix4ControlDescription | NumberInputControlDescription | RadioControlDescription | PopUpListControlDescription | StringInputControlDescription | StyleControlsControlDescription | Vector2ControlDescription | Vector3ControlDescription | Vector4ControlDescription;
+  export type HigherLevelControlType = 'array' | 'tuple' | 'object' | 'union';
+  export type RegularControlType = BaseControlType | HigherLevelControlType;
+  export type ControlType = RegularControlType | 'folder';
+  export interface ArrayControlDescription {
+      control: 'array';
+      label?: string;
+      visibleByDefault?: boolean;
+      propertyControl: RegularControlDescription;
       maxCount?: number;
   }
-  export interface ObjectControlDescription extends AbstractHigherLevelControlDescription<'object'> {
-      defaultValue?: unknown;
+  export interface ObjectControlDescription {
+      control: 'object';
+      label?: string;
+      visibleByDefault?: boolean;
       object: {
-          [prop: string]: ControlDescription;
+          [prop: string]: RegularControlDescription;
       };
   }
-  export interface UnionControlDescription extends AbstractHigherLevelControlDescription<'union'> {
-      defaultValue?: unknown;
-      controls: Array<ControlDescription>;
+  export interface UnionControlDescription {
+      control: 'union';
+      label?: string;
+      visibleByDefault?: boolean;
+      controls: Array<RegularControlDescription>;
   }
-  export type HigherLevelControlDescription = ArrayControlDescription | ObjectControlDescription | UnionControlDescription;
-  export type ControlDescription = BaseControlDescription | HigherLevelControlDescription;
+  export interface TupleControlDescription {
+      control: 'tuple';
+      label?: string;
+      visibleByDefault?: boolean;
+      propertyControls: RegularControlDescription[];
+  }
+ 
+  export type HigherLevelControlDescription = ArrayControlDescription | ObjectControlDescription | TupleControlDescription | UnionControlDescription;
+  export type RegularControlDescription = BaseControlDescription | HigherLevelControlDescription;
+  export type ControlDescription = RegularControlDescription;
   export function isBaseControlDescription(control: ControlDescription): control is BaseControlDescription;
   export function isHigherLevelControlDescription(control: ControlDescription): control is HigherLevelControlDescription;
-  export type PropertyControls<ComponentProps = any> = {
-      [K in keyof ComponentProps]?: ControlDescription;
+  export type PropertyControls = {
+      [key: string]: ControlDescription;
   };
   export function addPropertyControls(component: unknown, propertyControls: PropertyControls): void;
-  export function getDefaultProps(propertyControls: PropertyControls): {
-      [prop: string]: unknown;
-  };
-  export function expression(value: AllowedEnumType, expressionString: string, toImport: ImportType): ExpressionEnum;
-  export function importStar(source: string, name: string): ImportType;
-  export function importDefault(source: string, name: string): ImportType;
-  export function importNamed(source: string, name: string): ImportType;
-  export {};
 
 }
 declare module 'utopia-api/tests/test-utils' {
@@ -487,11 +551,11 @@ declare module 'utopia-api/tests/test-utils' {
   export const commonSenseUtopiaLayoutShorthands: (props: CommonSenseUtopiaProps) => import("@emotion/react").SerializedStyles;
   export const FlexRow: import("@emotion/styled").StyledComponent<{
       theme?: import("@emotion/react").Theme | undefined;
-      as?: "symbol" | "object" | "big" | "link" | "small" | "sub" | "sup" | "track" | "progress" | "a" | "abbr" | "address" | "area" | "article" | "aside" | "audio" | "b" | "base" | "bdi" | "bdo" | "blockquote" | "body" | "br" | "button" | "canvas" | "caption" | "cite" | "code" | "col" | "colgroup" | "data" | "datalist" | "dd" | "del" | "details" | "dfn" | "dialog" | "div" | "dl" | "dt" | "em" | "embed" | "fieldset" | "figcaption" | "figure" | "footer" | "form" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "head" | "header" | "hgroup" | "hr" | "html" | "i" | "iframe" | "img" | "input" | "ins" | "kbd" | "label" | "legend" | "li" | "main" | "map" | "mark" | "menu" | "meta" | "meter" | "nav" | "noscript" | "ol" | "optgroup" | "option" | "output" | "p" | "param" | "picture" | "pre" | "q" | "rp" | "rt" | "ruby" | "s" | "samp" | "script" | "section" | "select" | "slot" | "source" | "span" | "strong" | "style" | "summary" | "table" | "tbody" | "td" | "template" | "textarea" | "tfoot" | "th" | "thead" | "time" | "title" | "tr" | "u" | "ul" | "var" | "video" | "wbr" | "circle" | "clipPath" | "defs" | "desc" | "ellipse" | "feBlend" | "feColorMatrix" | "feComponentTransfer" | "feComposite" | "feConvolveMatrix" | "feDiffuseLighting" | "feDisplacementMap" | "feDistantLight" | "feFlood" | "feFuncA" | "feFuncB" | "feFuncG" | "feFuncR" | "feGaussianBlur" | "feImage" | "feMerge" | "feMergeNode" | "feMorphology" | "feOffset" | "fePointLight" | "feSpecularLighting" | "feSpotLight" | "feTile" | "feTurbulence" | "filter" | "foreignObject" | "g" | "image" | "line" | "linearGradient" | "marker" | "mask" | "metadata" | "path" | "pattern" | "polygon" | "polyline" | "radialGradient" | "rect" | "stop" | "svg" | "switch" | "text" | "textPath" | "tspan" | "use" | "view" | "menuitem" | "keygen" | "noindex" | "webview" | "animate" | "animateMotion" | "animateTransform" | "feDropShadow" | "mpath" | import("react").ComponentClass<any, any> | import("react").FunctionComponent<any> | undefined;
+      as?: import("react").ElementType<any> | undefined;
   } & CommonSenseUtopiaProps, import("react").DetailedHTMLProps<import("react").HTMLAttributes<HTMLDivElement>, HTMLDivElement>, {}>;
   export const FlexColumn: import("@emotion/styled").StyledComponent<{
       theme?: import("@emotion/react").Theme | undefined;
-      as?: "symbol" | "object" | "big" | "link" | "small" | "sub" | "sup" | "track" | "progress" | "a" | "abbr" | "address" | "area" | "article" | "aside" | "audio" | "b" | "base" | "bdi" | "bdo" | "blockquote" | "body" | "br" | "button" | "canvas" | "caption" | "cite" | "code" | "col" | "colgroup" | "data" | "datalist" | "dd" | "del" | "details" | "dfn" | "dialog" | "div" | "dl" | "dt" | "em" | "embed" | "fieldset" | "figcaption" | "figure" | "footer" | "form" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "head" | "header" | "hgroup" | "hr" | "html" | "i" | "iframe" | "img" | "input" | "ins" | "kbd" | "label" | "legend" | "li" | "main" | "map" | "mark" | "menu" | "meta" | "meter" | "nav" | "noscript" | "ol" | "optgroup" | "option" | "output" | "p" | "param" | "picture" | "pre" | "q" | "rp" | "rt" | "ruby" | "s" | "samp" | "script" | "section" | "select" | "slot" | "source" | "span" | "strong" | "style" | "summary" | "table" | "tbody" | "td" | "template" | "textarea" | "tfoot" | "th" | "thead" | "time" | "title" | "tr" | "u" | "ul" | "var" | "video" | "wbr" | "circle" | "clipPath" | "defs" | "desc" | "ellipse" | "feBlend" | "feColorMatrix" | "feComponentTransfer" | "feComposite" | "feConvolveMatrix" | "feDiffuseLighting" | "feDisplacementMap" | "feDistantLight" | "feFlood" | "feFuncA" | "feFuncB" | "feFuncG" | "feFuncR" | "feGaussianBlur" | "feImage" | "feMerge" | "feMergeNode" | "feMorphology" | "feOffset" | "fePointLight" | "feSpecularLighting" | "feSpotLight" | "feTile" | "feTurbulence" | "filter" | "foreignObject" | "g" | "image" | "line" | "linearGradient" | "marker" | "mask" | "metadata" | "path" | "pattern" | "polygon" | "polyline" | "radialGradient" | "rect" | "stop" | "svg" | "switch" | "text" | "textPath" | "tspan" | "use" | "view" | "menuitem" | "keygen" | "noindex" | "webview" | "animate" | "animateMotion" | "animateTransform" | "feDropShadow" | "mpath" | import("react").ComponentClass<any, any> | import("react").FunctionComponent<any> | undefined;
+      as?: import("react").ElementType<any> | undefined;
   } & CommonSenseUtopiaProps, import("react").DetailedHTMLProps<import("react").HTMLAttributes<HTMLDivElement>, HTMLDivElement>, {}>;
   export {};
 

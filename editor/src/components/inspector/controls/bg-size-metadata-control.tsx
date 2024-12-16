@@ -1,20 +1,21 @@
 import React from 'react'
-import { PopupList } from '../../../uuiui'
-import { SelectOption } from '../../../uuiui-deps'
-import { NumberOrKeywordControl } from '../../../uuiui/inputs/number-or-keyword-input'
-import { ControlStatus } from '../common/control-status'
-import {
+import { PopupList, NumberInput, FlexRow } from '../../../uuiui'
+import type { SelectOption } from '../../../uuiui-deps'
+import type { ControlStatus } from '../common/control-status'
+import type {
   CSSBackgroundLayers,
-  cssBGSize,
   CSSBGSize,
   CSSBGSizeValue,
-  cssDefault,
   CSSGradientBackgroundLayer,
   CSSKeyword,
-  cssKeyword,
   CSSNumber,
-  cssPixelLengthZero,
   CSSURLFunctionBackgroundLayer,
+  UnknownOrEmptyInput,
+} from '../common/css-utils'
+import {
+  cssBGSize,
+  cssDefault,
+  cssKeyword,
   isCSSBackgroundLayerWithBGSize,
   isCSSKeyword,
   isCSSNumber,
@@ -23,13 +24,11 @@ import {
   isParsedCurlyBrace,
   isUnknownInputValue,
   parsedCurlyBrace,
-  UnknownOrEmptyInput,
   cssPixelLength,
 } from '../common/css-utils'
-import { UseSubmitTransformedValuesFactory } from '../sections/style-section/background-subsection/background-layer-helpers'
+import type { UseSubmitTransformedValuesFactory } from '../sections/style-section/background-subsection/background-layer-helpers'
 import { MetadataControlsStyle } from '../sections/style-section/background-subsection/background-picker'
-import { KeywordControl } from './keyword-control'
-import { NO_OP } from '../../../core/shared/utils'
+import { UIGridRow } from '../widgets/ui-grid-row'
 
 interface BGSizeMetadataControlProps {
   index: number
@@ -37,8 +36,6 @@ interface BGSizeMetadataControlProps {
   useSubmitValueFactory: UseSubmitTransformedValuesFactory
   controlStatus: ControlStatus
 }
-
-const validDimensionComponentKeywords = ['auto']
 
 type BGSizeSelectOptionValue = 'auto' | 'contain' | 'cover' | 'percentage-length'
 interface BGSizeSelectOption extends SelectOption {
@@ -197,9 +194,9 @@ function bgSizeValueToSelectOption(value: CSSBGSizeValue): SelectOption {
   }
 }
 
-export const BGSizeMetadataControl: React.FunctionComponent<BGSizeMetadataControlProps> = (
-  props,
-) => {
+export const BGSizeMetadataControl: React.FunctionComponent<
+  React.PropsWithChildren<BGSizeMetadataControlProps>
+> = (props) => {
   const [onSubmitPopupListValue] = props.useSubmitValueFactory(
     getIndexedUpdateBGSizePopupList(props.index),
   )
@@ -211,48 +208,58 @@ export const BGSizeMetadataControl: React.FunctionComponent<BGSizeMetadataContro
   )
 
   const bgSizeValue = props.value.bgSize.size.value
-  let widthValue: CSSNumber | CSSKeyword | null = null
-  let heightValue: CSSNumber | CSSKeyword | null = null
+  let widthValue: CSSNumber | null = null
+  let heightValue: CSSNumber | null = null
   if (isParsedCurlyBrace(bgSizeValue)) {
-    widthValue = bgSizeValue.value[0]
-    heightValue = bgSizeValue.value[1] ?? widthValue
+    const firstValue = bgSizeValue.value[0]
+    const secondValue = bgSizeValue.value[1] ?? firstValue
+    if (isCSSNumber(firstValue)) {
+      widthValue = firstValue
+    }
+    if (isCSSNumber(secondValue)) {
+      heightValue = secondValue
+    }
   }
+  const isPercentageLength = bgSizeValueToSelectOption(bgSizeValue).value === 'percentage-length'
+
   return (
-    <div style={MetadataControlsStyle}>
+    <UIGridRow padded variant='<--1fr--><--1fr-->' style={{ padding: '0 8px 0 4px' }}>
       <PopupList
-        style={{ gridColumn: '1 / span 3' }}
+        style={{ background: 'transparent', width: 130 }}
         options={BGSizeKeywordValueSelectOptions}
         value={bgSizeValueToSelectOption(bgSizeValue)}
         onSubmitValue={onSubmitPopupListValue}
       />
-      {widthValue != null && heightValue != null ? (
-        <>
-          <NumberOrKeywordControl
-            style={{ gridColumn: '5 / span 1' }}
+      {isPercentageLength && widthValue != null && heightValue != null ? (
+        <UIGridRow padded={false} variant='<--1fr--><--1fr-->'>
+          <NumberInput
             id='bgSize-width-component'
             testId='bgSize-width-component'
             value={widthValue}
-            numberInputOptions={{ numberType: 'LengthPercent', defaultUnitToHide: null }}
-            keywordControlOptions={{ validKeywords: validDimensionComponentKeywords }}
+            stepSize={1}
+            minimum={0}
+            numberType='LengthPercent'
+            innerLabel='W'
             onSubmitValue={onSubmitWidthValue}
             onTransientSubmitValue={onTransientSubmitWidthValue}
             controlStatus={props.controlStatus}
-            DEPRECATED_labelBelow='width'
+            defaultUnitToHide={'px'}
           />
-          <NumberOrKeywordControl
-            style={{ gridColumn: '7 / span 1' }}
+          <NumberInput
             id='bgSize-height-component'
             testId='bgSize-height-component'
             value={heightValue}
-            numberInputOptions={{ numberType: 'LengthPercent', defaultUnitToHide: null }}
-            keywordControlOptions={{ validKeywords: validDimensionComponentKeywords }}
+            stepSize={1}
+            minimum={0}
+            numberType='LengthPercent'
+            innerLabel='H'
             onSubmitValue={onSubmitHeightValue}
             onTransientSubmitValue={onTransientSubmitHeightValue}
             controlStatus={props.controlStatus}
-            DEPRECATED_labelBelow='height'
+            defaultUnitToHide={'px'}
           />
-        </>
+        </UIGridRow>
       ) : null}
-    </div>
+    </UIGridRow>
   )
 }

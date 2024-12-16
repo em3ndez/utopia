@@ -1,17 +1,18 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx } from '@emotion/react'
 import styled from '@emotion/styled'
 import composeRefs from '@seznam/compose-react-refs'
+import type { CSSProperties } from 'react'
 import React from 'react'
-import {
-  ControlStatus,
-  ControlStyles,
-  getControlStyles,
-} from '../../components/inspector/common/control-status'
-import { stopPropagation } from '../../components/inspector/common/inspector-utils'
-import { betterReactMemo } from '../../uuiui-deps'
-import { useColorTheme, UtopiaTheme } from '../styles/theme'
-import { InspectorInput, InspectorInputEmotionStyle } from './base-input'
+import type { ControlStatus } from '../../components/inspector/common/control-status'
+import type { ControlStyles } from '../../components/inspector/common/control-styles'
+import { getControlStyles } from '../../components/inspector/common/control-styles'
+import { preventDefault, stopPropagation } from '../../components/inspector/common/inspector-utils'
+import { UtopiaTheme, useColorTheme } from '../styles/theme'
+import { InspectorInputEmotionStyle, getControlStylesAwarePlaceholder } from './base-input'
+import { useControlsDisabledInSubtree } from '../utilities/disable-subtree'
+import { dataPasteHandler } from '../../utils/paste-handler'
 
 interface StringInputOptions {
   focusOnMount?: boolean
@@ -27,19 +28,30 @@ export interface StringInputProps
   className?: string
   DEPRECATED_labelBelow?: React.ReactChild
   controlStatus?: ControlStatus
+  growInputAutomatically?: boolean
+  includeBoxShadow?: boolean
+  onSubmitValue?: (value: string) => void
+  onEscape?: () => void
+  pasteHandler?: boolean
+  showBorder?: boolean
+  innerStyle?: React.CSSProperties
+  ellipsize?: boolean
 }
 
-export const StringInput = betterReactMemo(
-  'StringInput',
+export const StringInput = React.memo(
   React.forwardRef<HTMLInputElement, StringInputProps>(
     (
       {
         controlStatus = 'simple',
         style,
+        innerStyle,
         focusOnMount = false,
+        includeBoxShadow = true,
         placeholder: initialPlaceHolder,
         DEPRECATED_labelBelow: labelBelow,
         testId,
+        showBorder,
+        ellipsize,
         ...inputProps
       },
       propsRef,
@@ -53,8 +65,9 @@ export const StringInput = betterReactMemo(
         }
       }, [focusOnMount, ref])
 
-      const disabled = controlStatus === 'disabled'
       const controlStyles: ControlStyles = getControlStyles(controlStatus)
+      const controlsDisabled = useControlsDisabledInSubtree()
+      const disabled = !controlStyles.interactive || controlsDisabled
 
       const inputPropsKeyDown = inputProps.onKeyDown
 
@@ -76,33 +89,46 @@ export const StringInput = betterReactMemo(
         [inputPropsKeyDown],
       )
 
-      let placeholder = initialPlaceHolder
-      if (controlStyles.unknown) {
-        placeholder = 'unknown'
-      } else if (controlStyles.mixed) {
-        placeholder = 'mixed'
+      const placeholder = getControlStylesAwarePlaceholder(controlStyles) ?? initialPlaceHolder
+
+      let inputStyle: CSSProperties = {}
+      if (ellipsize) {
+        inputStyle.textOverflow = 'ellipsis'
+        inputStyle.whiteSpace = 'nowrap'
+        inputStyle.overflow = 'hidden'
       }
 
       return (
-        <form autoComplete='off' style={style} onMouseDown={stopPropagation}>
+        <form
+          autoComplete='off'
+          style={style}
+          onMouseDown={stopPropagation}
+          onSubmit={preventDefault}
+        >
           <div
             className='string-input-container'
+            style={innerStyle}
             css={{
-              borderRadius: 2,
+              borderRadius: UtopiaTheme.inputBorderRadius,
               color: controlStyles.mainColor,
-              backgroundColor: controlStyles.backgroundColor,
               position: 'relative',
+              background: 'transparent',
+              boxShadow: showBorder ? `inset 0px 0px 0px 1px ${colorTheme.fg7.value}` : undefined,
               '&:hover': {
-                boxShadow: `inset 0px 0px 0px 1px ${colorTheme.primary.value}`,
+                boxShadow: includeBoxShadow
+                  ? `inset 0px 0px 0px 1px ${colorTheme.fg7.value}`
+                  : undefined,
               },
               '&:focus-within': {
-                boxShadow: `inset 0px 0px 0px 1px ${colorTheme.primary.value}`,
+                boxShadow: includeBoxShadow
+                  ? `inset 0px 0px 0px 1px ${colorTheme.dynamicBlue.value}`
+                  : undefined,
               },
             }}
           >
             <HeadlessStringInput
               {...inputProps}
-              data-testid={testId}
+              testId={testId}
               data-controlstatus={controlStatus}
               value={inputProps.value}
               css={[
@@ -114,7 +140,7 @@ export const StringInput = betterReactMemo(
                   },
                 },
                 InspectorInputEmotionStyle({
-                  controlStyles,
+                  controlStyles: controlStyles,
                   hasLabel: false,
                 }),
               ]}
@@ -125,6 +151,8 @@ export const StringInput = betterReactMemo(
               disabled={disabled}
               autoComplete='off'
               spellCheck={false}
+              growInputAutomatically={inputProps.growInputAutomatically}
+              style={inputStyle}
             />
             {labelBelow == null ? null : (
               <LabelBelow htmlFor={inputProps.id} style={{ color: controlStyles.secondaryColor }}>
@@ -148,13 +176,29 @@ const LabelBelow = styled.label({
 export type HeadlessStringInputProps = React.InputHTMLAttributes<HTMLInputElement> & {
   onSubmitValue?: (value: string) => void
   onEscape?: () => void
+  growInputAutomatically?: boolean
+  testId: string
+  pasteHandler?: boolean
 }
 
 export const HeadlessStringInput = React.forwardRef<HTMLInputElement, HeadlessStringInputProps>(
   (props, propsRef) => {
-    const { disabled, onKeyDown, onFocus, onSubmitValue, onEscape } = props
+    const {
+      onSubmitValue,
+      onEscape,
+      onChange,
+      growInputAutomatically = false,
+      style = {},
+      value,
+      testId,
+      pasteHandler,
+      ...otherProps
+    } = props
+    const { disabled, onKeyDown, onFocus, onBlur } = otherProps
 
     const ref = React.useRef<HTMLInputElement>(null)
+
+    const spanRef = React.useRef<HTMLSpanElement>(null)
 
     const handleOnKeyDown = React.useCallback(
       (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -195,13 +239,53 @@ export const HeadlessStringInput = React.forwardRef<HTMLInputElement, HeadlessSt
       [disabled, onFocus],
     )
 
-    return (
+    const inputComponent = (
       <input
         ref={composeRefs(ref, propsRef)}
-        {...props}
+        data-testid={testId}
+        {...dataPasteHandler(props.pasteHandler)}
+        {...otherProps}
+        disabled={disabled}
         onKeyDown={handleOnKeyDown}
         onFocus={handleOnFocus}
+        onBlur={onBlur}
+        onChange={onChange}
+        style={{
+          ...style,
+          gridRowStart: growInputAutomatically ? 1 : style.gridRowStart,
+          gridColumnStart: growInputAutomatically ? 1 : style.gridColumnStart,
+        }}
+        value={value ?? ''}
       />
     )
+
+    if (growInputAutomatically) {
+      return (
+        <div
+          style={{
+            display: 'inline-grid',
+            background: 'transparent',
+          }}
+        >
+          {inputComponent}
+          <span
+            ref={spanRef}
+            data-testid={`${testId}-span`}
+            {...otherProps}
+            style={{
+              ...style,
+              visibility: 'hidden',
+              whiteSpace: 'nowrap',
+              gridRowStart: 1,
+              gridColumnStart: 1,
+            }}
+          >
+            {value ?? ''}
+          </span>
+        </div>
+      )
+    } else {
+      return inputComponent
+    }
   },
 )

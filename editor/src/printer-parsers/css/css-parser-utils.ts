@@ -1,42 +1,42 @@
 import * as csstree from 'css-tree'
-import {
+import type {
   CSSColor,
   CSSColorHSL,
-  cssColorHSL,
   CSSColorRGB,
-  cssColorRGB,
-  cssKeyword,
   CSSKeyword,
   CSSNumber,
-  cssNumber,
   CSSNumberUnit,
   LengthUnit,
-  LengthUnits,
-  parseColor,
   ParsedCurlyBrace,
-  parsedCurlyBrace,
   ParsedDoubleBar,
-  parsedDoubleBar,
 } from '../../components/inspector/common/css-utils'
 import {
-  Either,
+  cssColorHSL,
+  cssColorRGB,
+  cssKeyword,
+  cssNumber,
+  LengthUnits,
+  parseColor,
+  parsedCurlyBrace,
+  parsedDoubleBar,
+} from '../../components/inspector/common/css-utils'
+import type { Either, Right } from '../../core/shared/either'
+import {
   eitherToMaybe,
   isRight,
   left,
   right,
-  Right,
   sequenceEither,
   traverseEither,
   mapEither,
 } from '../../core/shared/either'
-import * as csstreemissing from '../../missing-types/css-tree'
+import type * as csstreemissing from '../../missing-types/css-tree'
 import utils from '../../utils/utils'
+import type { Parser, ParseResult } from '../../utils/value-parser-utils'
 import {
   arrayIndexNotPresentParseError,
   descriptionParseError,
   parseAlternative,
-  Parser,
-  ParseResult,
 } from '../../utils/value-parser-utils'
 
 export function getLexerPropertyMatches(
@@ -339,8 +339,13 @@ export const parseLexedColor: Parser<CSSColor> = (value) => {
     value.match.length === 1
   ) {
     if (value.match[0] != null) {
-      const leaf = value.match[0]
+      let leaf = value.match[0]
       if (isLexerMatch(leaf)) {
+        // a fix for css-tree@3 aligned color parsing to CSS Color Level 5 syntax
+        // https://drafts.csswg.org/css-color-5/#color-syntax
+        if (isNamedSyntaxType(leaf.syntax, ['color-base']) && isLexerMatch(leaf.match[0])) {
+          leaf = leaf.match[0]
+        }
         if (isNamedSyntaxType(leaf.syntax, ['rgb()', 'rgba()', 'hsl()', 'hsla()'])) {
           const parsed = parseAlternative<CSSColorRGB | CSSColorHSL>(
             [parseRGBColor, parseHSLColor],
@@ -353,7 +358,7 @@ export const parseLexedColor: Parser<CSSColor> = (value) => {
           if (leaf.match[0] != null) {
             const tokenLeaf = leaf.match[0]
             if (isLexerToken(tokenLeaf)) {
-              const parsed = parseColor(tokenLeaf.token)
+              const parsed = parseColor(tokenLeaf.token, 'hex-hash-optional')
               if (isRight(parsed)) {
                 return parsed
               } else {
@@ -428,7 +433,7 @@ function isLexerToken(leaf: unknown): leaf is LexerToken<string> {
 
 // Type is very much in flex, if you find it doesn't match the data, fix it please
 export type LexerMatch<
-  T extends csstreemissing.Syntax.SyntaxItem = csstreemissing.Syntax.SyntaxItem
+  T extends csstreemissing.Syntax.SyntaxItem = csstreemissing.Syntax.SyntaxItem,
 > = {
   syntax: T
   match: Array<LexerElement>

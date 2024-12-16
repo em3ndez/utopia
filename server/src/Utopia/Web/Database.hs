@@ -14,45 +14,56 @@
 
 module Utopia.Web.Database where
 
-import           Control.Lens                    hiding ((.>))
+import           Control.Lens                           hiding ((.>))
 import           Control.Monad.Catch
 import           Control.Monad.Fail
 import           Data.Aeson
-import qualified Data.ByteString.Lazy            as BL
+import           Data.Aeson.Lens
+import qualified Data.ByteString.Lazy                   as BL
+import           Data.Generics.Product
+import           Data.Generics.Sum
 import           Data.Pool
 import           Data.Profunctor.Product.Default
 import           Data.String
-import qualified Data.Text                       as T
+import qualified Data.Text                              as T
 import           Data.Time
-import           Data.UUID                       hiding (null)
+import           Data.UUID                              hiding (null)
 import           Data.UUID.V4
 import           Database.PostgreSQL.Simple
+import           Database.PostgreSQL.Simple.Transaction
 import           Opaleye
-import           Opaleye.Trans
-import           Protolude                       hiding (get)
+import           Protolude                              hiding (get)
 import           System.Environment
 import           System.Posix.User
+import           Utopia.ClientModel
 import           Utopia.Web.Database.Types
-import           Utopia.Web.Metrics              hiding (count)
+import           Utopia.Web.Metrics                     hiding (count)
 
 data DatabaseMetrics = DatabaseMetrics
-                     { _generateUniqueIDMetrics         :: InvocationMetric
-                     , _insertProjectMetrics            :: InvocationMetric
-                     , _saveProjectMetrics              :: InvocationMetric
-                     , _createProjectMetrics            :: InvocationMetric
-                     , _deleteProjectMetrics            :: InvocationMetric
-                     , _loadProjectMetrics              :: InvocationMetric
-                     , _getProjectsForUserMetrics       :: InvocationMetric
-                     , _getProjectOwnerMetrics          :: InvocationMetric
-                     , _getProjectOwnerDetailsMetrics   :: InvocationMetric
-                     , _checkIfProjectOwnerMetrics      :: InvocationMetric
-                     , _getShowcaseProjectsMetrics      :: InvocationMetric
-                     , _setShowcaseProjectsMetrics      :: InvocationMetric
-                     , _updateUserDetailsMetrics        :: InvocationMetric
-                     , _getUserDetailsMetrics           :: InvocationMetric
-                     , _getUserConfigurationMetrics     :: InvocationMetric
-                     , _saveUserConfigurationMetrics    :: InvocationMetric
-                     , _checkIfProjectIDReservedMetrics :: InvocationMetric
+                     { _generateUniqueIDMetrics                           :: InvocationMetric
+                     , _insertProjectMetrics                              :: InvocationMetric
+                     , _saveProjectMetrics                                :: InvocationMetric
+                     , _createProjectMetrics                              :: InvocationMetric
+                     , _deleteProjectMetrics                              :: InvocationMetric
+                     , _loadProjectMetrics                                :: InvocationMetric
+                     , _getProjectsForUserMetrics                         :: InvocationMetric
+                     , _getProjectOwnerMetrics                            :: InvocationMetric
+                     , _getProjectOwnerDetailsMetrics                     :: InvocationMetric
+                     , _checkIfProjectOwnerMetrics                        :: InvocationMetric
+                     , _getShowcaseProjectsMetrics                        :: InvocationMetric
+                     , _setShowcaseProjectsMetrics                        :: InvocationMetric
+                     , _updateUserDetailsMetrics                          :: InvocationMetric
+                     , _getUserDetailsMetrics                             :: InvocationMetric
+                     , _getUserConfigurationMetrics                       :: InvocationMetric
+                     , _saveUserConfigurationMetrics                      :: InvocationMetric
+                     , _checkIfProjectIDReservedMetrics                   :: InvocationMetric
+                     , _updateGithubAuthenticationDetailsMetrics          :: InvocationMetric
+                     , _getGithubAuthenticationDetailsMetrics             :: InvocationMetric
+                     , _maybeClaimCollaborationControlMetrics             :: InvocationMetric
+                     , _forceClaimCollaborationControlMetrics             :: InvocationMetric
+                     , _releaseCollaborationControlMetrics                :: InvocationMetric
+                     , _deleteCollaborationControlByCollaboratorMetrics   :: InvocationMetric
+                     , _cleanupCollaborationControlMetrics                :: InvocationMetric
                      }
 
 createDatabaseMetrics :: Store -> IO DatabaseMetrics
@@ -74,6 +85,13 @@ createDatabaseMetrics store = DatabaseMetrics
   <*> createInvocationMetric "utopia.database.getuserconfiguration" store
   <*> createInvocationMetric "utopia.database.saveuserconfiguration" store
   <*> createInvocationMetric "utopia.database.checkifprojectidreserved" store
+  <*> createInvocationMetric "utopia.database.updategithubauthenticationdetails" store
+  <*> createInvocationMetric "utopia.database.getgithubauthenticationdetails" store
+  <*> createInvocationMetric "utopia.database.maybeclaimcollaborationownership" store
+  <*> createInvocationMetric "utopia.database.forceclaimcollaborationownership" store
+  <*> createInvocationMetric "utopia.database.releasecollaborationownership" store
+  <*> createInvocationMetric "utopia.database.deletecollaborationownershipbycollaborator" store
+  <*> createInvocationMetric "utopia.database.cleanupcollaborationownership" store
 
 data UserIDIncorrectException = UserIDIncorrectException
                               deriving (Eq, Show)
@@ -91,13 +109,20 @@ getDatabaseConnectionString = lookupEnv "DATABASE_URL"
 createDatabasePoolFromConnection :: IO Connection -> IO DBPool
 createDatabasePoolFromConnection createConnection = do
   let keepResourceOpenFor = 10
-  createPool createConnection close 3 keepResourceOpenFor 3
+  let poolStripes = 2
+  let connectionsPerStripe = 1
+  createPool createConnection close poolStripes keepResourceOpenFor connectionsPerStripe
 
 createLocalDatabasePool :: IO DBPool
 createLocalDatabasePool = do
   username <- getEffectiveUserName
   let connectInfo = defaultConnectInfo { connectUser = username, connectDatabase = "utopia" }
   createDatabasePoolFromConnection $ connect connectInfo
+
+getDatabaseMetrics :: IO DatabaseMetrics
+getDatabaseMetrics = do
+  store <- newStore
+  createDatabaseMetrics store
 
 createRemoteDatabasePool :: String -> IO DBPool
 createRemoteDatabasePool connectionString = createDatabasePoolFromConnection $ connectPostgreSQL $ encodeUtf8 $ toS connectionString
@@ -126,7 +151,7 @@ getProjectContent :: ByteString -> IO Value
 getProjectContent content = either fail pure $ eitherDecodeStrict' content
 
 notDeletedProject :: FieldNullable SqlBool -> Field SqlBool
-notDeletedProject deletedFlag = isNull deletedFlag .|| deletedFlag .=== toFields (Just False)
+notDeletedProject deletedFlag = isNull deletedFlag .|| ((nullableToMaybeFields deletedFlag) .=== (nullableToMaybeFields (toFields (Just False))))
 
 printSql :: Default Unpackspec fields fields => Select fields -> IO ()
 printSql = putStrLn . fromMaybe "Empty select" . showSql
@@ -154,7 +179,7 @@ projectToDecodedProject (projectId, ownerId, title, _, modifiedAt, content, _) =
 createProject :: DatabaseMetrics -> DBPool -> IO Text
 createProject metrics pool = invokeAndMeasure (_createProjectMetrics metrics) $ usePool pool $ \connection -> do
   projectID <- generateUniqueID metrics
-  void $ runInsert_ connection $ Insert
+  void $ runInsert connection $ Insert
                                  { iTable = projectIDTable
                                  , iRows = [toFields projectID]
                                  , iReturning = rCount
@@ -170,7 +195,7 @@ insertProject metrics connection userId projectId timestamp (Just pTitle) (Just 
                       , iReturning = rCount
                       , iOnConflict = Nothing
                       }
-  void $ runInsert_ connection projectInsert
+  void $ runInsert connection projectInsert
 insertProject _ _ _ _ _ _ _ = throwM MissingFieldsException
 
 saveProject :: DatabaseMetrics -> DBPool -> Text -> Text -> UTCTime -> Maybe Text -> Maybe Value -> IO ()
@@ -190,7 +215,7 @@ saveProjectInner _ connection userId projectId timestamp possibleTitle possibleP
                     , uWhere = \(projId, _, _, _, _, _, _) -> projId .== toFields projectId
                     , uReturning = rCount
                     }
-  when correctUser $ void $ runUpdate_ connection projectUpdate
+  when correctUser $ void $ runUpdate connection projectUpdate
   unless correctUser $ throwM UserIDIncorrectException
 saveProjectInner metrics connection userId projectId timestamp possibleTitle possibleProjectContents Nothing =
   insertProject metrics connection userId projectId timestamp possibleTitle possibleProjectContents
@@ -198,19 +223,13 @@ saveProjectInner metrics connection userId projectId timestamp possibleTitle pos
 deleteProject :: DatabaseMetrics -> DBPool -> Text -> Text -> IO ()
 deleteProject metrics pool userId projectId = invokeAndMeasure (_deleteProjectMetrics metrics) $ usePool pool $ \connection -> do
   correctUser <- checkIfProjectOwnerWithConnection metrics connection userId projectId
-  print ("correctUser" :: Text, correctUser)
   let projectUpdate = Update
                     { uTable = projectTable
                     , uUpdateWith = updateEasy (set _7 $ toFields $ Just True)
                     , uWhere = \(projId, _, _, _, _, _, _) -> projId .=== toFields projectId
                     , uReturning = rCount
                     }
-  when correctUser $ void $ runUpdate_ connection projectUpdate
-  fromDB <- runSelect connection $ do
-    (rowProjectId, _, _, _, _, _, rowDeleted) <- projectSelect
-    where_ $ rowProjectId .=== toFields projectId
-    pure (rowProjectId, rowDeleted)
-  print ("fromDB" :: Text, fromDB :: [(Text, Maybe Bool)])
+  when correctUser $ void $ runUpdate connection projectUpdate
   unless correctUser $ throwM UserIDIncorrectException
 
 projectMetadataFields :: Text
@@ -235,7 +254,7 @@ projectMetataFromColumns (id, ownerId, ownerName, ownerPicture, title, createdAt
   let description = Nothing
    in ProjectMetadata{..}
 
-lookupProjectMetadata :: Maybe (ProjectFields -> Column PGBool) -> Maybe (UserDetailsFields -> Column PGBool) -> Connection -> IO [ProjectMetadata]
+lookupProjectMetadata :: Maybe (ProjectFields -> Column SqlBool) -> Maybe (UserDetailsFields -> Column SqlBool) -> Connection -> IO [ProjectMetadata]
 lookupProjectMetadata projectFilter userDetailsFilter connection = do
   metadataEntries <- runSelect connection $ do
     project@(projectId, ownerId, title, createdAt, modifiedAt, _, deleted) <- projectSelect
@@ -291,12 +310,12 @@ getShowcaseProjects metrics pool = invokeAndMeasure (_getShowcaseProjectsMetrics
 setShowcaseProjects :: DatabaseMetrics -> DBPool -> [Text] -> IO ()
 setShowcaseProjects metrics pool projectIds = invokeAndMeasure (_setShowcaseProjectsMetrics metrics) $ usePool pool $ \connection -> do
   let records = zip projectIds ([1..] :: [Int])
-  void $ runDelete_ connection $ Delete
+  void $ runDelete connection $ Delete
                                { dTable = showcaseTable
                                , dWhere = const $ toFields True
                                , dReturning = rCount
                                }
-  void $ runInsert_ connection $ Insert
+  void $ runInsert connection $ Insert
                                { iTable = showcaseTable
                                , iRows = fmap toFields records
                                , iReturning = rCount
@@ -315,13 +334,13 @@ getBool = getSingleValue False
 updateUserDetails :: DatabaseMetrics -> DBPool -> UserDetails -> IO ()
 updateUserDetails metrics pool UserDetails{..} = invokeAndMeasure (_updateUserDetailsMetrics metrics) $ usePool pool $ \connection -> do
   let userDetailsEntry = toFields (userId, email, name, picture)
-  let insertNew = void $ runInsert_ connection $ Insert
+  let insertNew = void $ runInsert connection $ Insert
                                                { iTable = userDetailsTable
                                                , iRows = [userDetailsEntry]
                                                , iReturning = rCount
                                                , iOnConflict = Nothing
                                                }
-  let updateOld = void $ runUpdate_ connection $ Update
+  let updateOld = void $ runUpdate connection $ Update
                                                { uTable = userDetailsTable
                                                , uUpdateWith = updateEasy (\_ -> toFields (userId, email, name, picture))
                                                , uWhere = (\(rowUserId, _, _, _) -> rowUserId .=== toFields userId)
@@ -347,33 +366,49 @@ getUserDetails metrics pool userId = invokeAndMeasure (_getUserDetailsMetrics me
   pure $ fmap userDetailsFromRow $ listToMaybe userDetails
 
 userConfigurationToDecodedUserConfiguration :: UserConfiguration -> IO DecodedUserConfiguration
-userConfigurationToDecodedUserConfiguration (userId, encodedShortcutConfig) = do
+userConfigurationToDecodedUserConfiguration (userId, encodedShortcutConfig, encodedTheme) = do
   let decodeShortcutConfig conf = either fail return $ eitherDecodeStrict' $ encodeUtf8 conf
   decodedShortcutConfig <- traverse decodeShortcutConfig encodedShortcutConfig
+  let decodeTheme conf = either fail return $ eitherDecodeStrict' $ encodeUtf8 conf
+  decodedTheme <- traverse decodeTheme encodedTheme
   return $ DecodedUserConfiguration
               { id = userId
               , shortcutConfig = decodedShortcutConfig
+              , theme = decodedTheme
               }
 
 getUserConfiguration :: DatabaseMetrics -> DBPool -> Text -> IO (Maybe DecodedUserConfiguration)
 getUserConfiguration metrics pool userId = invokeAndMeasure (_getUserConfigurationMetrics metrics) $ usePool pool $ \connection -> do
   userConf <- fmap listToMaybe $ runSelect connection $ do
-    configurationRow@(rowUserId, _) <- userConfigurationSelect
+    configurationRow@(rowUserId, _, _) <- userConfigurationSelect
     where_ $ rowUserId .== toFields userId
     pure configurationRow
   traverse userConfigurationToDecodedUserConfiguration userConf
 
-saveUserConfiguration :: DatabaseMetrics -> DBPool -> Text -> Maybe Value -> IO ()
-saveUserConfiguration metrics pool userId updatedShortcutConfig = invokeAndMeasure (_saveUserConfigurationMetrics metrics) $ usePool pool $ \connection -> do
+saveUserConfiguration :: DatabaseMetrics -> DBPool -> Text -> Maybe Value -> Maybe Value -> IO ()
+saveUserConfiguration metrics pool userId updatedShortcutConfig updatedTheme = invokeAndMeasure (_saveUserConfigurationMetrics metrics) $ usePool pool $ \connection -> do
   encodedShortcutConfig <- do
     let encoded = fmap encode updatedShortcutConfig
     either (fail . show) pure $ traverse decodeUtf8' $ fmap BL.toStrict encoded
-  let newRecord = (toFields userId, toFields encodedShortcutConfig)
-  let insertConfig = void $ insert userConfigurationTable newRecord
-  let updateConfig = const $ void $ update userConfigurationTable (\(rowUserId, _) -> (rowUserId, toFields encodedShortcutConfig)) (\(rowUserId, _) -> rowUserId .== toFields userId)
-  runOpaleyeT connection $ transaction $ do
-    userConf <- queryFirst $ do
-      (rowUserId, _) <- userConfigurationSelect
+  encodedTheme <- do
+    let encoded = fmap encode updatedTheme
+    either (fail . show) pure $ traverse decodeUtf8' $ fmap BL.toStrict encoded
+  let newRecord = (toFields userId, toFields encodedShortcutConfig, toFields encodedTheme)
+  let insertConfig = void $ runInsert connection $ Insert
+                                                  { iTable = userConfigurationTable
+                                                  , iRows = [newRecord]
+                                                  , iReturning = rCount
+                                                  , iOnConflict = Nothing
+                                                  }
+  let updateConfig = const $ void $ runUpdate connection $ Update
+                                                          { uTable = userConfigurationTable
+                                                          , uUpdateWith = updateEasy (\(rowUserId, _, _) -> (rowUserId, toFields encodedShortcutConfig, toFields encodedTheme))
+                                                          , uWhere = (\(rowUserId, _, _) -> rowUserId .=== toFields userId)
+                                                          , uReturning = rCount
+                                                          }
+  withTransaction connection $ do
+    userConf <- fmap listToMaybe $ runSelect connection $ do
+      (rowUserId, _, _) <- userConfigurationSelect
       where_ $ rowUserId .== toFields userId
       pure rowUserId
     maybe insertConfig updateConfig (userConf :: Maybe Text)
@@ -384,3 +419,157 @@ checkIfProjectIDReserved metrics pool projectId = invokeAndMeasure (_checkIfProj
     rowProjectId <- projectIDSelect
     where_ $ rowProjectId .== toFields projectId
   pure $ Protolude.not $ Protolude.null entries
+
+projectContentTreeFromDecodedProject :: DecodedProject -> Either Text ProjectContentTreeRoot
+projectContentTreeFromDecodedProject decodedProject = do
+  let possibleContentOfProject = firstOf (field @"content" . key "projectContents") decodedProject
+  case possibleContentOfProject of
+    Nothing               -> Left "No projectContents found."
+    Just contentOfProject -> do
+      case fromJSON contentOfProject of
+        Error err      -> Left $ toS err
+        Success result -> Right result
+
+updateGithubAuthenticationDetails :: DatabaseMetrics -> DBPool -> GithubAuthenticationDetails -> IO ()
+updateGithubAuthenticationDetails metrics pool GithubAuthenticationDetails{..} = invokeAndMeasure (_updateGithubAuthenticationDetailsMetrics metrics) $ usePool pool $ \connection -> do
+  let githubAuthenticationDetailsEntry = toFields (userId, accessToken, refreshToken, expiresAt)
+  void $ runDelete connection $ Delete
+                               { dTable = githubAuthenticationTable
+                               , dWhere = (\(rowUserId, _, _, _) -> rowUserId .=== toFields userId)
+                               , dReturning = rCount
+                               }
+  void $ runInsert connection $ Insert
+                               { iTable = githubAuthenticationTable
+                               , iRows = [githubAuthenticationDetailsEntry]
+                               , iReturning = rCount
+                               , iOnConflict = Nothing
+                               }
+
+githubAuthenticationDetailsFromRow :: (Text, Text, Maybe Text, Maybe UTCTime) -> GithubAuthenticationDetails
+githubAuthenticationDetailsFromRow (userId, accessToken, refreshToken, expiresAt) = GithubAuthenticationDetails{..}
+
+lookupGithubAuthenticationDetails :: DatabaseMetrics -> DBPool -> Text -> IO (Maybe GithubAuthenticationDetails)
+lookupGithubAuthenticationDetails metrics pool userId = invokeAndMeasure (_getGithubAuthenticationDetailsMetrics metrics) $ usePool pool $ \connection -> do
+  githubAuthenticationDetails <- runSelect connection $ do
+    githubAuthenticationDetailsRow@(rowUserId, _, _, _) <- githubAuthenticationSelect
+    where_ $ rowUserId .== toFields userId
+    pure githubAuthenticationDetailsRow
+  pure $ fmap githubAuthenticationDetailsFromRow $ listToMaybe githubAuthenticationDetails
+
+insertCollaborationControl :: Connection -> Text -> Text -> Text -> UTCTime -> IO ()
+insertCollaborationControl connection userId projectId collaborationEditor currentTime = do
+  let newLastSeenTimeout = addUTCTime collaborationLastSeenTimeoutWindow currentTime
+  void $ runInsert connection $ Insert
+                                { iTable = projectCollaborationTable
+                                , iRows = [toFields (projectId, collaborationEditor, newLastSeenTimeout, Just userId)]
+                                , iReturning = rCount
+                                , iOnConflict = Nothing
+                                }
+
+collaborationLastSeenTimeoutWindow :: NominalDiffTime
+collaborationLastSeenTimeoutWindow = secondsToNominalDiffTime 20
+
+sameOwner :: FieldNullable SqlText -> Text -> Field SqlBool
+sameOwner rowPossibleUserId userId = matchNullable (toFields True) (.== toFields userId) rowPossibleUserId
+
+sameProject :: Field SqlText -> Text -> Field SqlBool
+sameProject rowProjectId projectId =
+  rowProjectId .== toFields projectId
+
+sameProjectAndOwner :: Field SqlText -> FieldNullable SqlText -> Text -> Text -> Field SqlBool
+sameProjectAndOwner rowProjectId rowPossibleUserId projectId userId =
+  sameProject rowProjectId projectId .&& sameOwner rowPossibleUserId userId
+
+updateCollaborationLastSeenTimeout :: Connection -> Text -> Text -> Text -> UTCTime -> IO ()
+updateCollaborationLastSeenTimeout connection userId projectId newCollaborationEditor newLastSeenTimeout = do
+  void $ runUpdate connection $ Update
+                               { uTable = projectCollaborationTable
+                               , uUpdateWith = updateEasy (\(rowProjectId, _, _, _) -> (rowProjectId, toFields newCollaborationEditor, toFields newLastSeenTimeout, toFields $ Just userId))
+                               , uWhere = (\(rowProjectId, _, _, rowPossibleUserId) -> sameProjectAndOwner rowProjectId rowPossibleUserId projectId userId)
+                               , uReturning = rCount
+                               }
+
+maybeClaimExistingCollaborationControl :: Connection -> Text -> Maybe Text -> Text -> Text -> Text -> UTCTime -> UTCTime -> IO Bool
+maybeClaimExistingCollaborationControl connection userId currentPossibleUserId projectId currentCollaborationEditor newCollaborationEditor currentLastSeenTimeout currentTime
+  -- Different user, but the current entry means they cannot claim control because the timeout hasn't expired.
+  | Just userId /= currentPossibleUserId
+      && isJust currentPossibleUserId
+      && currentLastSeenTimeout >= currentTime              = pure False
+  -- The same editor is trying to claim control again, so allow them to update it.
+  | currentCollaborationEditor == newCollaborationEditor    = updateLastSeen
+  -- The same user is trying to claim control but for what must be a different editor and the timeout has expired.
+  | currentLastSeenTimeout < currentTime                    = updateLastSeen
+  -- Refuse in all other cases.
+  | otherwise                                               = pure False
+  where
+    newTimeout = addUTCTime collaborationLastSeenTimeoutWindow currentTime
+    updateLastSeen = updateCollaborationLastSeenTimeout connection userId projectId newCollaborationEditor newTimeout >> pure True
+
+maybeClaimCollaborationControl :: DatabaseMetrics -> DBPool -> IO UTCTime -> Text -> Text -> Text -> IO Bool
+maybeClaimCollaborationControl metrics pool getTime userId projectId collaborationEditor = do
+  currentTime <- getTime
+  invokeAndMeasure (_maybeClaimCollaborationControlMetrics metrics) $ usePool pool $ \connection -> do
+    withTransaction connection $ do
+      -- Find any existing entries (should only be one).
+      collaborationEditorIdsWithLastSeen <- runSelect connection $ do
+        (rowProjectId, rowCollaborationEditor, rowLastSeenTimeout, rowPossibleUserId) <- projectCollaborationSelect
+        where_ $ sameProject rowProjectId projectId
+        pure (rowCollaborationEditor, rowLastSeenTimeout, rowPossibleUserId)
+      -- Get the first if there is one.
+      let maybeCurrentCollaborationEditorAndLastSeen = listToMaybe collaborationEditorIdsWithLastSeen
+      -- Create the expression that inserts an entry and returns true to indicate this was successfully claimed.
+      let insertCurrent = insertCollaborationControl connection userId projectId collaborationEditor currentTime >> pure True
+      -- Handle the current state.
+      case maybeCurrentCollaborationEditorAndLastSeen of
+        -- There's no current entry in the table, so add one.
+        Nothing -> insertCurrent
+        -- If the current entry is the same as the one we're trying to insert return true, otherwise
+        -- return false but in either case make no changes to the database.
+        Just (currentCollaborationEditor, currentLastSeenTimeout, currentPossibleUserId) ->
+          maybeClaimExistingCollaborationControl connection userId currentPossibleUserId projectId currentCollaborationEditor collaborationEditor currentLastSeenTimeout currentTime
+
+forceClaimCollaborationControl :: DatabaseMetrics -> DBPool -> IO UTCTime -> Text -> Text -> Text -> IO ()
+forceClaimCollaborationControl metrics pool getTime userId projectId collaborationEditor = do
+  currentTime <- getTime
+  invokeAndMeasure (_forceClaimCollaborationControlMetrics metrics) $ usePool pool $ \connection -> do
+    withTransaction connection $ do
+      -- Delete any and all values for this project.
+      void $ runDelete connection $ Delete
+                               { dTable = projectCollaborationTable
+                               , dWhere = (\(rowProjectId, _, _, _) -> rowProjectId .=== toFields projectId)
+                               , dReturning = rCount
+                               }
+      -- Inserts an entry for this collaborator.
+      insertCollaborationControl connection userId projectId collaborationEditor currentTime
+
+releaseCollaborationControl :: DatabaseMetrics -> DBPool -> Text -> Text -> Text -> IO ()
+releaseCollaborationControl metrics pool userId projectId collaborationEditor = do
+  invokeAndMeasure (_releaseCollaborationControlMetrics metrics) $ usePool pool $ \connection -> do
+    -- Delete any matching values for this project and collaboration editor.
+    void $ runDelete connection $ Delete
+                              { dTable = projectCollaborationTable
+                              , dWhere = (\(rowProjectId, rowCollaborationEditor, _, rowPossibleUserId) -> sameProjectAndOwner rowProjectId rowPossibleUserId projectId userId .&& rowCollaborationEditor .== toFields collaborationEditor)
+                              , dReturning = rCount
+                              }
+
+deleteCollaborationControlByCollaborator :: DatabaseMetrics -> DBPool -> Text -> Text -> IO ()
+deleteCollaborationControlByCollaborator metrics pool userId collaborationEditor = invokeAndMeasure (_deleteCollaborationControlByCollaboratorMetrics metrics) $ usePool pool $ \connection -> do
+  void $ runDelete connection $ Delete
+                               { dTable = projectCollaborationTable
+                               , dWhere = (\(_, rowCollaborationEditor, _, rowPossibleUserId) -> sameOwner rowPossibleUserId userId .&& rowCollaborationEditor .== toFields collaborationEditor)
+                               , dReturning = rCount
+                               }
+
+-- Treat anything last seen more than 1 hour ago as sufficiently in the past so as to be a candidate to be deleted.
+cleanupCollaborationControlThreshold :: NominalDiffTime
+cleanupCollaborationControlThreshold = negate $ secondsToNominalDiffTime (60 * 60)
+
+cleanupCollaborationControl :: DatabaseMetrics -> DBPool -> IO UTCTime -> IO ()
+cleanupCollaborationControl metrics pool getTime = invokeAndMeasure (_cleanupCollaborationControlMetrics metrics) $ usePool pool $ \connection -> do
+  currentTime <- getTime
+  let lastSeenThreshold = addUTCTime cleanupCollaborationControlThreshold currentTime
+  void $ runDelete connection $ Delete
+                               { dTable = projectCollaborationTable
+                               , dWhere = (\(_, _, rowLastSeenTimeout, _) -> rowLastSeenTimeout .< toFields lastSeenThreshold)
+                               , dReturning = rCount
+                               }

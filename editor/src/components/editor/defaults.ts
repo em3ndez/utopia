@@ -1,14 +1,18 @@
-import {
+import type {
   JSXElement,
+  JSXElementChildren,
+  JSExpression,
+} from '../../core/shared/element-template'
+import {
   jsxElement,
-  jsxAttributeValue,
+  jsExpressionValue,
   jsxElementName,
   jsxAttributesFromMap,
-  JSXElementChildren,
   emptyComments,
-  jsxTextBlock,
+  simpleAttribute,
 } from '../../core/shared/element-template'
-import { NormalisedFrame } from 'utopia-api'
+import type { NormalisedFrame } from 'utopia-api/core'
+import { defaultImageAttributes, insertableGridStyle } from '../shared/project-components'
 
 export function defaultSceneElement(
   uid: string,
@@ -17,35 +21,31 @@ export function defaultSceneElement(
   children: JSXElementChildren,
 ): JSXElement {
   const props = jsxAttributesFromMap({
-    'data-uid': jsxAttributeValue(uid, emptyComments),
-    'data-label': jsxAttributeValue(label, emptyComments),
-    style: jsxAttributeValue(
-      {
-        position: 'absolute',
-        ...frame,
-      },
-      emptyComments,
-    ),
+    'data-uid': jsExpressionValue(uid, emptyComments),
+    'data-label': jsExpressionValue(label, emptyComments),
+    style: defaultSceneElementStyle(frame),
   })
 
   return jsxElement(jsxElementName('Scene', []), uid, props, children)
 }
 
-export function defaultViewElement(uid: string): JSXElement {
-  return jsxElement(
-    jsxElementName('View', []),
-    uid,
-    jsxAttributesFromMap({
-      style: jsxAttributeValue(
-        {
-          backgroundColor: '#0091FFAA',
-          position: 'absolute',
-        },
-        emptyComments,
-      ),
-      'data-uid': jsxAttributeValue(uid, emptyComments),
-    }),
-    [],
+export function defaultSceneElementStyle(frame: NormalisedFrame | null): JSExpression {
+  return jsExpressionValue(
+    {
+      position: 'absolute',
+      ...frame,
+    },
+    emptyComments,
+  )
+}
+
+export function defaultElementStyle(): JSExpression {
+  return jsExpressionValue(
+    {
+      backgroundColor: '#aaaaaa33',
+      position: 'absolute',
+    },
+    emptyComments,
   )
 }
 
@@ -54,64 +54,56 @@ export function defaultAnimatedDivElement(uid: string): JSXElement {
     jsxElementName('animated', ['div']),
     uid,
     jsxAttributesFromMap({
-      style: jsxAttributeValue(
+      style: jsExpressionValue(
         {
-          backgroundColor: '#0091FFAA',
+          backgroundColor: '#aaaaaa33',
         },
         emptyComments,
       ),
-      'data-uid': jsxAttributeValue(uid, emptyComments),
+      'data-uid': jsExpressionValue(uid, emptyComments),
     }),
     [],
   )
 }
 
-export function defaultTransparentViewElement(uid: string): JSXElement {
+export function defaultUnstyledDivElement(uid: string): JSXElement {
   return jsxElement(
     jsxElementName('div', []),
     uid,
     jsxAttributesFromMap({
-      style: jsxAttributeValue(
-        {
-          position: 'absolute',
-        },
-        emptyComments,
-      ),
-      'data-uid': jsxAttributeValue(uid, emptyComments),
+      'data-uid': jsExpressionValue(uid, emptyComments),
     }),
     [],
   )
 }
 
-export function defaultTextElement(uid: string): JSXElement {
-  return jsxElement(
-    jsxElementName('Text', []),
-    uid,
-    jsxAttributesFromMap({
-      style: jsxAttributeValue(
-        {
-          fontSize: 16,
-        },
-        emptyComments,
-      ),
-      'data-uid': jsxAttributeValue(uid, emptyComments),
-    }),
-    [jsxTextBlock('Text')],
+export function defaultTextElementStyle(): JSExpression {
+  return jsExpressionValue(
+    {
+      fontSize: 16,
+    },
+    emptyComments,
+  )
+}
+
+export function defaultRectangleElementStyle(): JSExpression {
+  return jsExpressionValue(
+    {
+      backgroundColor: '#FF69B4AB',
+      position: 'absolute',
+    },
+    emptyComments,
   )
 }
 
 export function defaultRectangleElement(uid: string): JSXElement {
   return jsxElement(
-    jsxElementName('Rectangle', []),
+    jsxElementName('div', []),
     uid,
     jsxAttributesFromMap({
-      style: jsxAttributeValue(
-        {
-          backgroundColor: '#0091FFAA',
-        },
-        emptyComments,
-      ),
-      'data-uid': jsxAttributeValue(uid, emptyComments),
+      style: defaultRectangleElementStyle(),
+      'data-uid': jsExpressionValue(uid, emptyComments),
+      'data-label': jsExpressionValue('Rectangle', emptyComments),
     }),
     [],
   )
@@ -122,13 +114,8 @@ export function defaultEllipseElement(uid: string): JSXElement {
     jsxElementName('Ellipse', []),
     uid,
     jsxAttributesFromMap({
-      style: jsxAttributeValue(
-        {
-          backgroundColor: '#0091FFAA',
-        },
-        emptyComments,
-      ),
-      'data-uid': jsxAttributeValue(uid, emptyComments),
+      style: defaultElementStyle(),
+      'data-uid': jsExpressionValue(uid, emptyComments),
     }),
     [],
   )
@@ -139,15 +126,69 @@ export function defaultDivElement(uid: string): JSXElement {
     jsxElementName('div', []),
     uid,
     jsxAttributesFromMap({
-      style: jsxAttributeValue(
+      style: defaultElementStyle(),
+      'data-uid': jsExpressionValue(uid, emptyComments),
+    }),
+    [],
+  )
+}
+
+export function defaultSpanElement(uid: string): JSXElement {
+  return jsxElement(
+    jsxElementName('span', []),
+    uid,
+    jsxAttributesFromMap({
+      style: jsExpressionValue(
         {
-          backgroundColor: '#0091FFAA',
           position: 'absolute',
+          wordBreak: 'break-word',
         },
         emptyComments,
       ),
-      'data-uid': jsxAttributeValue(uid, emptyComments),
+      'data-uid': jsExpressionValue(uid, emptyComments),
     }),
     [],
+  )
+}
+
+export function defaultImgElement(uid: string): JSXElement {
+  return jsxElement(
+    jsxElementName('img', []),
+    uid,
+    [...defaultImageAttributes(), simpleAttribute('data-uid', uid)],
+    [],
+  )
+}
+
+export function defaultButtonElement(uid: string): JSXElement {
+  return jsxElement(
+    jsxElementName('button', []),
+    uid,
+    jsxAttributesFromMap({
+      'data-uid': jsExpressionValue(uid, emptyComments),
+      style: jsExpressionValue({ position: 'absolute' }, emptyComments),
+    }),
+    [],
+  )
+}
+
+export function defaultGridElement(uid: string): JSXElement {
+  return jsxElement(
+    jsxElementName('div', []),
+    uid,
+    jsxAttributesFromMap({
+      'data-uid': jsExpressionValue(uid, emptyComments),
+      style: jsExpressionValue(insertableGridStyle(), emptyComments),
+    }),
+    [],
+  )
+}
+
+export function defaultFlexRowOrColStyle(): JSExpression {
+  return jsExpressionValue(
+    {
+      position: 'absolute',
+    },
+    emptyComments,
   )
 }

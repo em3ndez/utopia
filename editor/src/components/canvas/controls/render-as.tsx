@@ -1,33 +1,32 @@
 import React from 'react'
-import { useEditorState, useRefEditorState } from '../../editor/store/store-hook'
-import { usePropControlledRef_DANGEROUS } from '../../inspector/common/inspector-utils'
-import { betterReactMemo, getControlStyles, SelectOption, Utils } from '../../../uuiui-deps'
-import * as EP from '../../../core/shared/element-path'
+import { Substores, useEditorState, useRefEditorState } from '../../editor/store/store-hook'
+import type { SelectOption } from '../../../uuiui-deps'
 import * as EditorActions from '../../editor/actions/action-creators'
 import { UIGridRow } from '../../inspector/widgets/ui-grid-row'
 import { PopupList } from '../../../uuiui'
-import { JSXElementName, jsxElementNameEquals } from '../../../core/shared/element-template'
+import type { JSXElementName } from '../../../core/shared/element-template'
+import { jsxElementNameEquals } from '../../../core/shared/element-template'
 import { getElementsToTarget } from '../../inspector/common/inspector-utils'
-import { Imports } from '../../../core/shared/project-file-types'
-import {
-  getComponentGroups,
-  getComponentGroupsAsSelectOptions,
-  InsertableComponent,
-} from '../../../components/shared/project-components'
+import type { Imports } from '../../../core/shared/project-file-types'
+import type { InsertableComponent } from '../../../components/shared/project-components'
+import { getComponentGroupsAsSelectOptions } from '../../../components/shared/project-components'
 import { usePossiblyResolvedPackageDependencies } from '../../../components/editor/npm-dependency/npm-dependency'
 import { MetadataUtils } from '../../../core/model/element-metadata-utils'
+import { useDispatch } from '../../editor/store/dispatch-context'
 
-export const RenderAsRow = betterReactMemo('RenderAsRow', () => {
-  const dispatch = useEditorState((store) => {
-    return store.dispatch
-  }, 'RenderAsRow dispatch')
+export const RenderAsRow = React.memo(() => {
+  const dispatch = useDispatch()
 
-  const selectedElementName = useEditorState((store) => {
-    return MetadataUtils.getJSXElementNameFromMetadata(
-      store.editor.jsxMetadata,
-      store.editor.selectedViews[0],
-    )
-  }, 'RenderAsRow selectedElementName')
+  const selectedElementName = useEditorState(
+    Substores.metadata,
+    (store) => {
+      return MetadataUtils.getJSXElementNameFromMetadata(
+        store.editor.jsxMetadata,
+        store.editor.selectedViews[0],
+      )
+    },
+    'RenderAsRow selectedElementName',
+  )
 
   const refElementsToTargetForUpdates = useRefEditorState((store) => {
     return getElementsToTarget(store.editor.selectedViews)
@@ -36,7 +35,11 @@ export const RenderAsRow = betterReactMemo('RenderAsRow', () => {
   const onElementTypeChange = React.useCallback(
     (newElementName: JSXElementName, importsToAdd: Imports) => {
       const actions = refElementsToTargetForUpdates.current.flatMap((path) => {
-        return EditorActions.updateJSXElementName(path, newElementName, importsToAdd)
+        return EditorActions.updateJSXElementName(
+          path,
+          { type: 'JSX_ELEMENT', name: newElementName },
+          importsToAdd,
+        )
       })
       dispatch(actions, 'everyone')
     },
@@ -46,23 +49,38 @@ export const RenderAsRow = betterReactMemo('RenderAsRow', () => {
   const onSelect = React.useCallback(
     (selectOption: SelectOption) => {
       const value: InsertableComponent = selectOption.value
-      onElementTypeChange(value.element.name, value.importsToAdd)
+      const element = value.element()
+      if (element.type !== 'JSX_ELEMENT') {
+        return
+      }
+      onElementTypeChange(element.name, value.importsToAdd)
     },
     [onElementTypeChange],
   )
 
   const dependencies = usePossiblyResolvedPackageDependencies()
 
-  const { packageStatus, propertyControlsInfo, projectContents, fullPath } = useEditorState(
+  const { packageStatus, propertyControlsInfo } = useEditorState(
+    Substores.restOfEditor,
     (store) => {
       return {
         packageStatus: store.editor.nodeModules.packageStatus,
         propertyControlsInfo: store.editor.propertyControlsInfo,
-        projectContents: store.editor.projectContents,
-        fullPath: store.editor.canvas.openFile?.filename ?? null,
       }
     },
     'RenderAsRow',
+  )
+
+  const projectContents = useEditorState(
+    Substores.projectContents,
+    (store) => store.editor.projectContents,
+    'RenderAsRow projectContents',
+  )
+
+  const fullPath = useEditorState(
+    Substores.canvas,
+    (store) => store.editor.canvas.openFile?.filename ?? null,
+    'RenderAsRow fullPath',
   )
 
   const insertableComponents = React.useMemo(() => {
@@ -70,6 +88,7 @@ export const RenderAsRow = betterReactMemo('RenderAsRow', () => {
       return []
     } else {
       return getComponentGroupsAsSelectOptions(
+        'insert',
         packageStatus,
         propertyControlsInfo,
         projectContents,
@@ -85,8 +104,9 @@ export const RenderAsRow = betterReactMemo('RenderAsRow', () => {
       for (const selectOptionGroup of insertableComponents) {
         for (const selectOption of selectOptionGroup.options ?? []) {
           const insertableComponent: InsertableComponent = selectOption.value
-          if (insertableComponent != null) {
-            if (jsxElementNameEquals(insertableComponent.element.name, nameToSearchFor)) {
+          const element = insertableComponent.element()
+          if (insertableComponent != null && element.type === 'JSX_ELEMENT') {
+            if (jsxElementNameEquals(element.name, nameToSearchFor)) {
               return selectOption
             }
           }

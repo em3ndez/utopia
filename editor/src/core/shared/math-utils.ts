@@ -1,5 +1,5 @@
-import { stripNulls } from './array-utils'
-import { Either, left, right, mapEither } from './either'
+import type { Either } from './either'
+import { left, right, mapEither } from './either'
 
 enum RawModifier {}
 enum WindowModifier {}
@@ -21,8 +21,27 @@ export type Point<C extends CoordinateMarker> = PointInner & C
 export type RawPoint = RawModifier & PointInner
 export type WindowPoint = WindowModifier & PointInner
 export type CanvasPoint = CanvasModifier & PointInner
+
+export type Delta = {
+  x: number
+  y: number
+}
+
+export interface Segment<C extends CoordinateMarker> {
+  a: Point<C>
+  b: Point<C>
+}
+
+export type CanvasSegment = Segment<CanvasModifier>
+export function canvasSegment(a: CanvasPoint, b: CanvasPoint): CanvasSegment {
+  return { a: a, b: b }
+}
+
 export function canvasPoint(p: PointInner): CanvasPoint {
   return p as CanvasPoint
+}
+export function localPoint(p: PointInner): LocalPoint {
+  return p as LocalPoint
 }
 export function windowPoint(p: PointInner): WindowPoint {
   return p as WindowPoint
@@ -35,6 +54,14 @@ export type WindowVector = WindowModifier & PointInner
 export type CanvasVector = CanvasModifier & PointInner
 export type LocalVector = LocalModifier & PointInner
 export type UnsafePoint = PointInner
+
+export function canvasVector(vector: PointInner): CanvasVector {
+  return vector as CanvasVector
+}
+
+export function windowVector(vector: PointInner): WindowVector {
+  return vector as WindowVector
+}
 
 export type Circle = {
   cx: number
@@ -61,27 +88,67 @@ export function size(width: number, height: number): Size {
   }
 }
 
-export type RectangleInner = {
+export function sizeFromRectangle(rectangle: Rectangle<any>): Size {
+  return size(rectangle.width, rectangle.height)
+}
+
+export type SimpleRectangle = {
   x: number
   y: number
   width: number
   height: number
 }
 
-export type SimpleRectangle = RectangleInner
-export type Rectangle<C extends CoordinateMarker> = RectangleInner & C
-export type WindowRectangle = WindowModifier & RectangleInner
-export type CanvasRectangle = CanvasModifier & RectangleInner
-export type LocalRectangle = LocalModifier & RectangleInner
-export type NodeGraphRectangle = NodeGraphModifier & RectangleInner
+export type Rectangle<C extends CoordinateMarker> = SimpleRectangle & C
+export type WindowRectangle = WindowModifier & SimpleRectangle
+export type CanvasRectangle = CanvasModifier & SimpleRectangle
+export type LocalRectangle = LocalModifier & SimpleRectangle
+export type NodeGraphRectangle = NodeGraphModifier & SimpleRectangle
+
+export type InfinityRectangle<C extends CoordinateMarker> = { type: 'INFINITY_RECTANGLE' } & C
+
+export const infinityRectangle = { type: 'INFINITY_RECTANGLE' }
+export const infinityCanvasRectangle = infinityRectangle as InfinityRectangle<CanvasModifier>
+export const infinityLocalRectangle = infinityRectangle as InfinityRectangle<LocalModifier>
+
+export type MaybeInfinityRectangle<C extends CoordinateMarker> = Rectangle<C> | InfinityRectangle<C>
+export type MaybeInfinityCanvasRectangle = MaybeInfinityRectangle<CanvasModifier>
+export type MaybeInfinityLocalRectangle = MaybeInfinityRectangle<LocalModifier>
+
+export function isInfinityRectangle<C extends CoordinateMarker>(
+  value: MaybeInfinityRectangle<C>,
+): value is InfinityRectangle<C> {
+  return 'type' in value && value.type === 'INFINITY_RECTANGLE'
+}
+
+export function isFiniteRectangle<C extends CoordinateMarker>(
+  r: MaybeInfinityRectangle<C>,
+): r is Rectangle<C> {
+  return !isInfinityRectangle(r)
+}
+
+export function isNotNullFiniteRectangle<C extends CoordinateMarker>(
+  r: MaybeInfinityRectangle<C> | null,
+): r is Rectangle<C> {
+  return r != null && isFiniteRectangle(r)
+}
+
+export function forceFiniteRectangle<C extends CoordinateMarker>(
+  r: MaybeInfinityRectangle<C> | null,
+): Rectangle<C> {
+  if (isNotNullFiniteRectangle(r)) {
+    return r
+  }
+  throw new Error('invariant: we expected a finite Rectangle')
+}
 
 export function canvasRectangle(rectangle: null | undefined): null
-export function canvasRectangle(rectangle: RectangleInner): CanvasRectangle
+export function canvasRectangle(rectangle: SimpleRectangle): CanvasRectangle
 export function canvasRectangle(
-  rectangle: RectangleInner | null | undefined,
+  rectangle: SimpleRectangle | null | undefined,
 ): CanvasRectangle | null
 export function canvasRectangle(
-  rectangle: RectangleInner | null | undefined,
+  rectangle: SimpleRectangle | null | undefined,
 ): CanvasRectangle | null {
   if (rectangle == null) {
     return null
@@ -90,15 +157,41 @@ export function canvasRectangle(
 }
 
 export function localRectangle(rectangle: null | undefined): null
-export function localRectangle(rectangle: RectangleInner): LocalRectangle
-export function localRectangle(rectangle: RectangleInner | null | undefined): LocalRectangle | null
+export function localRectangle(rectangle: SimpleRectangle): LocalRectangle
+export function localRectangle(rectangle: SimpleRectangle | null | undefined): LocalRectangle | null
 export function localRectangle(
-  rectangle: RectangleInner | null | undefined,
+  rectangle: SimpleRectangle | null | undefined,
 ): LocalRectangle | null {
   if (rectangle == null) {
     return null
   }
   return rectangle as LocalRectangle
+}
+
+export function windowRectangle(rectangle: null | undefined): null
+export function windowRectangle(rectangle: SimpleRectangle): WindowRectangle
+export function windowRectangle(
+  rectangle: SimpleRectangle | null | undefined,
+): WindowRectangle | null
+export function windowRectangle(
+  rectangle: SimpleRectangle | null | undefined,
+): WindowRectangle | null {
+  if (rectangle == null) {
+    return null
+  }
+  return rectangle as WindowRectangle
+}
+
+export function zeroRectIfNullOrInfinity<C extends CoordinateMarker>(
+  r: MaybeInfinityRectangle<C> | null | undefined,
+): Rectangle<C> {
+  return r == null || isInfinityRectangle(r) ? (zeroRectangle as Rectangle<C>) : r
+}
+
+export function nullIfInfinity<C extends CoordinateMarker>(
+  r: MaybeInfinityRectangle<C> | null | undefined,
+): Rectangle<C> | null {
+  return r == null || isInfinityRectangle(r) ? null : r
 }
 
 export function numbersEqual(l: number, r: number): boolean {
@@ -164,6 +257,7 @@ export const zeroRectangle = {
 }
 export const zeroCanvasRect = zeroRectangle as CanvasRectangle
 export const zeroLocalRect = zeroRectangle as LocalRectangle
+export const zeroWindowRect = zeroRectangle as WindowRectangle
 export const zeroCanvasPoint = zeroPoint as CanvasPoint
 
 export function zeroRectangleAtPoint<C extends CoordinateMarker>(p: Point<C>): Rectangle<C> {
@@ -212,23 +306,49 @@ export function rectOrigin<C extends CoordinateMarker>(rectangle: Rectangle<C>):
   } as Point<C>
 }
 
-export function rectSize(rectangle: Rectangle<any>): Size {
-  return {
-    width: rectangle.width,
-    height: rectangle.height,
-  }
+export function sizeFitsInTarget(sizeToCheck: Size, target: Size): boolean {
+  return sizeToCheck.width <= target.width && sizeToCheck.height <= target.height
 }
 
-export function setRectSize<C extends CoordinateMarker>(
-  rectangle: Rectangle<C>,
-  sizeToSet: Size,
-): Rectangle<C> {
-  return {
-    x: rectangle.x,
-    y: rectangle.y,
-    width: sizeToSet.width,
-    height: sizeToSet.height,
-  } as Rectangle<C>
+export function rectangleContainsRectangle(
+  outer: CanvasRectangle,
+  inner: CanvasRectangle,
+): boolean {
+  return (
+    outer.x < inner.x &&
+    inner.x + inner.width < outer.x + outer.width &&
+    outer.y < inner.y &&
+    inner.y + inner.height < outer.y + outer.height
+  )
+}
+
+export function rectangleContainsRectangleInclusive(
+  outer: CanvasRectangle,
+  inner: CanvasRectangle,
+): boolean {
+  return (
+    outer.x <= inner.x &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    outer.y <= inner.y &&
+    inner.y + inner.height <= outer.y + outer.height
+  )
+}
+
+export function rectangleFromTLBR(
+  topLeft: CanvasPoint,
+  bottomRight: CanvasPoint,
+  preventZeroSize?: boolean,
+): CanvasRectangle {
+  function maybePreventZeroSize(n: number) {
+    return preventZeroSize === true && n === 0 ? 1 : n
+  }
+
+  return canvasRectangle({
+    x: maybePreventZeroSize(topLeft.x),
+    y: maybePreventZeroSize(topLeft.y),
+    width: maybePreventZeroSize(bottomRight.x - topLeft.x),
+    height: maybePreventZeroSize(bottomRight.y - topLeft.y),
+  })
 }
 
 export function rectContainsPoint<C extends CoordinateMarker>(
@@ -240,6 +360,18 @@ export function rectContainsPoint<C extends CoordinateMarker>(
     rectangle.y < p.y &&
     rectangle.x + rectangle.width > p.x &&
     rectangle.y + rectangle.height > p.y
+  )
+}
+
+export function rectContainsPointInclusive<C extends CoordinateMarker>(
+  rectangle: Rectangle<C>,
+  p: Point<C>,
+): boolean {
+  return (
+    rectangle.x <= p.x &&
+    rectangle.y <= p.y &&
+    rectangle.x + rectangle.width >= p.x &&
+    rectangle.y + rectangle.height >= p.y
   )
 }
 
@@ -287,8 +419,47 @@ export function distance<C extends CoordinateMarker>(from: Point<C>, to: Point<C
   return magnitude({ x: from.x - to.x, y: from.y - to.y } as Vector<C>)
 }
 
+export function distanceFromPointToRectangle<C extends CoordinateMarker>(
+  p: Point<C>,
+  rectangle: Rectangle<C>,
+): number {
+  // Normalize the rectangle to ensure positive width and height
+  const normalizedRect = normalizeRect(rectangle)
+
+  // Calculate the nearest point on the rectangle to the given point
+  const nearestX = Math.max(
+    normalizedRect.x,
+    Math.min(p.x, normalizedRect.x + normalizedRect.width),
+  )
+  const nearestY = Math.max(
+    normalizedRect.y,
+    Math.min(p.y, normalizedRect.y + normalizedRect.height),
+  )
+
+  // If the nearest point is the same as the given point, it's inside or on the edge of the rectangle
+  if (nearestX === p.x && nearestY === p.y) {
+    return 0
+  }
+
+  // Calculate the distance between the nearest point and the given point
+  return distance(p, { x: nearestX, y: nearestY } as Point<C>)
+}
+
 export function product<C extends CoordinateMarker>(a: Point<C>, b: Point<C>): number {
   return a.x * b.x + a.y * b.y
+}
+
+export function pointIsClockwiseFromLine<C extends CoordinateMarker>(
+  targetPoint: Point<C>,
+  linePointA: Point<C>,
+  linePointB: Point<C>,
+): boolean {
+  // The order of line points a and b are important, as they determine which direction the line is pointing in,
+  // and therefore which direction is clockwise from it
+  return (
+    (linePointB.x - linePointA.x) * (targetPoint.y - linePointA.y) >
+    (linePointB.y - linePointA.y) * (targetPoint.x - linePointA.x)
+  )
 }
 
 export function vectorFromPoints<C extends CoordinateMarker>(
@@ -406,6 +577,31 @@ export function rectangleIntersection<C extends CoordinateMarker>(
   }
 }
 
+export function doRectanglesIntersect<C extends CoordinateMarker>(
+  rect1: MaybeInfinityRectangle<C>,
+  rect2: MaybeInfinityRectangle<C>,
+): boolean {
+  if (isInfinityRectangle(rect1) || isInfinityRectangle(rect2)) {
+    // Infinity rectangles intersect with anything and everything.
+    return true
+  } else {
+    return rectangleIntersection(rect1, rect2) != null
+  }
+}
+
+export function anyRectanglesIntersect<C extends CoordinateMarker>(
+  rectangles: Array<MaybeInfinityRectangle<C>>,
+): boolean {
+  for (let firstIndex = 0; firstIndex < rectangles.length; firstIndex++) {
+    for (let secondIndex = firstIndex + 1; secondIndex < rectangles.length; secondIndex++) {
+      if (doRectanglesIntersect(rectangles[firstIndex], rectangles[secondIndex])) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 export function pointDifference<C extends CoordinateMarker>(
   from: Point<C>,
   to: Point<C>,
@@ -452,6 +648,17 @@ export function combineRectangles<C extends CoordinateMarker>(
     width: first.width + second.width,
     height: first.height + second.height,
   } as Rectangle<C>
+}
+
+// Copied from array-utils.ts to prevent a cyclic dependency
+function stripNulls<T>(array: Array<T | null | undefined>): Array<T> {
+  var workingArray: Array<T> = []
+  for (const value of array) {
+    if (value !== null && value !== undefined) {
+      workingArray.push(value)
+    }
+  }
+  return workingArray
 }
 
 export function boundingRectangleArray<C extends CoordinateMarker>(
@@ -659,11 +866,31 @@ export function rectFromPointVector<C extends CoordinateMarker>(
   return normalizeRect(rectangle)
 }
 
+export function rectFromTwoPoints<C extends CoordinateMarker>(
+  corner: Point<C>,
+  oppositeCorner: Point<C>,
+): Rectangle<C> {
+  return rectFromPointVector(corner, vectorDifference(corner, oppositeCorner), false)
+}
+
 export function rectSizeToVector<C extends CoordinateMarker>(sizeOfVector: Size): Point<C> {
   return {
     x: sizeOfVector.width,
     y: sizeOfVector.height,
   } as Point<C>
+}
+
+export const roundToNearestWhole = (x: number) => roundTo(x, 0)
+
+export function roundRectangleToNearestWhole<C extends CoordinateMarker>(
+  rectangle: Rectangle<C>,
+): Rectangle<C> {
+  return {
+    x: roundToNearestWhole(rectangle.x),
+    y: roundToNearestWhole(rectangle.y),
+    width: roundToNearestWhole(rectangle.width),
+    height: roundToNearestWhole(rectangle.height),
+  } as Rectangle<C>
 }
 
 export function transformFrameUsingBoundingBox<C extends CoordinateMarker>(
@@ -734,13 +961,6 @@ export function lineIntersection<C extends CoordinateMarker>(
   } as Point<C>
 }
 
-export function roundPointTo<C extends CoordinateMarker>(p: Point<C>, precision: number): Point<C> {
-  return {
-    x: roundTo(p.x, precision),
-    y: roundTo(p.y, precision),
-  } as Point<C>
-}
-
 export function roundTo(number: number, digits: number = 0): number {
   const multiplicator = Math.pow(10, digits)
   const n = parseFloat((number * multiplicator).toFixed(11))
@@ -749,6 +969,13 @@ export function roundTo(number: number, digits: number = 0): number {
 
 export function roundToNearestHalf(n: number): number {
   return Math.round(n * 2) / 2
+}
+
+export function roundPointToNearestWhole<C extends CoordinateMarker>(p: Point<C>): Point<C> {
+  return {
+    x: roundToNearestWhole(p.x),
+    y: roundToNearestWhole(p.y),
+  } as Point<C>
 }
 
 export function roundPointToNearestHalf<C extends CoordinateMarker>(p: Point<C>): Point<C> {
@@ -813,13 +1040,43 @@ export function sizesEqual(first: Size | null, second: Size | null): boolean {
   }
 }
 
-export function rectanglesEqual(first: RectangleInner, second: RectangleInner): boolean {
-  return (
-    first.x === second.x &&
-    first.y === second.y &&
-    first.width === second.width &&
-    first.height === second.height
-  )
+export function rectanglesEqual<C extends CoordinateMarker>(
+  first: MaybeInfinityRectangle<C>,
+  second: MaybeInfinityRectangle<C>,
+): boolean {
+  if (isFiniteRectangle(first) && isFiniteRectangle(second)) {
+    return (
+      first.x === second.x &&
+      first.y === second.y &&
+      first.width === second.width &&
+      first.height === second.height
+    )
+  }
+  return isInfinityRectangle(first) && isInfinityRectangle(second)
+}
+
+export function roundedRectanglesEqual<C extends CoordinateMarker>(
+  first: Rectangle<C>,
+  second: Rectangle<C>,
+): boolean {
+  return rectanglesEqual(roundRectangleToNearestWhole(first), roundRectangleToNearestWhole(second))
+}
+
+export function getRoundedRectPointsAlongAxes<C extends CoordinateMarker>(
+  rectangle: Rectangle<C>,
+): { horizontalPoints: Array<number>; verticalPoints: Array<number> } {
+  return {
+    horizontalPoints: [
+      roundToNearestWhole(rectangle.x),
+      roundToNearestWhole(rectangle.x + rectangle.width / 2),
+      roundToNearestWhole(rectangle.x + rectangle.width),
+    ],
+    verticalPoints: [
+      roundToNearestWhole(rectangle.y),
+      roundToNearestWhole(rectangle.y + rectangle.height / 2),
+      roundToNearestWhole(rectangle.y + rectangle.height),
+    ],
+  }
 }
 
 export function proportion(from: number, to: number): number {
@@ -858,21 +1115,31 @@ export function forceNotNaN(n: number, errorMessage?: string): number {
   }
 }
 
-export function nanToZero(n: number): number {
+export const nanToZero = (n: number) => defaultIfNaN(n, 0)
+
+export function defaultIfNaN(n: number, defaultValue: number): number {
   if (isNaN(n)) {
-    return 0
+    return defaultValue
   } else {
     return n
   }
 }
 
-export function safeParseInt(s: string): number {
-  const n = Number.parseInt(s)
-  return forceNotNaN(n, `Unable to parse ${s}.`)
+export function safeParseInt(raw: string): number | null {
+  const result = Number.parseInt(raw)
+  return isNaN(result) ? null : result
 }
 
 export function clampValue(value: number, minimum: number, maximum: number): number {
   return Math.max(Math.min(value, maximum), minimum)
+}
+
+export function wrapValue(value: number, minimum: number, maximum: number): number {
+  const range = maximum - minimum + 1 // (+ 1) to include boundaries
+  if (range === 0) {
+    return minimum
+  }
+  return minimum + ((((value - minimum) % range) + range) % range)
 }
 
 export function parseNumber(value: string): Either<string, number> {
@@ -928,4 +1195,105 @@ export function clamp(min: number, max: number, value: number): number {
   } else {
     return value
   }
+}
+
+export function canvasRectangleToLocalRectangle(
+  canvasRect: CanvasRectangle,
+  parentRect: CanvasRectangle,
+): LocalRectangle {
+  const diff = roundPointToNearestHalf(pointDifference(parentRect, canvasRect))
+  return localRectangle({
+    x: diff.x,
+    y: diff.y,
+    width: canvasRect.width,
+    height: canvasRect.height,
+  })
+}
+
+// https://algs4.cs.princeton.edu/91primitives/
+function segmentsIntersect(a: CanvasSegment, b: CanvasSegment): boolean {
+  function counterClockwise(p1: CanvasPoint, p2: CanvasPoint, p3: CanvasPoint): number {
+    return (p2.y - p1.y) * (p3.x - p1.x) - (p3.y - p1.y) * (p2.x - p1.x)
+  }
+
+  if (counterClockwise(a.a, a.b, b.a) * counterClockwise(a.a, a.b, b.b) > 0) {
+    return false
+  }
+  if (counterClockwise(b.a, b.b, a.a) * counterClockwise(b.a, b.b, a.b) > 0) {
+    return false
+  }
+
+  return true
+}
+
+export function segmentIntersection(
+  leftSegment: CanvasSegment,
+  rightSegment: CanvasSegment,
+): CanvasPoint | null {
+  const pointOfIntersection = lineIntersection(
+    leftSegment.a,
+    leftSegment.b,
+    rightSegment.a,
+    rightSegment.b,
+  )
+  if (segmentsIntersect(leftSegment, rightSegment)) {
+    return pointOfIntersection
+  }
+  return null
+}
+
+/**
+ * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Remainder#description
+ * This is the modulo function, be careful as % is the remainder operator.
+ * The main difference is when using negative n, for example "-1 % 4 = -1" but "mod(-1, 4) = 3"
+ * For two values of the same sign, the two are equivalent, but when the operands are of different signs,
+ * the modulo result always has the same sign as the divisor, while the remainder has the same sign as the dividend,
+ * which can make them differ by one unit of d.
+ */
+export function mod(n: number, m: number): number {
+  return ((n % m) + m) % m
+}
+
+interface ResizeOptions {
+  desiredWidth: number
+  desiredHeight: number
+  keepAspectRatio: boolean
+  centerPoint: CanvasPoint
+}
+
+export function resizeCanvasRectangle(
+  rectangle: CanvasRectangle,
+  options: ResizeOptions,
+): CanvasRectangle {
+  const resizeI = (dimensions: { width: number; height: number }): CanvasRectangle => {
+    const { width, height } = dimensions
+    return canvasRectangle({
+      x: options.centerPoint.x - width / 2,
+      y: options.centerPoint.y - height / 2,
+      width: width,
+      height: height,
+    })
+  }
+
+  if (options.keepAspectRatio) {
+    const aspectRatio = rectangle.width / rectangle.height
+    options.desiredHeight = (options.desiredWidth / aspectRatio) ^ 0
+    return resizeI({ width: options.desiredWidth, height: options.desiredHeight })
+  }
+
+  return resizeI({ width: options.desiredWidth, height: options.desiredHeight })
+}
+
+export function resize(
+  originalSize: Size,
+  desiredSize: Size,
+  mode: 'force' | 'keep-aspect-ratio',
+): Size {
+  if (mode === 'force') {
+    return desiredSize
+  }
+
+  const aspectRatio = originalSize.width / originalSize.height
+  const desiredHeight = (desiredSize.width / aspectRatio) ^ 0
+  return size(desiredSize.width, desiredHeight)
 }

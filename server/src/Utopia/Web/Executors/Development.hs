@@ -18,9 +18,11 @@ import           Control.Lens
 import           Control.Monad.Free
 import           Control.Monad.RWS.Strict
 import           Data.IORef
+import           Data.Pool
 import           Data.Text
 import qualified Data.Text.Lazy                 as TL
 import           Data.Text.Lazy.Lens
+import           Data.Time.Clock
 import           Network.HTTP.Client            (Manager,
                                                  defaultManagerSettings,
                                                  newManager)
@@ -31,8 +33,10 @@ import           Servant
 import           Servant.Client
 import           System.Environment
 import           System.Log.FastLogger
+import           URI.ByteString
 import           Utopia.Web.Assets
 import           Utopia.Web.Auth
+import           Utopia.Web.Auth.Github
 import           Utopia.Web.Auth.Session
 import           Utopia.Web.Auth.Types
 import qualified Utopia.Web.Database            as DB
@@ -42,6 +46,8 @@ import           Utopia.Web.Editor.Branches
 import           Utopia.Web.Endpoints
 import           Utopia.Web.Executors.Common
 import           Utopia.Web.Github
+import           Utopia.Web.Liveblocks
+import           Utopia.Web.Liveblocks.Types
 import           Utopia.Web.Logging
 import           Utopia.Web.Metrics
 import           Utopia.Web.Packager.Locking
@@ -63,6 +69,7 @@ data DevServerResources = DevServerResources
                         , _proxyManager          :: Maybe Manager
                         , _auth0Resources        :: Maybe Auth0Resources
                         , _awsResources          :: Maybe AWSResources
+                        , _githubResources       :: Maybe GithubAuthResources
                         , _sessionState          :: SessionState
                         , _storeForMetrics       :: Store
                         , _databaseMetrics       :: DB.DatabaseMetrics
@@ -70,11 +77,13 @@ data DevServerResources = DevServerResources
                         , _registryManager       :: Manager
                         , _assetsCaches          :: AssetsCaches
                         , _nodeSemaphore         :: QSem
+                        , _githubSemaphore       :: QSem
                         , _locksRef              :: PackageVersionLocksRef
                         , _branchDownloads       :: Maybe BranchDownloads
                         , _matchingVersionsCache :: MatchingVersionsCache
                         , _logger                :: FastLogger
                         , _loggerShutdown        :: IO ()
+                        , _liveblocksResources   :: Maybe LiveblocksResources
                         }
 
 type DevProcessMonad a = ServerProcessMonad DevServerResources a
@@ -101,6 +110,20 @@ dummyUser cdnRoot = UserDetails { userId  = "1"
                                 , picture = Just (cdnRoot <> "/editor/avatars/utopino3.png")
                                 }
 
+dummyUserAlice :: Text -> UserDetails
+dummyUserAlice cdnRoot = UserDetails { userId  = "ab9401d8-f6f0-4642-8239-2435656bf0b2"
+                                     , email   = Just "team1@utopia.app"
+                                     , name    = Just "A real human being"
+                                     , picture = Just (cdnRoot <> "/editor/avatars/utopino3.png")
+                                     }
+
+dummyUserBob :: Text -> UserDetails
+dummyUserBob cdnRoot = UserDetails { userId  = "231f5f05-cac7-4910-8006-d7645c44051c"
+                                    , email   = Just "team1@utopia.app"
+                                    , name    = Just "Also a real human being"
+                                    , picture = Just (cdnRoot <> "/editor/avatars/utopino2.png")
+                                    }
+
 {-|
   Fallback for validating the authentication code in the case where Auth0 isn't setup locally.
 -}
@@ -110,7 +133,7 @@ localAuthCodeCheck "logmein" action = do
   pool <- fmap _projectPool ask
   metrics <- fmap _databaseMetrics ask
   portOfServer <- fmap _serverPort ask
-  let cdnRoot = "http://localhost:" <> show portOfServer
+  let cdnRoot = "http://cdn.localhost:" <> show portOfServer
   successfulAuthCheck metrics pool sessionStore action $ dummyUser cdnRoot
 localAuthCodeCheck _ action = do
   return $ action Nothing
@@ -139,6 +162,8 @@ innerServerExecutor BadRequest = do
   throwError err400
 innerServerExecutor NotAuthenticated = do
   throwError err401
+innerServerExecutor (TempRedirect uri) = do
+  throwError err302 { errHeaders = [("Location", serializeURIRef' uri)]}
 innerServerExecutor NotModified = do
   throwError err304
 innerServerExecutor (CheckAuthCode authCode action) = do
@@ -146,8 +171,13 @@ innerServerExecutor (CheckAuthCode authCode action) = do
   sessionStore <- fmap _sessionState ask
   pool <- fmap _projectPool ask
   metrics <- fmap _databaseMetrics ask
+  portOfServer <- fmap _serverPort ask
+  let cdnRoot = "http://cdn.localhost:" <> show portOfServer
   let codeCheck = maybe localAuthCodeCheck (auth0CodeCheck metrics pool sessionStore) auth0
-  codeCheck authCode action
+  case authCode of
+    "alice" -> successfulAuthCheck metrics pool sessionStore action (dummyUserAlice cdnRoot)
+    "bob" -> successfulAuthCheck metrics pool sessionStore action (dummyUserBob cdnRoot)
+    _ -> codeCheck authCode action
 innerServerExecutor (Logout cookie pageContents action) = do
   sessionStore <- fmap _sessionState ask
   logoutOfSession sessionStore cookie pageContents action
@@ -199,15 +229,14 @@ innerServerExecutor (SetShowcaseProjects showcaseProjects next) = do
   setShowcaseProjectsWithDBPool metrics pool showcaseProjects next
 innerServerExecutor (LoadProjectAsset path possibleETag action) = do
   awsResource <- fmap _awsResources ask
-  let loadCall = maybe loadProjectAssetFromDisk loadProjectAssetFromS3 awsResource
-  application <- loadProjectAssetWithCall loadCall path possibleETag
+  possibleAsset <- liftIO $ loadAsset awsResource path possibleETag
+  application <- loadProjectAssetWithAsset path possibleAsset
   return $ action application
 innerServerExecutor (SaveProjectAsset user projectID path action) = do
   awsResource <- fmap _awsResources ask
   pool <- fmap _projectPool ask
   metrics <- fmap _databaseMetrics ask
-  let saveCall = maybe saveProjectAssetToDisk saveProjectAssetToS3 awsResource
-  application <- saveProjectAssetWithCall metrics pool user projectID path saveCall
+  application <- saveProjectAssetWithCall metrics pool user projectID path $ saveAsset awsResource
   return $ action application
 innerServerExecutor (RenameProjectAsset user projectID oldPath newPath next) = do
   awsResource <- fmap _awsResources ask
@@ -285,7 +314,7 @@ innerServerExecutor (GetSiteRoot action) = do
   return $ action siteRoot
 innerServerExecutor (GetCDNRoot action) = do
   portOfServer <- fmap _serverPort ask
-  let siteRoot = "http://localhost:" <> show portOfServer
+  let siteRoot = "http://cdn.localhost:" <> show portOfServer
   return $ action siteRoot
 innerServerExecutor (GetPathToServe defaultPathToServe possibleBranchName action) = do
   possibleDownloads <- fmap _branchDownloads ask
@@ -299,10 +328,10 @@ innerServerExecutor (GetUserConfiguration user action) = do
   pool <- fmap _projectPool ask
   metrics <- fmap _databaseMetrics ask
   getUserConfigurationWithDBPool metrics pool user action
-innerServerExecutor (SaveUserConfiguration user possibleShortcutConfig action) = do
+innerServerExecutor (SaveUserConfiguration user possibleShortcutConfig possibleTheme action) = do
   pool <- fmap _projectPool ask
   metrics <- fmap _databaseMetrics ask
-  saveUserConfigurationWithDBPool metrics pool user possibleShortcutConfig
+  saveUserConfigurationWithDBPool metrics pool user possibleShortcutConfig possibleTheme
   return action
 innerServerExecutor (ClearBranchCache branchName action) = do
   possibleDownloads <- fmap _branchDownloads ask
@@ -312,6 +341,156 @@ innerServerExecutor (GetDownloadBranchFolders action) = do
   downloads <- fmap _branchDownloads ask
   folders <- liftIO $ maybe (pure []) getDownloadedLocalFolders downloads
   pure $ action folders
+innerServerExecutor (GetGithubAuthorizationURI action) = do
+  possibleGithubResources <- fmap _githubResources ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      let uri = getAuthorizationURI githubResources
+      pure $ action uri
+innerServerExecutor (GetGithubAccessToken user authCode action) = do
+  possibleGithubResources <- fmap _githubResources ask
+  logger <- fmap _logger ask
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- getAndHandleGithubAccessToken githubResources logger metrics pool user authCode
+      pure $ action result
+innerServerExecutor (GetGithubAuthentication user action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  result <- liftIO $ DB.lookupGithubAuthenticationDetails metrics pool user
+  pure $ action result
+innerServerExecutor (SaveToGithubRepo user projectID possibleBranchName possibleCommitMessage model action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  possibleGithubResources <- fmap _githubResources ask
+  awsResource <- fmap _awsResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- createTreeAndSaveToGithub githubSemaphore githubResources awsResource logger metrics pool user projectID possibleBranchName possibleCommitMessage model
+      pure $ action result
+innerServerExecutor (GetBranchesFromGithubRepo user owner repository action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  possibleGithubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- getGithubBranches githubSemaphore githubResources logger metrics pool user owner repository
+      pure $ action result
+innerServerExecutor (GetBranchContent user owner repository branchName possibleCommitSha possiblePreviousCommitSha action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  possibleGithubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- getGithubBranch githubSemaphore githubResources logger metrics pool user owner repository branchName possibleCommitSha possiblePreviousCommitSha
+      pure $ action result
+innerServerExecutor (GetDefaultBranchContent user owner repository possibleCommitSha possiblePreviousCommitSha action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  possibleGithubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- getDefaultGithubBranch githubSemaphore githubResources logger metrics pool user owner repository possibleCommitSha possiblePreviousCommitSha
+      pure $ action result
+innerServerExecutor (GetUsersRepositories user action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  possibleGithubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- getGithubUsersPublicRepositories githubSemaphore githubResources logger metrics pool user
+      pure $ action result
+innerServerExecutor (SaveGithubAsset user owner repository assetSha projectID assetPath action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  possibleGithubResources <- fmap _githubResources ask
+  awsResource <- fmap _awsResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- saveGithubAssetToProject githubSemaphore githubResources awsResource logger metrics pool user owner repository assetSha projectID assetPath
+      pure $ action result
+innerServerExecutor (GetPullRequestForBranch user owner repository branchName action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  possibleGithubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- getBranchPullRequest githubSemaphore githubResources logger metrics pool user owner repository branchName
+      pure $ action result
+innerServerExecutor (GetGithubUserDetails user action) = do
+  githubSemaphore <- fmap _githubSemaphore ask
+  possibleGithubResources <- fmap _githubResources ask
+  metrics <- fmap _databaseMetrics ask
+  logger <- fmap _logger ask
+  pool <- fmap _projectPool ask
+  case possibleGithubResources of
+    Nothing -> throwError err501
+    Just githubResources -> do
+      result <- getDetailsOfGithubUser githubSemaphore githubResources logger metrics pool user
+      pure $ action result
+innerServerExecutor (AuthLiveblocksUser user roomID action) = do
+  possibleLiveblocksResources <- fmap _liveblocksResources ask
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  case possibleLiveblocksResources of
+    Nothing -> throwError err501
+    Just liveblocksResources -> do
+      errorOrToken <- liftIO $ authorizeUserForLiveblocksProjectRoom liveblocksResources metrics pool user roomID
+      case errorOrToken of
+        Left errorMessage -> putStrLn errorMessage >> throwError err500
+        Right token       -> pure $ action token
+innerServerExecutor (IsLiveblocksEnabled action) = do
+  possibleLiveblocksResources <- fmap _liveblocksResources ask
+  pure $ action $ isJust possibleLiveblocksResources
+innerServerExecutor (ClaimCollaborationControl user projectID collaborationEditor action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  projectOwnershipResult <- liftIO $ DB.checkIfProjectOwner metrics pool user projectID
+  unless projectOwnershipResult $ throwError err400
+  ownershipResult <- liftIO $ DB.maybeClaimCollaborationControl metrics pool getCurrentTime user projectID collaborationEditor
+  pure $ action ownershipResult
+innerServerExecutor (SnatchCollaborationControl user projectID collaborationEditor action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  projectOwnershipResult <- liftIO $ DB.checkIfProjectOwner metrics pool user projectID
+  unless projectOwnershipResult $ throwError err400
+  liftIO $ DB.forceClaimCollaborationControl metrics pool getCurrentTime user projectID collaborationEditor
+  pure action
+innerServerExecutor (ReleaseCollaborationControl user projectID collaborationEditor action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  liftIO $ DB.releaseCollaborationControl metrics pool user projectID collaborationEditor
+  pure action
+innerServerExecutor (ClearCollaboratorOwnership user collaborationEditor action) = do
+  metrics <- fmap _databaseMetrics ask
+  pool <- fmap _projectPool ask
+  liftIO $ DB.deleteCollaborationControlByCollaborator metrics pool user collaborationEditor
+  pure action
 
 {-|
   Invokes a service call using the supplied resources.
@@ -336,12 +515,15 @@ serverAPI resources = hoistServer apiProxy (serverMonadToHandler resources) serv
 startup :: DevServerResources -> IO Stop
 startup DevServerResources{..} = do
   migrateDatabase (not _silentMigration) True _projectPool
+  DB.cleanupCollaborationControl _databaseMetrics _projectPool getCurrentTime
+  preloadNPMDependencies _logger _npmMetrics _nodeSemaphore _locksRef
   hashedFilenamesThread <- forkIO $ watchFilenamesWithHashes (_hashCache _assetsCaches) (_assetResultCache _assetsCaches) assetPathsAndBuilders
   return $ do
         killThread hashedFilenamesThread
+        destroyAllResources _projectPool
 
 serverPortFromResources :: DevServerResources -> Int
-serverPortFromResources = _serverPort
+serverPortFromResources resources = _serverPort resources
 
 shouldProxyWebpack :: IO Bool
 shouldProxyWebpack = do
@@ -365,6 +547,7 @@ initialiseResources = do
   _proxyManager <- if shouldProxy then Just <$> newManager defaultManagerSettings else return Nothing
   _auth0Resources <- getAuth0Environment
   _awsResources <- getAmazonResourcesFromEnvironment
+  _githubResources <- getGithubAuthResources
   _sessionState <- createSessionState _projectPool
   _serverPort <- portFromEnvironment
   _storeForMetrics <- newStore
@@ -373,12 +556,14 @@ initialiseResources = do
   _registryManager <- newManager tlsManagerSettings
   _assetsCaches <- emptyAssetsCaches assetPathsAndBuilders
   _nodeSemaphore <- newQSem 1
+  _githubSemaphore <- newQSem 5
   _branchDownloads <- createBranchDownloads
   _locksRef <- newIORef mempty
   let _silentMigration = False
   let _logOnStartup = True
   (_logger, _loggerShutdown) <- newFastLogger (LogStdout defaultBufSize)
   _matchingVersionsCache <- newMatchingVersionsCache
+  _liveblocksResources <- makeLiveblocksResources
   return $ DevServerResources{..}
 
 devEnvironmentRuntime :: EnvironmentRuntime DevServerResources

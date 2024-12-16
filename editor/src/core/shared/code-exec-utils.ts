@@ -1,17 +1,38 @@
-import { strToBase64, base64ToStr } from '@root/encoding/base64'
+import { strToBase64 } from '@root/encoding/base64'
 import StackFrame, { ScriptLine } from '../../third-party/react-error-overlay/utils/stack-frame'
 import { getSourceMapConsumer } from '../../third-party/react-error-overlay/utils/getSourceMap'
 import {
   unmapBabelTranspiledCode,
   unmapUtopiaSafeFunction,
 } from '../../third-party/react-error-overlay/utils/mapper'
-import { RawSourceMap } from '../workers/ts/ts-typings/RawSourceMap'
+import type { RawSourceMap } from '../workers/ts/ts-typings/RawSourceMap'
 import { NO_OP } from './utils'
-import { findLastIndex, last, take } from './array-utils'
+import { findLastIndex, take } from './array-utils'
 import parseError from '../../third-party/react-error-overlay/utils/parser'
 
 // eslint-disable-next-line @typescript-eslint/no-empty-function
 export const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+
+let CurrentEvaluatedFileName = 'unknown'
+
+export function setGlobalEvaluatedFileName(fileName: string) {
+  CurrentEvaluatedFileName = fileName
+  EvaluatedFiles.push(fileName)
+}
+
+export function getGlobalEvaluatedFileName(): string {
+  return CurrentEvaluatedFileName
+}
+
+let EvaluatedFiles: Array<string> = []
+
+export function clearListOfEvaluatedFiles() {
+  EvaluatedFiles = []
+}
+
+export function getListOfEvaluatedFiles(): Array<string> {
+  return [...EvaluatedFiles]
+}
 
 export interface FancyError extends Error {
   stackFrames?: StackFrame[]
@@ -27,9 +48,13 @@ export type ErrorHandler = (e: Error) => void
 
 const UTOPIA_FUNCTION_ROOT_NAME = 'SafeFunctionCurriedErrorHandler'
 
-export const SOURCE_MAP_PREFIX = `;sourceMap=`
+export const SOURCE_MAP_SEPARATOR = `;##sourceMap##`
+
+export type SourceMapCache = { [key: string]: RawSourceMap }
 
 export function processErrorWithSourceMap(
+  fallbackCode: string | null,
+  filePath: string,
   error: Error | FancyError,
   inSafeFunction: boolean,
 ): FancyError {
@@ -37,6 +62,7 @@ export function processErrorWithSourceMap(
     // this Error is already processed!
     return error
   }
+  const sourceMapCache: SourceMapCache = {}
   const errorStack = error.stack
   if (errorStack != null) {
     try {
@@ -50,9 +76,15 @@ export function processErrorWithSourceMap(
           inSafeFunction ? stackLine.replace(UTOPIA_FUNCTION_ROOT_NAME, 'eval') : stackLine,
         )
         .join('\n')
-      const parsedStackFrames = parseError(error)
+      const parsedStackFrames = parseError(error, sourceMapCache)
 
-      const enhancedStackFrames = enhanceStackFrames(parsedStackFrames, inSafeFunction)
+      const enhancedStackFrames = enhanceStackFrames(
+        fallbackCode,
+        filePath,
+        parsedStackFrames,
+        inSafeFunction,
+        sourceMapCache,
+      )
       ;(error as FancyError).stackFrames = enhancedStackFrames
     } catch (sourceMapError) {
       console.error('Source map handling threw an error.', sourceMapError)
@@ -62,13 +94,30 @@ export function processErrorWithSourceMap(
 }
 
 export function enhanceStackFrames(
+  fallbackCode: string | null,
+  filePath: string,
   parsedStackFrames: Array<StackFrame>,
   inSafeFunction: boolean,
+  sourceMaps: SourceMapCache,
 ): StackFrame[] {
   return parsedStackFrames.map((frame) => {
-    const rawSourceMap = extractRawSourceMap(frame)
-    const scriptLines = parseSourceCodeFromRawSourceMap(rawSourceMap)
-    const fixedFilename = frame.fileName?.split(SOURCE_MAP_PREFIX)[0]
+    const rawSourceMap = extractRawSourceMap(frame, sourceMaps)
+    const scriptLinesFromSourceMap = parseSourceCodeFromRawSourceMap(rawSourceMap)
+    let scriptLines: Array<ScriptLine> | null = null
+    if (scriptLinesFromSourceMap == null) {
+      if (fallbackCode != null) {
+        const fallbackCodeLines = fallbackCode.split('\n')
+        scriptLines = fallbackCodeLines.map(
+          (sourceLine, index) => new ScriptLine(index + 1, sourceLine, false),
+        )
+      }
+    } else {
+      scriptLines = scriptLinesFromSourceMap
+    }
+    let fixedFilename: string | undefined = frame.fileName?.split(SOURCE_MAP_SEPARATOR)[0]
+    if (fixedFilename === 'eval(undefined)') {
+      fixedFilename = filePath
+    }
     const stackFrame = new StackFrame(
       frame.functionName,
       fixedFilename,
@@ -102,23 +151,35 @@ function maybeEnhanceStackFrame(
   }
 }
 
-function extractRawSourceMap(stackFrame: StackFrame): RawSourceMap | null {
-  const possibleSourceMapSegment = stackFrame.fileName?.split(SOURCE_MAP_PREFIX)[1] ?? null
-  return possibleSourceMapSegment == null ? null : JSON.parse(base64ToStr(possibleSourceMapSegment))
+function extractRawSourceMap(
+  stackFrame: StackFrame,
+  sourceMaps: SourceMapCache,
+): RawSourceMap | null {
+  const possibleSourceMapKey = stackFrame.fileName?.split(SOURCE_MAP_SEPARATOR)[1]
+  if (possibleSourceMapKey == null) {
+    return null
+  }
+  return sourceMaps[possibleSourceMapKey] ?? null
 }
 
-function parseSourceCodeFromRawSourceMap(rawSourceMap: RawSourceMap | null): ScriptLine[] {
+function parseSourceCodeFromRawSourceMap(rawSourceMap: RawSourceMap | null): ScriptLine[] | null {
   const sourceCode = rawSourceMap?.transpiledContentUtopia
-  const fixedSourceCode = sourceCode?.split('\n') ?? []
-  return fixedSourceCode.map((sourceLine, index) => new ScriptLine(index + 1, sourceLine, false))
+  const fixedSourceCode = sourceCode?.split('\n')
+  if (fixedSourceCode == null) {
+    return null
+  } else {
+    return fixedSourceCode.map((sourceLine, index) => new ScriptLine(index + 1, sourceLine, false))
+  }
 }
 
 function processErrorAndCallHandler(
+  code: string,
+  filePath: string,
   onError: ErrorHandler,
   error: Error,
   inSafeFunction: boolean,
 ): void {
-  const fancyError = processErrorWithSourceMap(error, inSafeFunction)
+  const fancyError = processErrorWithSourceMap(code, filePath, error, inSafeFunction)
   onError(fancyError)
 }
 
@@ -126,6 +187,7 @@ export const SafeFunctionCurriedErrorHandler = {
   [UTOPIA_FUNCTION_ROOT_NAME]: function (
     async: boolean,
     cacheableContext: any,
+    filePath: string,
     code: string,
     sourceMapWithoutTranspiledCode: RawSourceMap | null,
     extraParamKeys: Array<string> = [],
@@ -145,11 +207,12 @@ export const SafeFunctionCurriedErrorHandler = {
 
     let sourceMapBase64 = strToBase64(JSON.stringify(sourceMap))
 
-    const fileName = `${UTOPIA_FUNCTION_ROOT_NAME}(${sourceMap?.sources?.[0]})`
+    const sourceFile = sourceMap?.sources?.[0]
+    const fileName = `${UTOPIA_FUNCTION_ROOT_NAME}(${sourceFile})`
 
     const codeWithSourceMapAttached = `${code}
 
-    //# sourceURL=${fileName}${SOURCE_MAP_PREFIX}${sourceMapBase64}
+    //# sourceURL=${fileName}${SOURCE_MAP_SEPARATOR}${sourceMapBase64}${SOURCE_MAP_SEPARATOR}
     `
 
     const FunctionOrAsyncFunction = async ? AsyncFunction : Function
@@ -158,21 +221,25 @@ export const SafeFunctionCurriedErrorHandler = {
       codeWithSourceMapAttached,
     )
     fn.displayName = UTOPIA_FUNCTION_ROOT_NAME
-    const safeFn = (onError: ErrorHandler) => (...params: Array<unknown>) => {
-      try {
-        const [boundThis, ...otherParams] = params
-        return fn.bind(boundThis)(...contextValues, ...otherParams)
-      } catch (e) {
-        processErrorAndCallHandler(onError, e, true)
+    const safeFn =
+      (onError: ErrorHandler) =>
+      (...params: Array<unknown>) => {
+        try {
+          setGlobalEvaluatedFileName(sourceFile ?? 'unknown')
+          const [boundThis, ...otherParams] = params
+          return fn.bind(boundThis)(...contextValues, ...otherParams)
+        } catch (e: any) {
+          processErrorAndCallHandler(code, filePath, onError, e, true)
+        }
       }
-    }
     return safeFn
   },
 }[UTOPIA_FUNCTION_ROOT_NAME]
 
-export function SafeFunction(
+export function safeFunction(
   async: boolean,
   cacheableContext: any,
+  filePath: string,
   code: string,
   sourceMapWithoutTranspiledCode: RawSourceMap | null,
   extraParamKeys: Array<string>,
@@ -182,12 +249,13 @@ export function SafeFunction(
     return SafeFunctionCurriedErrorHandler(
       async,
       cacheableContext,
+      filePath,
       code,
       sourceMapWithoutTranspiledCode,
       extraParamKeys,
     )(onError)
-  } catch (e) {
-    processErrorAndCallHandler(onError, e, true)
+  } catch (e: any) {
+    processErrorAndCallHandler(code, filePath, onError, e, true)
     return NO_OP
   }
 }

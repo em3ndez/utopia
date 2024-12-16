@@ -1,11 +1,11 @@
 import { PRODUCTION_ENV } from '../../common/env-vars'
-import { PropertyPath, PropertyPathPart } from './project-file-types'
-import { arrayEquals, fastForEach, longestCommonArray } from './utils'
+import type { PropertyPath, PropertyPathPart } from './project-file-types'
+import { arrayEqualsByReference, fastForEach, longestCommonArray } from './utils'
 
 export function fromString(value: string): PropertyPath {
   let fromPathStringCache: PropertyPath | null = globalPathStringToPathCache[value]
   if (fromPathStringCache == null) {
-    const result = create(value.split('.'))
+    const result = createFromArray(value.split('.'))
     globalPathStringToPathCache[value] = result
     return result
   } else {
@@ -16,14 +16,16 @@ export function fromString(value: string): PropertyPath {
 interface PropertyPathCache {
   cached: PropertyPath | null
   cachedToString: string | null
-  childCaches: { [key: string]: PropertyPathCache }
+  stringChildCaches: { [key: string]: PropertyPathCache }
+  numberChildCaches: { [key: number]: PropertyPathCache }
 }
 
 function emptyPathCache(): PropertyPathCache {
   return {
     cached: null,
     cachedToString: null,
-    childCaches: {},
+    stringChildCaches: {},
+    numberChildCaches: {},
   }
 }
 
@@ -37,19 +39,44 @@ export function clearPropertyPathCache() {
 
 function getPathCache(elements: Array<PropertyPathPart>): PropertyPathCache {
   let workingPathCache: PropertyPathCache = globalPathCache
-  fastForEach(elements, (pathPart) => {
-    if (workingPathCache.childCaches[pathPart] == null) {
-      const newCache = emptyPathCache()
-      workingPathCache.childCaches[pathPart] = newCache
-      workingPathCache = newCache
+  for (const pathPart of elements) {
+    // Create a distinction between keys of `0` and `'0'`,
+    // as indexing into an object coerces the key to a string.
+    if (typeof pathPart === 'number') {
+      if (pathPart in workingPathCache.numberChildCaches) {
+        workingPathCache = workingPathCache.numberChildCaches[pathPart]
+      } else {
+        const newCache = emptyPathCache()
+        workingPathCache.numberChildCaches[pathPart] = newCache
+        workingPathCache = newCache
+      }
     } else {
-      workingPathCache = workingPathCache.childCaches[pathPart]
+      if (pathPart in workingPathCache.stringChildCaches) {
+        workingPathCache = workingPathCache.stringChildCaches[pathPart]
+      } else {
+        const newCache = emptyPathCache()
+        workingPathCache.stringChildCaches[pathPart] = newCache
+        workingPathCache = newCache
+      }
     }
-  })
+  }
   return workingPathCache
 }
 
-export function create(elements: Array<PropertyPathPart>): PropertyPath {
+export function create<T1 extends PropertyPathPart>(element1: T1): PropertyPath<[T1]>
+export function create<T1 extends PropertyPathPart, T2 extends PropertyPathPart>(
+  element1: T1,
+  element2: T2,
+): PropertyPath<[T1, T2]>
+export function create<
+  T1 extends PropertyPathPart,
+  T2 extends PropertyPathPart,
+  T3 extends PropertyPathPart,
+>(element1: T1, element2: T2, element3: T3): PropertyPath<[T1, T2, T3]>
+export function create(...elements: Array<PropertyPathPart>): PropertyPath<Array<PropertyPathPart>>
+export function create(
+  ...elements: Array<PropertyPathPart>
+): PropertyPath<Array<PropertyPathPart>> {
   const pathCache = getPathCache(elements)
   if (pathCache.cached == null) {
     const newPath = { propertyElements: elements }
@@ -57,6 +84,17 @@ export function create(elements: Array<PropertyPathPart>): PropertyPath {
     return newPath
   } else {
     return pathCache.cached
+  }
+}
+
+export function createFromArray<T extends Array<PropertyPathPart>>(elements: T): PropertyPath<T> {
+  const pathCache = getPathCache(elements)
+  if (pathCache.cached == null) {
+    const newPath = { propertyElements: elements }
+    pathCache.cached = newPath
+    return newPath
+  } else {
+    return pathCache.cached as PropertyPath<T>
   }
 }
 
@@ -91,10 +129,14 @@ export function firstPart(propertyPath: PropertyPath): PropertyPathPart {
   return propertyPath.propertyElements[0]
 }
 
+export function firstPartToString(propertyPath: PropertyPath): string {
+  return `${firstPart(propertyPath)}`
+}
+
 export function tail(propertyPath: PropertyPath): PropertyPath {
   const newElements =
     propertyPath.propertyElements.length > 0 ? propertyPath.propertyElements.slice(1) : []
-  return create(newElements)
+  return createFromArray(newElements)
 }
 
 export function getElements(propertyPath: PropertyPath): Array<PropertyPathPart> {
@@ -105,14 +147,14 @@ export function appendPropertyPathElems(
   path: PropertyPath,
   elems: Array<PropertyPathPart>,
 ): PropertyPath {
-  return create(path.propertyElements.concat(elems))
+  return createFromArray(path.propertyElements.concat(elems))
 }
 
 export function prependPropertyPathElems(
   elems: Array<PropertyPathPart>,
   path: PropertyPath,
 ): PropertyPath {
-  return create(elems.concat(path.propertyElements))
+  return createFromArray(elems.concat(path.propertyElements))
 }
 
 export function append(first: PropertyPath, second: PropertyPath): PropertyPath {
@@ -128,14 +170,8 @@ export function sameOrSubPath(compareTo: PropertyPath, possibleSubPath: Property
   return true
 }
 
-export function pathsEqual(l: PropertyPath | null, r: PropertyPath | null): boolean {
-  if (l === null && r === null) {
-    return true
-  } else if (l !== null && r !== null) {
-    return arrayEquals(l.propertyElements, r.propertyElements)
-  } else {
-    return false
-  }
+export function pathsEqual(l: PropertyPath, r: PropertyPath): boolean {
+  return arrayEqualsByReference(l.propertyElements, r.propertyElements)
 }
 
 export function contains(paths: Array<PropertyPath>, path: PropertyPath): boolean {
@@ -165,7 +201,7 @@ export function isSameProperty(path: PropertyPath, stringPath: string): boolean 
 }
 
 export function rootPath(path: PropertyPath): PropertyPath {
-  return create([getElements(path)[0]])
+  return create(getElements(path)[0])
 }
 
 export function stepDownPath(
@@ -182,7 +218,9 @@ export function stepDownPath(
   if (pathToStep == null) {
     return rootPath(pathToFollow)
   } else {
-    return create(pathToFollow.propertyElements.slice(0, pathToStep.propertyElements.length + 1))
+    return createFromArray(
+      pathToFollow.propertyElements.slice(0, pathToStep.propertyElements.length + 1),
+    )
   }
 }
 
@@ -205,5 +243,5 @@ export function findLongestMatchingPropertyPath(
   path: PropertyPath,
   from: Array<PropertyPathPart>,
 ): PropertyPath {
-  return create(findLongestMatchingSubPath(path.propertyElements, from))
+  return createFromArray(findLongestMatchingSubPath(path.propertyElements, from))
 }

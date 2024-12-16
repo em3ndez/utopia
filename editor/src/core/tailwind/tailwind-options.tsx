@@ -1,6 +1,5 @@
 import React from 'react'
-import { betterReactMemo } from '../../uuiui-deps'
-import { filterDuplicates, flatMapArray, last, stripNulls } from '../shared/array-utils'
+import { filterDuplicates, flatMapArray, stripNulls } from '../shared/array-utils'
 import { mapToArray, mapValues } from '../shared/object-utils'
 import { NO_OP } from '../shared/utils'
 import {
@@ -9,27 +8,29 @@ import {
   ClassNameToAttributes,
 } from '../third-party/tailwind-defaults'
 import Highlighter from 'react-highlight-words'
-import { ElementPath, isParseSuccess, isTextFile, NodeModules } from '../shared/project-file-types'
-import { useEditorState, useRefEditorState } from '../../components/editor/store/store-hook'
-import { EditorStore, getOpenUIJSFileKey } from '../../components/editor/store/editor-state'
-import { normalisePathToUnderlyingTarget } from '../../components/custom-code/code-file'
-import { getContentsTreeFileFromString, ProjectContentTreeRoot } from '../../components/assets'
+import type { ElementPath } from '../shared/project-file-types'
 import {
-  isJSXAttributeNotFound,
-  isJSXAttributeValue,
+  Substores,
+  useEditorState,
+  useRefEditorState,
+} from '../../components/editor/store/store-hook'
+import { getElementFromProjectContents } from '../../components/editor/store/editor-state'
+import type { JSXElementChild } from '../shared/element-template'
+import {
+  modifiableAttributeIsAttributeNotFound,
   isJSXElement,
-  JSXElementChild,
+  modifiableAttributeIsAttributeValue,
 } from '../shared/element-template'
-import { findElementAtPath, MetadataUtils } from '../model/element-metadata-utils'
-import { getUtopiaJSXComponentsFromSuccess } from '../model/project-file-utils'
-import { eitherToMaybe, flatMapEither, foldEither, mapEither } from '../shared/either'
+import { eitherToMaybe, flatMapEither, foldEither } from '../shared/either'
 import {
   getModifiableJSXAttributeAtPath,
   jsxSimpleAttributeToValue,
-} from '../shared/jsx-attributes'
+} from '../shared/jsx-attribute-utils'
 import * as PP from '../shared/property-path'
-import { isTwindEnabled } from './tailwind'
-import { AttributeCategories, AttributeCategory } from './attribute-categories'
+import * as EP from '../shared/element-path'
+import type { AttributeCategory } from './attribute-categories'
+import { AttributeCategories } from './attribute-categories'
+import { isTailwindEnabled } from './tailwind-compilation'
 
 export interface TailWindOption {
   label: string
@@ -72,7 +73,7 @@ async function loadTailwindOptions() {
   })
 }
 
-loadTailwindOptions()
+void loadTailwindOptions()
 
 export function getTailwindOptionForClassName(className: string): TailWindOption {
   const foundOption = TailWindOptionLookup[className]
@@ -164,7 +165,7 @@ export function useFilteredOptions(
   onEmptyResults: () => void = NO_OP,
 ): Array<TailWindOption> {
   return React.useMemo(() => {
-    if (isTwindEnabled()) {
+    if (isTailwindEnabled()) {
       const sanitisedFilter = filter.trim().toLowerCase()
       const searchTerms = searchStringToIndividualTerms(sanitisedFilter)
       let results: Array<TailWindOption>
@@ -221,41 +222,17 @@ export function useFilteredOptions(
   }, [filter, maxResults, onEmptyResults])
 }
 
-function getJSXElementForTarget(
-  target: ElementPath,
-  openUIJSFileKey: string,
-  projectContents: ProjectContentTreeRoot,
-  nodeModules: NodeModules,
-): JSXElementChild | null {
-  const underlyingTarget = normalisePathToUnderlyingTarget(
-    projectContents,
-    nodeModules,
-    openUIJSFileKey,
-    target,
-  )
-  const underlyingPath =
-    underlyingTarget.type === 'NORMALISE_PATH_SUCCESS' ? underlyingTarget.filePath : openUIJSFileKey
-  const projectFile = getContentsTreeFileFromString(projectContents, underlyingPath)
-  if (isTextFile(projectFile) && isParseSuccess(projectFile.fileContents.parsed)) {
-    return findElementAtPath(
-      target,
-      getUtopiaJSXComponentsFromSuccess(projectFile.fileContents.parsed),
-    )
-  } else {
-    return null
-  }
-}
-
-function getClassNameAttribute(
-  element: JSXElementChild | null,
-): { value: string | null; isSettable: boolean } {
+function getClassNameJSXAttribute(element: JSXElementChild | null): {
+  value: any | null
+  isSettable: boolean
+} {
   if (element != null && isJSXElement(element)) {
     const jsxAttributes = element.props
-    const foundAttribute = getModifiableJSXAttributeAtPath(jsxAttributes, PP.create(['className']))
+    const foundAttribute = getModifiableJSXAttributeAtPath(jsxAttributes, PP.create('className'))
     const foundAttributeValue = flatMapEither(jsxSimpleAttributeToValue, foundAttribute)
     const isSettable = foldEither(
       () => false,
-      (r) => isJSXAttributeValue(r) || isJSXAttributeNotFound(r),
+      (r) => modifiableAttributeIsAttributeValue(r) || modifiableAttributeIsAttributeNotFound(r),
       foundAttribute,
     )
 
@@ -271,32 +248,48 @@ function getClassNameAttribute(
   }
 }
 
+export function getClassNameAttribute(element: JSXElementChild | null): {
+  value: string | null
+  isSettable: boolean
+} {
+  const classNameJSXAttribute = getClassNameJSXAttribute(element)
+  if (
+    classNameJSXAttribute.value == null ||
+    // The type check here is necessary because in <div className /> the value
+    // of `className` would be `true`
+    typeof classNameJSXAttribute.value !== 'string'
+  ) {
+    return {
+      value: null,
+      isSettable: classNameJSXAttribute.isSettable,
+    }
+  }
+
+  return classNameJSXAttribute
+}
+
 export function useGetSelectedClasses(): {
   selectedClasses: Array<string>
   elementPaths: Array<ElementPath>
   isSettable: boolean
 } {
   const metadataRef = useRefEditorState((store) => store.editor.jsxMetadata)
-  const elements = useEditorState((store) => {
-    const openUIJSFileKey = getOpenUIJSFileKey(store.editor)
-    if (openUIJSFileKey == null) {
-      return []
-    } else {
-      return store.editor.selectedViews.map((elementPath) =>
-        getJSXElementForTarget(
-          elementPath,
-          openUIJSFileKey,
-          store.editor.projectContents,
-          store.editor.nodeModules.files,
-        ),
-      )
-    }
-  }, 'ClassNameSelect elements')
+  const elements = useEditorState(
+    Substores.fullStore,
+    (store) =>
+      store.editor.selectedViews.map((elementPath) =>
+        getElementFromProjectContents(elementPath, store.editor.projectContents),
+      ),
+    'ClassNameSelect elements',
+  )
 
   const elementPaths = useEditorState(
+    Substores.selectedViews,
     (store) => store.editor.selectedViews,
     'ClassNameSelect elementPaths',
   )
+
+  const allElementPropsRef = useRefEditorState((store) => store.editor.allElementProps)
 
   const classNamesFromAttributesOrProps = React.useMemo(
     () =>
@@ -306,17 +299,13 @@ export function useGetSelectedClasses(): {
           return fromAttributes
         } else {
           const elementPath = elementPaths[index]
-          const elementMetadata = MetadataUtils.findElementByElementPath(
-            metadataRef.current,
-            elementPath,
-          )
           return {
-            value: elementMetadata?.props['className'],
+            value: allElementPropsRef.current[EP.toString(elementPath)]?.className,
             isSettable: fromAttributes.isSettable,
           }
         }
       }),
-    [elements, elementPaths, metadataRef],
+    [elements, elementPaths, allElementPropsRef],
   )
 
   const isSettable =
@@ -343,12 +332,11 @@ export function useGetSelectedClasses(): {
   }
 }
 
-const Bold = betterReactMemo('Bold', ({ children }: { children: React.ReactNode }) => {
+const Bold = React.memo(({ children }: { children: React.ReactNode }) => {
   return <strong>{children}</strong>
 })
 
-export const MatchHighlighter = betterReactMemo(
-  'MatchHighlighter',
+export const MatchHighlighter = React.memo(
   ({ text, searchString }: { text: string; searchString: string | null | undefined }) => {
     const sanitisedFilter = searchString?.trim().toLowerCase() ?? ''
     const individualTerms = searchStringToIndividualTerms(sanitisedFilter)
@@ -397,7 +385,7 @@ const getColorForCategory = (category: AttributeCategory): string => {
   }
 }
 
-const AngledStripe = betterReactMemo('AngledStripe', (props: { category: AttributeCategory }) => {
+const AngledStripe = React.memo((props: { category: AttributeCategory }) => {
   return (
     <div
       style={{
@@ -411,8 +399,7 @@ const AngledStripe = betterReactMemo('AngledStripe', (props: { category: Attribu
   )
 })
 
-export const LabelWithStripes = betterReactMemo(
-  'LabelWithStripes',
+export const LabelWithStripes = React.memo(
   (props: { label: string; categories: Array<AttributeCategory> }) => {
     const { label, categories } = props
 

@@ -2,7 +2,7 @@ import { HEADERS, MODE } from '../common/server'
 import { BASE_URL, STATIC_BASE_URL } from '../common/env-vars'
 import { isBrowserEnvironment } from '../core/shared/utils'
 import { cachedPromise } from '../core/shared/promise-utils'
-const urljoin = require('url-join')
+import { appendToPath } from './path-utils'
 
 const HASHED_ASSETS_ENDPOINT = BASE_URL + 'hashed-assets.json'
 
@@ -27,7 +27,8 @@ export function triggerHashedAssetsUpdate(): Promise<void> {
 
 function getPossiblyHashedURLInner(url: string): string {
   if (url in HASHED_ASSETS_MAPPINGS) {
-    return HASHED_ASSETS_MAPPINGS[url]
+    // Provably exists because of the `in` check.
+    return HASHED_ASSETS_MAPPINGS[url]!
   } else {
     return url
   }
@@ -35,24 +36,24 @@ function getPossiblyHashedURLInner(url: string): string {
 
 export function getPossiblyHashedURL(url: string): string {
   const relativeURL = getPossiblyHashedURLInner(url)
-  return urljoin(STATIC_BASE_URL, relativeURL)
+  return appendToPath(STATIC_BASE_URL, relativeURL)
 }
 
+// prioritise the toolbar assets for now, so first click shows them immediately
 const prioritisedAssets = [
-  '/editor/icons/light/semantic/hamburgermenu-black-24x24@2x.png',
-  '/editor/icons/light/semantic/closedcube-black-24x24@2x.png',
-  '/editor/icons/light/semantic/closedcube-white-24x24@2x.png',
-  '/editor/icons/light/filetype/ui-darkgray-18x18@2x.png',
-  '/editor/icons/light/filetype/js-darkgray-18x18@2x.png',
-  '/editor/icons/light/semantic/externallink-large-black-24x24@2x.png',
-  '/editor/icons/light/semantic/cross-small-gray-16x16@2x.png',
+  '/editor/icons/light/semantic/checkmark-white-16x16@2x.png',
+  '/editor/icons/light/tools/comment-white-18x18@2x.png',
+  // next line is for the pointer when it's not selected (by default it is)
+  '/editor/icons/light/tools/pointer-black-18x18@2x.png',
+  '/editor/icons/light/tools/text-white-18x18@2x.png',
+  '/editor/icons/light/tools/panels-white-18x18@2x.png',
 ]
 
 export function preloadPrioritizedAssets() {
   if (isBrowserEnvironment) {
     prioritisedAssets.forEach((asset) => {
       const url = getPossiblyHashedURL(asset)
-      fetch(url)
+      void fetch(url)
     })
   }
 }

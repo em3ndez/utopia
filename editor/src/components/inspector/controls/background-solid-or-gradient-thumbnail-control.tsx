@@ -1,15 +1,18 @@
 import React from 'react'
-import { UseSubmitValueFactory } from '../common/property-path-hooks'
+import type { UseSubmitValueFactory } from '../common/property-path-hooks'
 import { isRight } from '../../../core/shared/either'
-import { ControlStatus, ControlStyles } from '../common/control-status'
-import {
+import type { ControlStyles } from '../common/control-styles'
+import type { ControlStatus } from '../common/control-status'
+import type {
   CSSBackground,
   CSSBackgroundLayer,
   CSSBackgroundLayers,
   CSSColor,
-  cssColorToChromaColorOrDefault,
   CSSGradientBackgroundLayer,
   CSSSolidBackgroundLayer,
+} from '../common/css-utils'
+import {
+  cssColorToChromaColorOrDefault,
   isCSSGradientBackgroundLayer,
   isCSSSolidBackgroundLayer,
   parseColor,
@@ -20,7 +23,6 @@ import {
 import { BackgroundPicker } from '../sections/style-section/background-subsection/background-picker'
 import { StringControl } from './string-control'
 import { useColorTheme, UtopiaTheme } from '../../../uuiui'
-import { betterReactMemo } from '../../../uuiui-deps'
 import Utils from '../../../utils/utils'
 
 export interface BackgroundThumbnailControlProps {
@@ -49,7 +51,7 @@ interface BackgroundSolidOrGradientThumbnailControlProps extends BackgroundThumb
 }
 
 export function updateStringCSSColor(newValue: string, oldValue: CSSColor) {
-  const parsed = parseColor(newValue)
+  const parsed = parseColor(newValue, 'hex-hash-optional')
   if (isRight(parsed)) {
     return parsed.value
   } else {
@@ -61,7 +63,7 @@ export function updateStringCSSBackgroundItem(
   newValue: string,
   oldValue: CSSBackground,
 ): CSSBackground {
-  const parsed = parseColor(newValue)
+  const parsed = parseColor(newValue, 'hex-hash-optional')
   if (isRight(parsed)) {
     return { type: 'solid', enabled: true, color: parsed.value }
   } else {
@@ -83,8 +85,7 @@ export const backgroundControlContainerStyle = {
   margin: 1,
 }
 
-export const BackgroundSolidOrGradientThumbnailControl = betterReactMemo(
-  'BackgroundControl',
+export const BackgroundSolidOrGradientThumbnailControl = React.memo(
   (props: BackgroundSolidOrGradientThumbnailControlProps) => {
     const colorTheme = useColorTheme()
     const setOpenPopup = props.setOpenPopup
@@ -160,9 +161,8 @@ export const BackgroundSolidOrGradientThumbnailControl = betterReactMemo(
       ) : null
 
     const backgroundIndex = props.backgroundIndex
-    const onMouseDown = React.useCallback(
+    const onMouseDown: React.MouseEventHandler<HTMLDivElement> = React.useCallback(
       (e) => {
-        e.stopPropagation()
         setOpenPopup((openPopup) => {
           if (openPopup != null) {
             return undefined
@@ -178,8 +178,16 @@ export const BackgroundSolidOrGradientThumbnailControl = betterReactMemo(
       <div
         key={props.id}
         id={`trigger-${props.id}`}
-        className={` hexField ${Utils.pathOr('', ['controlClassName'], props)}`}
-        style={props.style}
+        className={` hexField ${Utils.pathOr(
+          '',
+          ['controlClassName'],
+          props,
+        )} ignore-react-onclickoutside-${props.id}`}
+        style={{
+          width: 30,
+          height: 24,
+          ...props.style,
+        }}
       >
         {picker}
         <div className={`widget-color-control relative`} key={`${props.id}-surround`}>
@@ -207,8 +215,7 @@ export const BackgroundSolidOrGradientThumbnailControl = betterReactMemo(
   },
 )
 
-export const StringBackgroundColorControl = betterReactMemo(
-  'StringBackgroundColorControl',
+export const StringBackgroundColorControl = React.memo(
   (props: BackgroundSolidOrGradientThumbnailControlProps) => {
     const value = props.value
     if (isCSSGradientBackgroundLayer(value) || props.onSubmitSolidStringValue == null) {

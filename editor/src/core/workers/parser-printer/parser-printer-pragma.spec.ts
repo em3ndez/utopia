@@ -1,3 +1,4 @@
+/* eslint jest/expect-expect: ["error", { "assertFunctionNames": ["expect", "testParseThenPrint"] }] */
 import { applyPrettier } from 'utopia-vscode-common'
 import { testParseCode, testParseThenPrint } from './parser-printer.test-utils'
 import { BakedInStoryboardUID } from '../../model/scene-utils'
@@ -16,7 +17,7 @@ describe('Parsing JSX Pragma:', () => {
     if (isParseSuccess(parsedPlainCode)) {
       expect(parsedPlainCode.jsxFactoryFunction).toEqual(null)
     } else {
-      fail(parsedPlainCode)
+      throw new Error(JSON.stringify(parsedPlainCode))
     }
   })
 
@@ -33,7 +34,7 @@ describe('Parsing JSX Pragma:', () => {
     if (isParseSuccess(parsedPlainCode)) {
       expect(parsedPlainCode.jsxFactoryFunction).toEqual('jsx')
     } else {
-      fail(parsedPlainCode)
+      throw new Error(JSON.stringify(parsedPlainCode))
     }
   })
 
@@ -76,7 +77,7 @@ describe('Parsing JSX Pragma:', () => {
     if (isParseSuccess(parsedPlainCode)) {
       expect(parsedPlainCode.jsxFactoryFunction).toEqual('preact.h')
     } else {
-      fail(parsedPlainCode)
+      throw new Error(JSON.stringify(parsedPlainCode))
     }
   })
 
@@ -94,7 +95,7 @@ describe('Parsing JSX Pragma:', () => {
     if (isParseSuccess(parsedPlainCode)) {
       expect(parsedPlainCode.jsxFactoryFunction).toEqual('preact.h')
     } else {
-      fail(parsedPlainCode)
+      throw new Error(JSON.stringify(parsedPlainCode))
     }
   })
 })

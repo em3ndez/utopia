@@ -1,217 +1,372 @@
 import type { CSSProperties } from 'react'
-import { fastForEach } from '../utils'
+import type { PreferredContents } from '../core'
+import type { UtopiaIcon } from '../primitives/icons'
+
+// these fields are shared among all RegularControlDescription. the helper function getControlSharedFields makes sure the types line up
+// Ensure that the fields are also added to the object within `getControlSharedFields` for that typechecking.
+interface ControlBaseFields {
+  control: RegularControlType
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
+}
 
 // Base Level Controls
 
 export type BaseControlType =
-  | 'boolean'
+  | 'checkbox'
   | 'color'
-  | 'componentinstance'
-  | 'enum'
-  | 'expression-enum'
-  | 'eventhandler'
-  | 'ignore'
-  | 'image'
-  | 'number'
-  | 'options'
+  | 'euler'
+  | 'expression-input'
+  | 'expression-popuplist'
+  | 'matrix3'
+  | 'matrix4'
+  | 'none'
+  | 'number-input'
   | 'popuplist'
-  | 'slider'
-  | 'string'
-  | 'styleobject'
+  | 'radio'
+  | 'string-input'
+  | 'html-input'
+  | 'style-controls'
   | 'vector2'
   | 'vector3'
+  | 'vector4'
+  | 'jsx'
 
-interface AbstractControlDescription<T extends ControlType> {
-  title?: string
-  type: T
-  defaultValue?: unknown
-}
-
-interface AbstractBaseControlDescription<T extends BaseControlType>
-  extends AbstractControlDescription<T> {}
-
-export interface BooleanControlDescription extends AbstractBaseControlDescription<'boolean'> {
-  defaultValue?: boolean
+export interface CheckboxControlDescription {
+  control: 'checkbox'
+  label?: string
+  visibleByDefault?: boolean
   disabledTitle?: string
   enabledTitle?: string
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
-export interface ColorControlDescription extends AbstractBaseControlDescription<'color'> {
-  defaultValue?: string
-}
-
-export interface ComponentInstanceDescription
-  extends AbstractBaseControlDescription<'componentinstance'> {
-  defaultValue?: never
+export interface ColorControlDescription {
+  control: 'color'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
 export type AllowedEnumType = string | boolean | number | undefined | null
+export interface BasicControlOption<T> {
+  value: T
+  label: string
+}
 
-export interface EnumControlDescription extends AbstractBaseControlDescription<'enum'> {
-  defaultValue?: AllowedEnumType
-  options: AllowedEnumType[]
-  optionTitles?: string[] | ((props: unknown | null) => string[])
-  displaySegmentedControl?: boolean
+export interface BasicControlOptionWithIcon<T> {
+  value: T
+  label: string
+  icon?: UtopiaIcon
+}
+
+export type BasicControlOptions<T> = AllowedEnumType[] | BasicControlOption<T>[]
+
+export interface PopUpListControlDescription {
+  control: 'popuplist'
+  label?: string
+  visibleByDefault?: boolean
+  options: BasicControlOptions<unknown>
+  required?: boolean
+  defaultValue?: AllowedEnumType | BasicControlOption<unknown>
+  folder?: string
 }
 
 export interface ImportType {
   source: string // importSource
-  name: string
+  name: string | null
   type: 'star' | 'default' | null
 }
 
-export interface ExpressionEnum {
-  value: AllowedEnumType
+export interface ExpressionControlOption<T> {
+  value: T
   expression: string
-  import?: ImportType
+  label?: string
+  requiredImport?: ImportType
 }
 
-export interface ExpressionEnumControlDescription
-  extends AbstractBaseControlDescription<'expression-enum'> {
-  defaultValue?: ExpressionEnum
-  options: ExpressionEnum[]
-  optionTitles?: string[] | ((props: unknown | null) => string[])
+export interface ExpressionPopUpListControlDescription {
+  control: 'expression-popuplist'
+  label?: string
+  visibleByDefault?: boolean
+  options: ExpressionControlOption<unknown>[]
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
-export interface EventHandlerControlDescription
-  extends AbstractBaseControlDescription<'eventhandler'> {
-  defaultValue?: never
+export interface EulerControlDescription {
+  control: 'euler'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: [number, number, number, string]
+  folder?: string
 }
 
-export interface IgnoreControlDescription extends AbstractBaseControlDescription<'ignore'> {
-  defaultValue?: never
+export interface NoneControlDescription {
+  control: 'none'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
-export interface ImageControlDescription extends AbstractBaseControlDescription<'image'> {
-  defaultValue?: string
+// prettier-ignore
+export type Matrix3 = [
+  number, number, number,
+  number, number, number,
+  number, number, number,
+]
+
+export interface Matrix3ControlDescription {
+  control: 'matrix3'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: Matrix3
+  folder?: string
 }
 
-export interface NumberControlDescription extends AbstractBaseControlDescription<'number'> {
-  defaultValue?: number | null
+// prettier-ignore
+export type Matrix4 = [
+  number, number, number, number,
+  number, number, number, number,
+  number, number, number, number,
+  number, number, number, number,
+]
+
+export interface Matrix4ControlDescription {
+  control: 'matrix4'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: Matrix4
+  folder?: string
+}
+
+export interface NumberInputControlDescription {
+  control: 'number-input'
+  label?: string
+  visibleByDefault?: boolean
   max?: number
   min?: number
   unit?: string
   step?: number
   displayStepper?: boolean
-}
-
-export interface OptionsControlDescription extends AbstractBaseControlDescription<'options'> {
+  required?: boolean
   defaultValue?: unknown
-  options: Array<{
-    value: unknown
-    label: string
-  }>
+  folder?: string
 }
 
-export interface PopUpListControlDescription extends AbstractBaseControlDescription<'popuplist'> {
+export interface RadioControlDescription {
+  control: 'radio'
+  label?: string
+  visibleByDefault?: boolean
+  options: AllowedEnumType[] | BasicControlOptionWithIcon<unknown>[]
+  required?: boolean
+  defaultValue?: AllowedEnumType | BasicControlOptionWithIcon<unknown>
+  folder?: string
+}
+
+export interface ExpressionInputControlDescription {
+  control: 'expression-input'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
   defaultValue?: unknown
-  options: Array<{
-    value: unknown
-    label: string
-  }>
+  folder?: string
 }
 
-export interface SliderControlDescription extends AbstractBaseControlDescription<'slider'> {
-  defaultValue?: number
-  max: number
-  min: number
-  step: number
-}
-
-export interface StringControlDescription extends AbstractBaseControlDescription<'string'> {
-  defaultValue?: string
+export interface StringInputControlDescription {
+  control: 'string-input'
+  label?: string
+  visibleByDefault?: boolean
   placeholder?: string
   obscured?: boolean
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
-export interface StyleObjectControlDescription
-  extends AbstractBaseControlDescription<'styleobject'> {
-  defaultValue?: CSSProperties
+export interface HtmlInputControlDescription {
+  control: 'html-input'
+  label?: string
+  visibleByDefault?: boolean
+  placeholder?: string
+  obscured?: boolean
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
+}
+
+export interface StyleControlsControlDescription {
+  control: 'style-controls'
+  label?: string
+  visibleByDefault?: boolean
   placeholder?: CSSProperties
-}
-export interface Vector2ControlDescription extends AbstractBaseControlDescription<'vector2'> {
-  defaultValue?: [number, number]
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
-export interface Vector3ControlDescription extends AbstractBaseControlDescription<'vector3'> {
-  defaultValue?: [number, number, number]
+export type Vector2 = [number, number]
+
+export interface Vector2ControlDescription {
+  control: 'vector2'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: Vector2
+  folder?: string
+}
+
+export type Vector3 = [number, number, number]
+
+export interface Vector3ControlDescription {
+  control: 'vector3'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: Vector3
+  folder?: string
+}
+
+export type Vector4 = [number, number, number, number]
+
+export interface Vector4ControlDescription {
+  control: 'vector4'
+  label?: string
+  visibleByDefault?: boolean
+  required?: boolean
+  defaultValue?: Vector4
+  folder?: string
+}
+
+export interface JSXControlDescription {
+  control: 'jsx'
+  label?: string
+  visibleByDefault?: boolean
+  preferredContents?: PreferredContents | PreferredContents[]
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
 export type BaseControlDescription =
-  | BooleanControlDescription
+  | CheckboxControlDescription
   | ColorControlDescription
-  | ComponentInstanceDescription
-  | EnumControlDescription
-  | ExpressionEnumControlDescription
-  | EventHandlerControlDescription
-  | IgnoreControlDescription
-  | ImageControlDescription
-  | NumberControlDescription
-  | OptionsControlDescription
+  | ExpressionInputControlDescription
+  | ExpressionPopUpListControlDescription
+  | EulerControlDescription
+  | NoneControlDescription
+  | Matrix3ControlDescription
+  | Matrix4ControlDescription
+  | NumberInputControlDescription
+  | RadioControlDescription
   | PopUpListControlDescription
-  | SliderControlDescription
-  | StringControlDescription
-  | StyleObjectControlDescription
+  | StringInputControlDescription
+  | HtmlInputControlDescription
+  | StyleControlsControlDescription
   | Vector2ControlDescription
   | Vector3ControlDescription
+  | Vector4ControlDescription
+  | JSXControlDescription
+
+export type PropertyControlsOptions<T> = Omit<ControlBaseFields, 'control'> & { defaultValue?: T }
 
 // Higher Level Controls
 
-export type HigherLevelControlType = 'array' | 'object' | 'union'
+export type HigherLevelControlType = 'array' | 'tuple' | 'object' | 'union'
+export type RegularControlType = BaseControlType | HigherLevelControlType
+export type ControlType = RegularControlType | 'folder'
 
-export type ControlType = BaseControlType | HigherLevelControlType
-
-interface AbstractHigherLevelControlDescription<T extends HigherLevelControlType>
-  extends AbstractControlDescription<T> {}
-
-export interface ArrayControlDescription extends AbstractHigherLevelControlDescription<'array'> {
-  defaultValue?: unknown[]
-  propertyControl: ControlDescription
+export interface ArrayControlDescription {
+  control: 'array'
+  label?: string
+  visibleByDefault?: boolean
+  propertyControl: RegularControlDescription
   maxCount?: number
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
-export interface ObjectControlDescription extends AbstractHigherLevelControlDescription<'object'> {
+export interface ObjectControlDescription {
+  control: 'object'
+  label?: string
+  visibleByDefault?: boolean
+  object: { [prop: string]: RegularControlDescription }
+  required?: boolean
   defaultValue?: unknown
-  object: { [prop: string]: ControlDescription }
+  folder?: string
 }
 
-export interface UnionControlDescription extends AbstractHigherLevelControlDescription<'union'> {
+export interface UnionControlDescription {
+  control: 'union'
+  label?: string
+  visibleByDefault?: boolean
+  controls: Array<RegularControlDescription>
+  required?: boolean
   defaultValue?: unknown
-  controls: Array<ControlDescription>
+  folder?: string
+}
+export interface TupleControlDescription {
+  control: 'tuple'
+  label?: string
+  visibleByDefault?: boolean
+  propertyControls: RegularControlDescription[]
+  required?: boolean
+  defaultValue?: unknown
+  folder?: string
 }
 
 export type HigherLevelControlDescription =
   | ArrayControlDescription
   | ObjectControlDescription
+  | TupleControlDescription
   | UnionControlDescription
+
+export type RegularControlDescription = BaseControlDescription | HigherLevelControlDescription
 
 // Please ensure that `property-controls-utils.ts` is kept up to date
 // with any changes to this or the component types.
-export type ControlDescription = BaseControlDescription | HigherLevelControlDescription
+export type ControlDescription = RegularControlDescription
 
 export function isBaseControlDescription(
   control: ControlDescription,
 ): control is BaseControlDescription {
-  switch (control.type) {
-    case 'boolean':
+  switch (control.control) {
+    case 'checkbox':
     case 'color':
-    case 'componentinstance':
-    case 'enum':
-    case 'expression-enum':
-    case 'eventhandler':
-    case 'ignore':
-    case 'image':
-    case 'number':
-    case 'options':
+    case 'euler':
+    case 'expression-input':
+    case 'expression-popuplist':
+    case 'matrix3':
+    case 'matrix4':
+    case 'none':
+    case 'number-input':
     case 'popuplist':
-    case 'slider':
-    case 'string':
-    case 'styleobject':
+    case 'radio':
+    case 'string-input':
+    case 'html-input':
+    case 'style-controls':
     case 'vector2':
     case 'vector3':
+    case 'vector4':
+    case 'jsx':
       return true
     case 'array':
     case 'object':
+    case 'tuple':
     case 'union':
       return false
     default:
@@ -223,86 +378,15 @@ export function isBaseControlDescription(
 export function isHigherLevelControlDescription(
   control: ControlDescription,
 ): control is HigherLevelControlDescription {
-  switch (control.type) {
-    case 'boolean':
-    case 'color':
-    case 'componentinstance':
-    case 'enum':
-    case 'expression-enum':
-    case 'eventhandler':
-    case 'ignore':
-    case 'image':
-    case 'number':
-    case 'options':
-    case 'popuplist':
-    case 'slider':
-    case 'string':
-    case 'styleobject':
-    case 'vector2':
-    case 'vector3':
-      return false
-    case 'array':
-    case 'object':
-    case 'union':
-      return true
-    default:
-      const _exhaustiveCheck: never = control
-      throw new Error(`Unhandled controls ${JSON.stringify(control)}`)
-  }
+  return !isBaseControlDescription(control)
 }
 
-export type PropertyControls<ComponentProps = any> = {
-  [K in keyof ComponentProps]?: ControlDescription
+export type PropertyControls = {
+  [key: string]: ControlDescription
 }
 
 export function addPropertyControls(component: unknown, propertyControls: PropertyControls): void {
   if (component != null) {
     ;(component as any)['propertyControls'] = propertyControls
-  }
-}
-
-export function getDefaultProps(propertyControls: PropertyControls): { [prop: string]: unknown } {
-  let defaults: { [prop: string]: unknown } = {}
-  const propKeys = Object.keys(propertyControls)
-  fastForEach(propKeys, (prop) => {
-    const control = propertyControls[prop]
-    if (control != null && control.defaultValue != null) {
-      defaults[prop] = control.defaultValue
-    }
-  })
-  return defaults
-}
-
-export function expression(
-  value: AllowedEnumType,
-  expressionString: string,
-  toImport: ImportType,
-): ExpressionEnum {
-  return {
-    value: value,
-    expression: expressionString,
-    import: toImport,
-  }
-}
-
-export function importStar(source: string, name: string): ImportType {
-  return {
-    source: source,
-    name: name,
-    type: 'star',
-  }
-}
-export function importDefault(source: string, name: string): ImportType {
-  return {
-    source: source,
-    name: name,
-    type: 'default',
-  }
-}
-export function importNamed(source: string, name: string): ImportType {
-  return {
-    source: source,
-    name: name,
-    type: null,
   }
 }

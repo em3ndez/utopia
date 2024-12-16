@@ -6,6 +6,7 @@ node_modules
 
 ## Build generated
 build/
+dist/
 DerivedData
 editor/build
 editor/node_modules
@@ -114,6 +115,7 @@ editor/test/mocha.opts
 
 # Server executable from the release build.
 server/utopia-web
+server/utopia-web-test
 
 # Redis
 *.rdb
@@ -127,6 +129,15 @@ editor/src/components/editor/npm-dependency/utopia-api-typings.ts
 .github-test-projects
 
 # Database.
-server/pglog.txt
-server/.pglock
-server/utopia-db
+pglog.txt
+.pglock
+utopia-db
+
+# Nix builds.
+server-build-result
+
+# Local custom setups.
+custom-shell.nix
+
+# Benchmark results.
+editor/benchmark

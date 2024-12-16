@@ -1,0 +1,269 @@
+/** @jsxRuntime classic */
+/** @jsx jsx */
+import React from 'react'
+import { jsx } from '@emotion/react'
+import {
+  Icons,
+  FlexRow,
+  SquareButton,
+  InspectorSectionHeader,
+  useColorTheme,
+  Button,
+} from '../../uuiui'
+import { Substores, useEditorState, useRefEditorState } from '../editor/store/store-hook'
+import { metadataSelector, selectedViewsSelector } from './inpector-selectors'
+import {
+  addFlexLayoutStrategies,
+  addGridLayoutStrategies,
+  removeFlexLayoutStrategies,
+  removeGridLayoutStrategies,
+} from './inspector-strategies/inspector-strategies'
+import { executeFirstApplicableStrategy } from './inspector-strategies/inspector-strategy'
+import { useDispatch } from '../editor/store/dispatch-context'
+import { NO_OP, assertNever } from '../../core/shared/utils'
+import type { DropdownMenuItem } from '../../uuiui/radix-components'
+import {
+  DropdownMenu,
+  regularDropdownMenuItem,
+  separatorDropdownMenuItem,
+} from '../../uuiui/radix-components'
+import { stripNulls } from '../../core/shared/array-utils'
+import { layoutSystemSelector } from './flex-section'
+import { AdvancedGridModal } from './controls/advanced-grid-modal'
+import { when } from '../../utils/react-conditionals'
+import { useDesignPanelContext } from '../canvas/design-panel-root'
+import { useGridAdvancedPropertiesCount } from './use-grid-advanced-properties'
+
+export const AddRemoveLayoutSystemControlTestId = (): string => 'AddRemoveLayoutSystemControlTestId'
+export const AddFlexLayoutOptionId = 'add-flex-layout'
+export const AddGridLayoutOptionId = 'add-grid-layout'
+export const RemoveLayoutSystemOptionId = 'remove-layout-system'
+
+interface AddRemoveLayoutSystemControlProps {}
+
+// adjusting the modal position to have some space from the left edge of the design panel
+const X_OFFSET = 20
+const Y_OFFSET = 20
+
+export const AddRemoveLayoutSystemControl = React.memo<AddRemoveLayoutSystemControlProps>(() => {
+  const [popupOpen, setPopupOpen] = React.useState(false)
+  const closePopup = React.useCallback(() => {
+    setPopupOpen(false)
+  }, [])
+  const openPopup = React.useCallback(() => {
+    setPopupOpen(true)
+  }, [])
+
+  const layoutSystem = useEditorState(
+    Substores.metadata,
+    layoutSystemSelector,
+    'AddRemoveLayoutSystemControl isFlexLayoutedContainer',
+  )
+
+  const dispatch = useDispatch()
+  const elementMetadataRef = useRefEditorState(metadataSelector)
+  const selectedViewsRef = useRefEditorState(selectedViewsSelector)
+  const elementPathTreeRef = useRefEditorState((store) => store.editor.elementPathTree)
+  const allElementPropsRef = useRefEditorState((store) => store.editor.allElementProps)
+
+  const addFlexLayoutSystem = React.useCallback(
+    () =>
+      executeFirstApplicableStrategy(
+        dispatch,
+        addFlexLayoutStrategies(
+          elementMetadataRef.current,
+          selectedViewsRef.current,
+          elementPathTreeRef.current,
+          allElementPropsRef.current,
+        ),
+      ),
+    [allElementPropsRef, dispatch, elementMetadataRef, elementPathTreeRef, selectedViewsRef],
+  )
+
+  const addGridLayoutSystem = React.useCallback(
+    () =>
+      executeFirstApplicableStrategy(
+        dispatch,
+        addGridLayoutStrategies(
+          elementMetadataRef.current,
+          selectedViewsRef.current,
+          elementPathTreeRef.current,
+          allElementPropsRef.current,
+        ),
+      ),
+    [allElementPropsRef, dispatch, elementMetadataRef, elementPathTreeRef, selectedViewsRef],
+  )
+
+  const removeLayoutSystem = React.useCallback(
+    () =>
+      executeFirstApplicableStrategy(dispatch, [
+        ...removeFlexLayoutStrategies(
+          elementMetadataRef.current,
+          selectedViewsRef.current,
+          elementPathTreeRef.current,
+        ),
+        ...removeGridLayoutStrategies(
+          elementMetadataRef.current,
+          selectedViewsRef.current,
+          elementPathTreeRef.current,
+        ),
+      ]),
+    [dispatch, elementMetadataRef, elementPathTreeRef, selectedViewsRef],
+  )
+
+  const colorTheme = useColorTheme()
+
+  const addLayoutSystemOpenerButton = React.useCallback(() => {
+    return (
+      <SquareButton highlight onClick={NO_OP} primary={popupOpen}>
+        {layoutSystem == null ? (
+          <Icons.SmallPlus />
+        ) : (
+          <Icons.Threedots color={popupOpen ? 'white' : 'main'} />
+        )}
+      </SquareButton>
+    )
+  }, [layoutSystem, popupOpen])
+
+  const numberOfGridPropsSet = useGridAdvancedPropertiesCount()
+
+  const addLayoutSystemMenuDropdownItems = React.useMemo((): DropdownMenuItem[] => {
+    const gridItems: DropdownMenuItem[] = [
+      regularDropdownMenuItem({
+        id: 'more-settings',
+        label: 'Advanced',
+        onSelect: openPopup,
+        badge: numberOfGridPropsSet > 0 ? `+${numberOfGridPropsSet}` : null,
+      }),
+      regularDropdownMenuItem({
+        id: AddFlexLayoutOptionId,
+        label: 'Convert to Flex',
+        onSelect: addFlexLayoutSystem,
+      }),
+      separatorDropdownMenuItem('dropdown-separator'),
+      regularDropdownMenuItem({
+        id: RemoveLayoutSystemOptionId,
+        label: 'Remove Grid',
+        onSelect: removeLayoutSystem,
+        danger: true,
+      }),
+    ]
+
+    const flexItems: DropdownMenuItem[] = [
+      regularDropdownMenuItem({
+        id: AddGridLayoutOptionId,
+        label: 'Convert to Grid',
+        onSelect: addGridLayoutSystem,
+      }),
+      separatorDropdownMenuItem('dropdown-separator'),
+      regularDropdownMenuItem({
+        id: RemoveLayoutSystemOptionId,
+        label: 'Remove Flex',
+        onSelect: removeLayoutSystem,
+        danger: true,
+      }),
+    ]
+
+    const noLayoutItems: DropdownMenuItem[] = [
+      regularDropdownMenuItem({
+        id: AddFlexLayoutOptionId,
+        label: 'Flex',
+        onSelect: addFlexLayoutSystem,
+      }),
+      regularDropdownMenuItem({
+        id: AddGridLayoutOptionId,
+        label: 'Grid',
+        onSelect: addGridLayoutSystem,
+      }),
+    ]
+
+    return stripNulls(
+      layoutSystem === 'grid' ? gridItems : layoutSystem === 'flex' ? flexItems : noLayoutItems,
+    )
+  }, [
+    addFlexLayoutSystem,
+    addGridLayoutSystem,
+    layoutSystem,
+    removeLayoutSystem,
+    openPopup,
+    numberOfGridPropsSet,
+  ])
+
+  const label = () => {
+    switch (layoutSystem) {
+      case null:
+        return 'Layout System'
+      case 'flex':
+        return 'Flex'
+      case 'grid':
+        return 'Grid'
+      default:
+        assertNever(layoutSystem)
+    }
+  }
+
+  const { panelWidth } = useDesignPanelContext()
+  const modalOffset = React.useMemo(() => {
+    const x = -1 * (panelWidth + X_OFFSET)
+    const y = -1 * Y_OFFSET
+    return { x: x, y: y }
+  }, [panelWidth])
+
+  const [menuOpen, setMenuOpen] = React.useState(false)
+
+  return (
+    <InspectorSectionHeader
+      css={{
+        transition: 'color .1s ease-in-out',
+        color: colorTheme.fg1.value,
+        '--buttonContentOpacity': 0.3,
+        '&:hover': {
+          color: colorTheme.fg1.value,
+          '--buttonContentOpacity': 1,
+        },
+      }}
+    >
+      <FlexRow
+        style={{
+          flexGrow: 1,
+          alignSelf: 'stretch',
+          gap: 8,
+        }}
+      >
+        <span style={{ textTransform: 'capitalize', fontSize: '11px' }}>{label()}</span>
+        {when(
+          popupOpen,
+          <AdvancedGridModal
+            id='grid-advanced'
+            testId='grid-advanced'
+            key='grid-advanced'
+            closePopup={closePopup}
+            popupOpen={popupOpen}
+            modalOffset={modalOffset}
+          />,
+        )}
+      </FlexRow>
+      <FlexRow data-testid={AddRemoveLayoutSystemControlTestId()} style={{ gap: 2 }}>
+        {when(
+          numberOfGridPropsSet > 0 && !menuOpen && !popupOpen,
+          <Button
+            onClick={openPopup}
+            highlight
+            style={{
+              color: colorTheme.dynamicBlue.value,
+              minWidth: 22,
+            }}
+          >
+            +{numberOfGridPropsSet}
+          </Button>,
+        )}
+        <DropdownMenu
+          align='end'
+          items={addLayoutSystemMenuDropdownItems}
+          opener={addLayoutSystemOpenerButton}
+          onOpenChange={setMenuOpen}
+        />
+      </FlexRow>
+    </InspectorSectionHeader>
+  )
+})

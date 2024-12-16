@@ -1,41 +1,34 @@
 import React from 'react'
-import {
-  CSSUnknownArrayItem,
-  EmptyInputValue,
-  isCSSUnknownArrayItem,
-  isEmptyInputValue,
-} from '../common/css-utils'
+import type { CSSUnknownArrayItem, EmptyInputValue } from '../common/css-utils'
+import { isCSSUnknownArrayItem, isEmptyInputValue } from '../common/css-utils'
 import { CSSArrayItem, getIndexedSpliceArrayItem } from '../common/inspector-utils'
-import { UseSubmitValueFactory } from '../common/property-path-hooks'
+import type { UseSubmitValueFactory } from '../common/property-path-hooks'
 import { stopPropagation } from '../common/inspector-utils'
-import { ControlStatus, ControlStyles } from '../common/control-status'
+import type { ControlStyles } from '../common/control-styles'
+import type { ControlStatus } from '../common/control-status'
 import { PropertyRow } from '../widgets/property-row'
 import { StringControl } from './string-control'
 import { CheckboxInput, FlexRow, Tooltip } from '../../../uuiui'
-import { betterReactMemo } from '../../../uuiui-deps'
 
 interface FakeUnknownArrayItemProps {
   controlStatus: ControlStatus
 }
 
-export const FakeUnknownArrayItem = betterReactMemo<FakeUnknownArrayItemProps>(
-  'FakeUnknownArrayItem',
-  (props) => (
-    <PropertyRow
-      style={{
-        gridTemplateColumns: '12px 1fr',
-        gridColumnGap: 8,
-      }}
-    >
-      <CheckboxInput
-        disabled={true}
-        controlStatus={props.controlStatus}
-        onMouseDown={stopPropagation}
-      />
-      <FlexRow style={{ height: 22 }}>Unknown</FlexRow>
-    </PropertyRow>
-  ),
-)
+export const FakeUnknownArrayItem = React.memo<FakeUnknownArrayItemProps>((props) => (
+  <PropertyRow
+    style={{
+      gridTemplateColumns: '12px 1fr',
+      gridColumnGap: 8,
+    }}
+  >
+    <CheckboxInput
+      disabled={true}
+      controlStatus={props.controlStatus}
+      onMouseDown={stopPropagation}
+    />
+    <FlexRow style={{ height: 22 }}>Unknown</FlexRow>
+  </PropertyRow>
+))
 
 function getIndexedUpdateUnknownArrayItemValue<T>(index: number) {
   return function updateUnknownArrayItemValue(

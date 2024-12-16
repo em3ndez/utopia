@@ -1,11 +1,11 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.4.
+-- This file has been generated from package.yaml by hpack version 0.34.7.
 --
 -- see: https://github.com/sol/hpack
 
 name:           utopia-web
-version:        0.1.0.4
+version:        0.1.1.0
 synopsis:       Utopia Web
 description:    Utopia Web
 category:       Development
@@ -18,25 +18,36 @@ source-repository head
   type: git
   location: https://github.com/concrete-utopia/utopia
 
+flag enable-external-tests
+  description: Enable the external tests.
+  manual: True
+  default: True
+
 executable utopia-web
   main-is: Main.hs
   other-modules:
       Utopia.Web.Assets
       Utopia.Web.Auth
+      Utopia.Web.Auth.Github
       Utopia.Web.Auth.Session
       Utopia.Web.Auth.Types
-      Utopia.Web.ClientModel
       Utopia.Web.Database
       Utopia.Web.Database.Migrations
       Utopia.Web.Database.Types
       Utopia.Web.Editor.Branches
       Utopia.Web.Endpoints
+      Utopia.Web.Endpoints.Collaboration
+      Utopia.Web.Endpoints.Common
       Utopia.Web.Exceptions
       Utopia.Web.Executors.Common
       Utopia.Web.Executors.Development
       Utopia.Web.Executors.Production
       Utopia.Web.Github
+      Utopia.Web.Github.Types
       Utopia.Web.JSON
+      Utopia.Web.Liveblocks
+      Utopia.Web.Liveblocks.API
+      Utopia.Web.Liveblocks.Types
       Utopia.Web.Logging
       Utopia.Web.Metrics
       Utopia.Web.Packager.Locking
@@ -47,23 +58,27 @@ executable utopia-web
       Utopia.Web.Server
       Utopia.Web.ServiceTypes
       Utopia.Web.Types
+      Utopia.Web.Types.Collaboration
       Utopia.Web.Utils.Files
+      Utopia.Web.Utils.Limits
       Paths_utopia_web
   hs-source-dirs:
       src
+      app
   default-extensions:
       NoImplicitPrelude
-  ghc-options: -Wall -threaded -rtsopts
+  ghc-options: -Wall -Werror -threaded -fno-warn-orphans -Wno-unused-imports -Wno-deprecations -rtsopts -O2
   extra-libraries:
       z
   build-depends:
-      aeson
+      JuicyPixels
+    , aeson ==2.0.3.0
     , aeson-pretty
-    , amazonka ==1.6.1
-    , amazonka-core ==1.6.1
-    , amazonka-s3 ==1.6.1
+    , async
+    , aws
     , base >=4.7 && <5
     , base16-bytestring
+    , base64
     , binary
     , blaze-html
     , bytestring
@@ -71,8 +86,10 @@ executable utopia-web
     , cereal
     , concurrent-extra
     , conduit
+    , containers
     , cookie
     , cryptohash-sha256
+    , cryptonite
     , data-default
     , directory
     , exceptions
@@ -80,22 +97,28 @@ executable utopia-web
     , filepath
     , free
     , generic-lens
+    , generic-lens-core
+    , github ==0.27
+    , hashable
+    , hoauth2
     , http-api-data
     , http-client
     , http-client-tls
     , http-media
     , http-types
     , lens
-    , lens-aeson
+    , lens-aeson ==1.1.3
+    , lifted-async
     , lifted-base
+    , magic
+    , mime
     , mime-types
     , modern-uri
     , monad-control
     , monad-logger
     , mtl
     , network-uri
-    , opaleye
-    , opaleye-trans
+    , opaleye ==0.9.6.1
     , path
     , path-pieces
     , pathwalk
@@ -103,19 +126,20 @@ executable utopia-web
     , postgresql-simple-migration
     , process
     , product-profunctors
-    , protolude ==0.3.0
+    , protolude
     , resource-pool
     , rio
-    , servant ==0.18.2
+    , servant ==0.19.1
     , servant-blaze
-    , servant-client ==0.18.2
+    , servant-client
     , servant-conduit
     , servant-rawm-client
-    , servant-rawm-server
-    , servant-server ==0.18.2
-    , servant-websockets ==2.0.0
+    , servant-rawm-server ==1.0.0.1
+    , servant-server ==0.19.2
+    , servant-websockets
     , serversession ==1.0.2
     , split
+    , string-conversions
     , tagsoup
     , tar
     , temporary
@@ -124,12 +148,16 @@ executable utopia-web
     , time-manager
     , transformers
     , unix
+    , unliftio
     , unordered-containers
+    , uri-bytestring
+    , utf8-string
+    , utopia-clientmodel
     , uuid
     , vector
     , wai
     , wai-app-static
-    , wai-extra ==3.0.29.1
+    , wai-extra
     , wai-websockets
     , warp
     , websockets
@@ -141,27 +169,34 @@ test-suite utopia-web-test
   type: exitcode-stdio-1.0
   main-is: Main.hs
   other-modules:
+      Test.Utopia.Web.Database
+      Test.Utopia.Web.Database.Utils
       Test.Utopia.Web.Endpoints
       Test.Utopia.Web.Executors.Test
       Test.Utopia.Web.Packager.NPM
       Test.Utopia.Web.Servant
-      Main
       Utopia.Web.Assets
       Utopia.Web.Auth
+      Utopia.Web.Auth.Github
       Utopia.Web.Auth.Session
       Utopia.Web.Auth.Types
-      Utopia.Web.ClientModel
       Utopia.Web.Database
       Utopia.Web.Database.Migrations
       Utopia.Web.Database.Types
       Utopia.Web.Editor.Branches
       Utopia.Web.Endpoints
+      Utopia.Web.Endpoints.Collaboration
+      Utopia.Web.Endpoints.Common
       Utopia.Web.Exceptions
       Utopia.Web.Executors.Common
       Utopia.Web.Executors.Development
       Utopia.Web.Executors.Production
       Utopia.Web.Github
+      Utopia.Web.Github.Types
       Utopia.Web.JSON
+      Utopia.Web.Liveblocks
+      Utopia.Web.Liveblocks.API
+      Utopia.Web.Liveblocks.Types
       Utopia.Web.Logging
       Utopia.Web.Metrics
       Utopia.Web.Packager.Locking
@@ -172,24 +207,28 @@ test-suite utopia-web-test
       Utopia.Web.Server
       Utopia.Web.ServiceTypes
       Utopia.Web.Types
+      Utopia.Web.Types.Collaboration
       Utopia.Web.Utils.Files
+      Utopia.Web.Utils.Limits
       Paths_utopia_web
   hs-source-dirs:
       test
       src
   default-extensions:
       NoImplicitPrelude
-  ghc-options: -Wall -threaded -rtsopts
+  ghc-options: -Wall -Werror -threaded -fno-warn-orphans -Wno-unused-imports -Wno-deprecations -rtsopts -O2
   extra-libraries:
       z
   build-depends:
-      aeson
+      HUnit
+    , JuicyPixels
+    , aeson ==2.0.3.0
     , aeson-pretty
-    , amazonka ==1.6.1
-    , amazonka-core ==1.6.1
-    , amazonka-s3 ==1.6.1
+    , async
+    , aws
     , base >=4.7 && <5
     , base16-bytestring
+    , base64
     , binary
     , blaze-html
     , bytestring
@@ -197,8 +236,10 @@ test-suite utopia-web-test
     , cereal
     , concurrent-extra
     , conduit
+    , containers
     , cookie
     , cryptohash-sha256
+    , cryptonite
     , data-default
     , directory
     , exceptions
@@ -206,24 +247,29 @@ test-suite utopia-web-test
     , filepath
     , free
     , generic-lens
+    , generic-lens-core
+    , github ==0.27
+    , hashable
     , hedgehog
-    , hspec
+    , hoauth2
     , http-api-data
     , http-client
     , http-client-tls
     , http-media
     , http-types
     , lens
-    , lens-aeson
+    , lens-aeson ==1.1.3
+    , lifted-async
     , lifted-base
+    , magic
+    , mime
     , mime-types
     , modern-uri
     , monad-control
     , monad-logger
     , mtl
     , network-uri
-    , opaleye
-    , opaleye-trans
+    , opaleye ==0.9.6.1
     , path
     , path-pieces
     , pathwalk
@@ -232,26 +278,26 @@ test-suite utopia-web-test
     , postgresql-simple-migration
     , process
     , product-profunctors
-    , protolude ==0.3.0
+    , protolude
     , random
     , resource-pool
     , rio
-    , servant ==0.18.2
+    , servant ==0.19.1
     , servant-blaze
-    , servant-client ==0.18.2
+    , servant-client
     , servant-client-core
     , servant-conduit
     , servant-rawm-client
-    , servant-rawm-server
-    , servant-server ==0.18.2
-    , servant-websockets ==2.0.0
+    , servant-rawm-server ==1.0.0.1
+    , servant-server ==0.19.2
+    , servant-websockets
     , serversession ==1.0.2
     , split
+    , string-conversions
     , tagsoup
     , tar
-    , tasty
+    , tasty ==1.5
     , tasty-hedgehog
-    , tasty-hspec
     , tasty-hunit
     , temporary
     , text
@@ -259,15 +305,23 @@ test-suite utopia-web-test
     , time-manager
     , transformers
     , unix
+    , unliftio
     , unordered-containers
+    , uri-bytestring
+    , utf8-string
+    , utopia-clientmodel
     , uuid
     , vector
     , wai
     , wai-app-static
-    , wai-extra ==3.0.29.1
+    , wai-extra
     , wai-websockets
     , warp
     , websockets
     , wreq
     , zlib
+  if flag(enable-external-tests)
+    cpp-options: -DENABLE_EXTERNAL_TESTS=True
+  else
+    cpp-options: -DENABLE_EXTERNAL_TESTS=False
   default-language: Haskell2010

@@ -1,5 +1,5 @@
 import React from 'react'
-import {
+import type {
   Attributes,
   CElement,
   ClassAttributes,
@@ -19,8 +19,8 @@ import {
   ReactNode,
   ReactSVG,
   ReactSVGElement,
-  SFC,
-  SFCElement,
+  FC,
+  FunctionComponentElement,
   SVGAttributes,
 } from 'react'
 
@@ -49,10 +49,10 @@ class RU {
 
   // Custom components
   static create<P>(
-    type: SFC<P>,
+    type: FC<React.PropsWithChildren<P>>,
     props?: { key: Key } & Attributes & P,
     ...children: ReactNode[]
-  ): SFCElement<P>
+  ): FunctionComponentElement<P>
   static create<P>(
     type: ClassType<P, ClassicComponent<P, ComponentState>, ClassicComponentClass<P>>,
     props?: { key: Key } & ClassAttributes<ClassicComponent<P, ComponentState>> & P,
@@ -81,6 +81,15 @@ class RU {
   static children(attrs: any): Array<ReactElement<any>> | null {
     return attrs.children
   }
+}
+
+export function isValidReactNode(node: unknown) {
+  return (
+    React.isValidElement(node) ||
+    typeof node === 'string' ||
+    typeof node === 'number' ||
+    node === null
+  )
 }
 
 export default RU

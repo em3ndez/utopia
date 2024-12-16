@@ -1,3 +1,4 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
 import { jsx } from '@emotion/react'
 import styled from '@emotion/styled'
@@ -19,13 +20,12 @@ import {
   A,
   PMT,
 } from './documentation-components'
-import { ProjectListing } from '../../common/persistence'
+import type { ProjectListing } from '../../common/persistence'
 import { fetchProjectMetadata } from '../../common/server'
 import { stripNulls } from '../../core/shared/array-utils'
 import { projectURLForProject } from '../../core/shared/utils'
 import { EllipsisSpinner } from '../common/ellipsis-spinner'
 import { FlexRow, FlexColumn } from '../../uuiui'
-import { betterReactMemo } from '../../uuiui-deps'
 
 const codeString = `
 App.propertyControls = {
@@ -51,7 +51,7 @@ App.propertyControls = {
 
 `
 
-const ProjectCard = betterReactMemo('Project Card', (props: ProjectListing) => {
+const ProjectCard = React.memo((props: ProjectListing) => {
   const projectURL = projectURLForProject(props.id, props.title)
   const onClick = React.useCallback(() => window.open(projectURL, '_self'), [projectURL])
   return (
@@ -151,8 +151,7 @@ const FeaturedProjectIDs: ReadonlyArray<string> = [
   'f4fcb83b-react-spring-cards',
 ]
 
-const LoadedProjectsRow = betterReactMemo(
-  'Loaded Projects',
+const LoadedProjectsRow = React.memo(
   ({ projects }: { projects: ReadonlyArray<ProjectListing> }) => {
     return (
       <FlexRow
@@ -179,16 +178,15 @@ const LoadedProjectsRow = betterReactMemo(
   },
 )
 
-const FeaturedProjects = betterReactMemo('Featured Projects', () => {
-  const [featuredProjectList, setFeaturedProjectList] = React.useState<ReadonlyArray<
-    ProjectListing
-  > | null>(null)
+const FeaturedProjects = React.memo(() => {
+  const [featuredProjectList, setFeaturedProjectList] =
+    React.useState<ReadonlyArray<ProjectListing> | null>(null)
 
   React.useEffect(() => {
     const fetchedProjectPromises = FeaturedProjectIDs.map((projectId) =>
       fetchProjectMetadata(projectId),
     )
-    Promise.all(fetchedProjectPromises).then((fetchedProjects) => {
+    void Promise.all(fetchedProjectPromises).then((fetchedProjects) => {
       const withOutNulls = stripNulls(fetchedProjects)
       setFeaturedProjectList(withOutNulls)
     })
@@ -214,7 +212,7 @@ const FeaturedProjects = betterReactMemo('Featured Projects', () => {
   )
 })
 
-export const GettingStarted = betterReactMemo('Getting Started', () => {
+export const GettingStarted = React.memo(() => {
   return (
     <FixedWidth>
       <H1>Welcome to the Developer Preview</H1>

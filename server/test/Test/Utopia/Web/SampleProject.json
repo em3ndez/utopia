@@ -1,6 +1,7 @@
 {
   "appID": null,
-  "projectVersion": 6,
+  "projectVersion": 8,
+  "projectDescription": "",
   "projectContents": {
     "package.json": {
       "type": "PROJECT_CONTENT_FILE",
@@ -13,7 +14,7 @@
           "revisionsState": "BOTH_MATCH"
         },
         "lastSavedContents": null,
-        "lastRevisedTime": 0
+        "versionNumber": 0
       }
     },
     "src": {
@@ -170,7 +171,7 @@
               "revisionsState": "BOTH_MATCH"
             },
             "lastSavedContents": null,
-            "lastRevisedTime": 1608045469428
+            "versionNumber": 1
           }
         },
         "index.js": {
@@ -184,7 +185,7 @@
               "revisionsState": "CODE_AHEAD"
             },
             "lastSavedContents": null,
-            "lastRevisedTime": 0
+            "versionNumber": 0
           }
         }
       }
@@ -211,7 +212,7 @@
               "revisionsState": "CODE_AHEAD"
             },
             "lastSavedContents": null,
-            "lastRevisedTime": 0
+            "versionNumber": 0
           }
         }
       }
@@ -230,6 +231,8 @@
   "fileBrowser": { "minimised": false },
   "dependencyList": { "minimised": false },
   "projectSettings": { "minimised": false },
-  "navigator": { "minimised": false }
+  "navigator": { "minimised": false },
+  "githubSettings": {
+    "targetRepository": null
+  }
 }
-

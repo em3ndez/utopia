@@ -1,236 +1,474 @@
+/** @jsxRuntime classic */
 /** @jsx jsx */
-import { jsx } from '@emotion/react'
-import { ResizeDirection } from 're-resizable'
-import React from 'react'
-import { DndProvider } from 'react-dnd'
-import Backend from 'react-dnd-html5-backend'
-import Utils from '../../utils/utils'
-import { FancyError, RuntimeErrorInfo } from '../../core/shared/code-exec-utils'
-import { getCursorFromDragState } from '../canvas/canvas-utils'
-import { DesignPanelRoot } from '../canvas/design-panel-root'
-import { resizeLeftPane } from '../common/actions'
-import { ConfirmCloseDialog } from '../filebrowser/confirm-close-dialog'
-import { ConfirmDeleteDialog } from '../filebrowser/confirm-delete-dialog'
-import { Menubar } from '../menubar/menubar'
-import { LeftPaneComponent } from '../navigator/left-pane'
-import { PreviewColumn } from '../preview/preview-pane'
-import { ReleaseNotesContent } from '../documentation/release-notes'
-import { EditorDispatch, LoginState } from './action-types'
-import * as EditorActions from './actions/action-creators'
-import { handleKeyDown, handleKeyUp } from './global-shortcuts'
-import { StateHistory } from './history'
-import { LoginStatusBar, BrowserInfoBar } from './notification-bar'
-import {
-  ConsoleLog,
-  getOpenFile,
-  getOpenTextFileKey,
-  LeftMenuTab,
-  LeftPaneDefaultWidth,
-  StoryboardFilePath,
-} from './store/editor-state'
-import { useEditorState, useRefEditorState } from './store/store-hook'
-import { isParsedTextFile } from '../../core/shared/project-file-types'
-import { isLiveMode, dragAndDropInsertionSubject, EditorModes, isSelectMode } from './editor-modes'
-import { Toast } from '../common/notices'
+/** @jsxFrag React.Fragment */
+import { css, jsx, keyframes } from '@emotion/react'
 import { chrome as isChrome } from 'platform-detect'
-import { applyShortcutConfigurationToDefaults } from './shortcut-definitions'
-import { PROPERTY_CONTROLS_INFO_BASE_URL } from '../../common/env-vars'
+import React, { useEffect } from 'react'
+import ReactDOM from 'react-dom'
+import { DndProvider } from 'react-dnd'
+import { HTML5Backend } from 'react-dnd-html5-backend'
+import { IS_TEST_ENVIRONMENT } from '../../common/env-vars'
 import {
-  PropertyControlsInfoIFrameID,
-  setPropertyControlsIFrameAvailable,
-} from '../../core/property-controls/property-controls-utils'
+  CanvasContextMenuPortalTargetID,
+  assertNever,
+  projectURLForProject,
+} from '../../core/shared/utils'
+import Keyboard from '../../utils/keyboard'
+import { Modifier } from '../../utils/modifiers'
 import {
-  SimpleFlexRow,
-  SimpleFlexColumn,
-  UtopiaTheme,
-  FlexRow,
-  ResizableFlexColumn,
-  useColorTheme,
-  TabComponent,
-  LargerIcons,
-  Subdued,
   FlexColumn,
+  LargerIcons,
+  ResizableFlexColumn,
+  SimpleFlexColumn,
+  SimpleFlexRow,
+  ColorThemeComponent,
+  TabComponent,
+  useColorTheme,
+  UtopiaTheme,
+  UtopiaStyles,
 } from '../../uuiui'
-import { betterReactMemo } from '../../uuiui-deps'
-import { createIframeUrl } from '../../core/shared/utils'
-import { setBranchNameFromURL } from '../../utils/branches'
+import CanvasActions from '../canvas/canvas-actions'
+import {
+  createInteractionViaKeyboard,
+  updateInteractionViaKeyboard,
+} from '../canvas/canvas-strategies/interaction-state'
+import { useClearKeyboardInteraction } from '../canvas/controls/select-mode/select-mode-hooks'
+import { DesignPanelRoot } from '../canvas/design-panel-root'
+import { Toast } from '../common/notices'
+import { ConfirmDeleteDialog } from '../filebrowser/confirm-delete-dialog'
+import { ConfirmOverwriteDialog } from '../filebrowser/confirm-overwrite-dialog'
+import { ConfirmRevertDialog } from '../filebrowser/confirm-revert-dialog'
+import { ConfirmRevertAllDialog } from '../filebrowser/confirm-revert-all-dialog'
+import * as EditorActions from './actions/action-creators'
+import { FatalIndexedDBErrorComponent } from './fatal-indexeddb-error-component'
+import { editorIsTarget, handleKeyDown, handleKeyUp } from './global-shortcuts'
+import { BrowserInfoBar, LoginStatusBar } from './notification-bar'
+import { applyShortcutConfigurationToDefaults } from './shortcut-definitions'
+import type { GithubOperation } from './store/editor-state'
+import { githubOperationLocksEditor, LeftMenuTab, RightMenuTab } from './store/editor-state'
+import {
+  Substores,
+  useEditorState,
+  useRefEditorState,
+  useSelectorWithCallback,
+} from './store/store-hook'
+import { ConfirmDisconnectBranchDialog } from '../filebrowser/confirm-branch-disconnect'
+import { when } from '../../utils/react-conditionals'
+import { LowPriorityStoreProvider } from './store/store-context-providers'
+import { useDispatch } from './store/dispatch-context'
+import type { EditorAction } from './action-types'
+import { EditorCommon } from './editor-component-common'
+import { notice } from '../common/notice'
+import { ProjectServerStateUpdater } from './store/project-server-state'
+import { RoomProvider, initialPresence, useRoom, initialStorage } from '../../../liveblocks.config'
+import { generateUUID } from '../../utils/utils'
+import { isLiveblocksEnabled } from './liveblocks-utils'
+import type { Storage, Presence, RoomEvent, UserMeta } from '../../../liveblocks.config'
+import LiveblocksProvider from '@liveblocks/yjs'
+import { EditorModes } from './editor-modes'
+import { useDataThemeAttributeOnBody } from '../../core/commenting/comment-hooks'
+import { CollaborationStateUpdater } from './store/collaboration-state'
+import { GithubRepositoryCloneFlow } from '../github/github-repository-clone-flow'
+import { getPermissions } from './store/permissions'
+import { CommentMaintainer } from '../../core/commenting/comment-maintainer'
+import { useIsLoggedIn, useLiveblocksConnectionListener } from '../../core/shared/multiplayer-hooks'
+import { ForkSearchParamKey, ProjectForkFlow } from './project-fork-flow'
+import { isRoomId, projectIdToRoomId } from '../../utils/room-id'
+import { SharingDialog } from './sharing-dialog'
+import {
+  AccessLevelParamKey,
+  CloneParamKey,
+  GithubBranchParamKey,
+} from './persistence/persistence-backend'
+import {
+  RemixNavigationAtom,
+  useUpdateActiveRemixSceneOnSelectionChange,
+} from '../canvas/remix/utopia-remix-root-component'
+import { useDefaultCollapsedViews } from './use-default-collapsed-views'
+import {
+  ComponentPickerContextMenu,
+  useCreateCallbackToShowComponentPicker,
+} from '../navigator/navigator-item/component-picker-context-menu'
+import { useGithubPolling } from '../../core/shared/github/helpers'
+import { useAtom } from 'jotai'
+import { clearOpenMenuIds } from '../../core/shared/menu-state'
+import {
+  navigatorTargetsSelector,
+  navigatorTargetsSelectorNavigatorTargets,
+} from '../navigator/navigator-utils'
+import { ImportWizard } from './import-wizard/import-wizard'
 
-interface NumberSize {
-  width: number
-  height: number
+const liveModeToastId = 'play-mode-toast'
+
+function pushProjectURLToBrowserHistory(
+  projectId: string,
+  projectName: string,
+  forking: boolean,
+): void {
+  // Make sure we don't replace the query params
+  const queryParams = new URLSearchParams(window.top?.location.search)
+  if (forking) {
+    // …but if it's forking, remove the fork param
+    queryParams.delete(ForkSearchParamKey)
+  }
+  // remove one-time creation params
+  queryParams.delete(AccessLevelParamKey)
+  queryParams.delete(CloneParamKey)
+  queryParams.delete(GithubBranchParamKey)
+
+  const queryParamsStr = queryParams.size > 0 ? `?${queryParams.toString()}` : ''
+
+  const projectURL = projectURLForProject(projectId, projectName)
+  const title = `Utopia ${projectName}`
+
+  window.top?.history.replaceState({}, title, `${projectURL}${queryParamsStr}`)
 }
 
-export interface EditorProps {
-  propertyControlsInfoSupported: boolean
-  vscodeBridgeReady: boolean
+function githubOperationPrettyNameForOverlay(op: GithubOperation): string {
+  switch (op.name) {
+    case 'commitAndPush':
+      return 'Saving to GitHub'
+    case 'listBranches':
+      return 'Listing branches from GitHub'
+    case 'loadBranch':
+      return 'Loading branch from GitHub'
+    case 'loadRepositories':
+      return 'Loading Repositories'
+    case 'updateAgainstBranch':
+      return 'Updating against branch from GitHub'
+    case 'listPullRequestsForBranch':
+      return 'Listing GitHub pull requests'
+    case 'saveAsset':
+      return 'Saving asset to GitHub'
+    case 'searchRepository':
+      return 'Searching public repository'
+    default:
+      assertNever(op)
+  }
 }
 
-function useDelayedValueHook(inputValue: boolean, delayMs: number): boolean {
-  const [returnValue, setReturnValue] = React.useState(inputValue)
-  React.useEffect(() => {
-    let timerID: any = undefined
-    if (inputValue) {
-      // we do not delay the toggling if the input value is true
-      setReturnValue(true)
-    } else {
-      timerID = setTimeout(() => {
-        setReturnValue(false)
-      }, delayMs)
-    }
-    return function cleanup() {
-      clearTimeout(timerID)
-    }
-  }, [inputValue, delayMs])
-  return returnValue
-}
+export interface EditorProps {}
 
-export const EditorComponentInner = betterReactMemo(
-  'EditorComponentInner',
-  (props: EditorProps) => {
-    const editorStoreRef = useRefEditorState((store) => store)
-    const colorTheme = useColorTheme()
-    const onWindowMouseDown = React.useCallback(
-      (event: MouseEvent) => {
-        const popupId = editorStoreRef.current.editor.openPopupId
-        if (popupId != null) {
-          const popupElement = document.getElementById(popupId)
-          const triggerElement = document.getElementById(`trigger-${popupId}`)
-          const clickOutsidePopup =
-            popupElement != null && !popupElement.contains(event.target as Node)
-          const clickOutsideTrigger =
-            triggerElement != null && !triggerElement.contains(event.target as Node)
-          if (
-            (clickOutsidePopup && triggerElement == null) ||
-            (clickOutsidePopup && clickOutsideTrigger)
-          ) {
-            editorStoreRef.current.dispatch([EditorActions.closePopup()], 'everyone')
-          }
-        }
-        const activeElement = document.activeElement
+export const EditorComponentInner = React.memo((props: EditorProps) => {
+  const room = useRoom()
+  const dispatch = useDispatch()
+  const editorStoreRef = useRefEditorState((store) => store)
+  const metadataRef = useRefEditorState((store) => store.editor.jsxMetadata)
+  const navigatorTargetsRef = useRefEditorState(navigatorTargetsSelectorNavigatorTargets)
+  const colorTheme = useColorTheme()
+  const onWindowMouseUp = React.useCallback((event: MouseEvent) => {
+    return [EditorActions.updateMouseButtonsPressed(null, event.button)]
+  }, [])
+  const onWindowMouseDown = React.useCallback(
+    (event: MouseEvent) => {
+      let actions: Array<EditorAction> = []
+      actions.push(EditorActions.updateMouseButtonsPressed(event.button, null))
+      const popupId = editorStoreRef.current.editor.openPopupId
+      if (popupId != null) {
+        const popupElement = document.getElementById(popupId)
+        const triggerElement = document.getElementById(`trigger-${popupId}`)
+        const clickOutsidePopup =
+          popupElement != null && !popupElement.contains(event.target as Node)
+        const clickOutsideTrigger =
+          triggerElement != null && !triggerElement.contains(event.target as Node)
         if (
-          event.target !== activeElement &&
-          activeElement != null &&
-          activeElement.getAttribute('data-inspector-input') != null &&
-          (activeElement as any).blur != null
+          (clickOutsidePopup && triggerElement == null) ||
+          (clickOutsidePopup && clickOutsideTrigger)
         ) {
-          // OMG what a nightmare! This is the only way of keeping the Inspector fast and ensuring the blur handler for inputs
-          // is called before triggering a change that might change the selection
-          ;(activeElement as any).blur()
+          actions.push(EditorActions.closePopup())
         }
-      },
-      [editorStoreRef],
-    )
-
-    const namesByKey = React.useMemo(() => {
-      return applyShortcutConfigurationToDefaults(editorStoreRef.current.userState.shortcutConfig)
-    }, [editorStoreRef])
-
-    const onWindowKeyDown = React.useCallback(
-      (event: KeyboardEvent) => {
-        handleKeyDown(
-          event,
-          editorStoreRef.current.editor,
-          editorStoreRef.current.derived,
-          namesByKey,
-          editorStoreRef.current.dispatch,
-        )
-      },
-      [editorStoreRef, namesByKey],
-    )
-
-    const onWindowKeyUp = React.useCallback(
-      (event) => {
-        handleKeyUp(
-          event,
-          editorStoreRef.current.editor,
-          namesByKey,
-          editorStoreRef.current.dispatch,
-        )
-      },
-      [editorStoreRef, namesByKey],
-    )
-
-    const preventDefault = React.useCallback((event: MouseEvent) => {
-      event.preventDefault()
-    }, [])
-
-    React.useEffect(() => {
-      window.addEventListener('mousedown', onWindowMouseDown, true)
-      window.addEventListener('keydown', onWindowKeyDown)
-      window.addEventListener('keyup', onWindowKeyUp)
-      window.addEventListener('contextmenu', preventDefault)
-      return function cleanup() {
-        window.removeEventListener('mousedown', onWindowMouseDown, true)
-        window.removeEventListener('keydown', onWindowKeyDown)
-        window.removeEventListener('keyup', onWindowKeyUp)
-        window.removeEventListener('contextmenu', preventDefault)
       }
-    }, [onWindowMouseDown, onWindowKeyDown, onWindowKeyUp, preventDefault])
+      return actions
+    },
+    [editorStoreRef],
+  )
 
-    const dispatch = useEditorState((store) => store.dispatch, 'EditorComponentInner dispatch')
-    const projectName = useEditorState(
-      (store) => store.editor.projectName,
-      'EditorComponentInner projectName',
-    )
-    const previewVisible = useEditorState(
-      (store) => store.editor.preview.visible,
-      'EditorComponentInner previewVisible',
-    )
-    const leftMenuExpanded = useEditorState(
-      (store) => store.editor.leftMenu.expanded,
-      'EditorComponentInner leftMenuExpanded',
-    )
+  const inputBlurForce = React.useCallback((event: MouseEvent) => {
+    // Keep this outside of the common handling because it needs to be triggered with `capture` set to `true`,
+    // so that it fires before the inspector disappears.
+    const activeElement = document.activeElement
+    if (
+      event.target !== activeElement &&
+      activeElement != null &&
+      activeElement.getAttribute('data-inspector-input') != null &&
+      (activeElement as any).blur != null
+    ) {
+      // OMG what a nightmare! This is the only way of keeping the Inspector fast and ensuring the blur handler for inputs
+      // is called before triggering a change that might change the selection
+      ;(activeElement as any).blur()
+    }
+  }, [])
 
-    const delayedLeftMenuExpanded = useDelayedValueHook(leftMenuExpanded, 200)
+  const namesByKey = React.useMemo(() => {
+    return applyShortcutConfigurationToDefaults(editorStoreRef.current.userState.shortcutConfig)
+  }, [editorStoreRef])
 
-    React.useEffect(() => {
-      document.title = projectName + ' - Utopia'
-    }, [projectName])
+  const setClearKeyboardInteraction = useClearKeyboardInteraction(editorStoreRef)
 
-    const onClosePreview = React.useCallback(
-      () => dispatch([EditorActions.setPanelVisibility('preview', false)]),
-      [dispatch],
-    )
+  const mode = useEditorState(Substores.restOfEditor, (store) => store.editor.mode, 'mode')
+  React.useEffect(() => {
+    setTimeout(() => {
+      if (mode.type === 'live') {
+        dispatch([
+          EditorActions.showToast(
+            notice(
+              'You are in Live mode. Use ⌘ to select and scroll.',
+              'NOTICE',
+              true,
+              liveModeToastId,
+            ),
+          ),
+        ])
+      } else {
+        dispatch([EditorActions.removeToast(liveModeToastId)])
+      }
+    }, 0)
+  }, [mode.type, dispatch])
 
-    const updateDeltaWidth = React.useCallback(
-      (deltaWidth: number) => {
-        dispatch([resizeLeftPane(deltaWidth)])
-      },
-      [dispatch],
-    )
+  const onBeforeUnload = React.useCallback(
+    (event: BeforeUnloadEvent) => {
+      if (mode.type === 'live') {
+        // Catch and check unintended navigation when the user is in live mode
+        event.preventDefault()
+        event.returnValue = ''
+      }
+    },
+    [mode.type],
+  )
 
-    const toggleLiveCanvas = React.useCallback(
-      () => dispatch([EditorActions.toggleCanvasIsLive()]),
-      [dispatch],
-    )
+  const showComponentPicker = useCreateCallbackToShowComponentPicker()
 
-    const startDragInsertion = React.useCallback(
-      (event: React.DragEvent<HTMLDivElement>) => {
-        const draggedTypes = event.nativeEvent?.dataTransfer?.types
-        const isDraggedFile =
-          draggedTypes != null && draggedTypes.length === 1 && draggedTypes[0] === 'Files'
-        if (isDraggedFile) {
-          const actions = [
-            EditorActions.setPanelVisibility('leftmenu', true),
-            EditorActions.setLeftMenuTab(LeftMenuTab.Contents),
-          ]
-          dispatch(actions, 'everyone')
+  React.useEffect(() => {
+    clearOpenMenuIds()
+  }, [])
+
+  const onWindowKeyDown = React.useCallback(
+    (event: KeyboardEvent) => {
+      let actions: Array<EditorAction> = []
+      if (editorIsTarget(event, editorStoreRef.current.editor)) {
+        const key = Keyboard.keyCharacterForCode(event.keyCode)
+        const modifiers = Modifier.modifiersForKeyboardEvent(event)
+
+        // TODO: maybe we should not whitelist keys, just check if Keyboard.keyIsModifer(key) is false
+        const existingInteractionSession = editorStoreRef.current.editor.canvas.interactionSession
+
+        const cmdPressedThisFrame = event.key === 'Meta'
+
+        if (
+          existingInteractionSession != null &&
+          existingInteractionSession.interactionData.type === 'KEYBOARD' &&
+          cmdPressedThisFrame
+        ) {
+          // If cmd has been pressed this frame, we need to clear this session and start a new one
+          actions.push(CanvasActions.clearInteractionSession(true))
         }
-      },
-      [dispatch],
-    )
 
-    React.useEffect(() => {
-      setPropertyControlsIFrameAvailable(props.propertyControlsInfoSupported)
-    })
+        if (
+          (Keyboard.keyIsModifier(key) || key === 'space') &&
+          existingInteractionSession != null &&
+          !cmdPressedThisFrame
+        ) {
+          // Never update an existing interaction if cmd was just pressed
+          actions.push(
+            CanvasActions.createInteractionSession(
+              updateInteractionViaKeyboard(existingInteractionSession, [key], [], modifiers, {
+                type: 'KEYBOARD_CATCHER_CONTROL',
+              }),
+            ),
+          )
+        } else if (Keyboard.keyIsInteraction(key)) {
+          const action =
+            existingInteractionSession == null
+              ? CanvasActions.createInteractionSession(
+                  createInteractionViaKeyboard([key], modifiers, {
+                    type: 'KEYBOARD_CATCHER_CONTROL',
+                  }),
+                )
+              : CanvasActions.createInteractionSession(
+                  updateInteractionViaKeyboard(existingInteractionSession, [key], [], modifiers, {
+                    type: 'KEYBOARD_CATCHER_CONTROL',
+                  }),
+                )
 
-    return (
+          actions.push(action)
+
+          setClearKeyboardInteraction()
+        }
+      }
+
+      actions.push(
+        ...handleKeyDown(
+          event,
+          editorStoreRef.current.editor,
+          editorStoreRef.current.userState.loginState,
+          editorStoreRef.current.derived,
+          editorStoreRef.current.projectServerState,
+          metadataRef,
+          navigatorTargetsRef,
+          namesByKey,
+          dispatch,
+          showComponentPicker,
+        ),
+      )
+      return actions
+    },
+    [
+      dispatch,
+      editorStoreRef,
+      metadataRef,
+      navigatorTargetsRef,
+      namesByKey,
+      setClearKeyboardInteraction,
+      showComponentPicker,
+    ],
+  )
+
+  const onWindowKeyUp = React.useCallback(
+    (event: KeyboardEvent) => {
+      let actions: Array<EditorAction> = []
+      const existingInteractionSession = editorStoreRef.current.editor.canvas.interactionSession
+      if (existingInteractionSession != null) {
+        if (
+          existingInteractionSession.interactionData.type === 'KEYBOARD' &&
+          event.key === 'Meta'
+        ) {
+          actions.push(CanvasActions.clearInteractionSession(true))
+        } else {
+          const action = CanvasActions.createInteractionSession(
+            updateInteractionViaKeyboard(
+              existingInteractionSession,
+              [],
+              [Keyboard.keyCharacterForCode(event.keyCode)],
+              Modifier.modifiersForKeyboardEvent(event),
+              { type: 'KEYBOARD_CATCHER_CONTROL' },
+            ),
+          )
+          actions.push(action)
+        }
+      }
+      actions.push(...handleKeyUp(event, editorStoreRef.current.editor, namesByKey))
+      return actions
+    },
+    [editorStoreRef, namesByKey],
+  )
+
+  const preventDefault = React.useCallback((event: MouseEvent) => {
+    event.preventDefault()
+  }, [])
+
+  React.useEffect(() => {
+    window.addEventListener('contextmenu', preventDefault)
+    window.addEventListener('mousedown', inputBlurForce, true)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return function cleanup() {
+      window.removeEventListener('contextmenu', preventDefault)
+      window.removeEventListener('mousedown', inputBlurForce, true)
+      window.addEventListener('beforeunload', onBeforeUnload)
+    }
+  }, [onBeforeUnload, preventDefault, inputBlurForce])
+
+  const projectName = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.projectName,
+    'EditorComponentInner projectName',
+  )
+  const projectId = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.id,
+    'EditorComponentInner projectId',
+  )
+  const yDoc = useEditorState(
+    Substores.restOfStore,
+    (store) => store.collaborativeEditingSupport.session?.mergeDoc,
+    'EditorComponentInner yDoc',
+  )
+
+  React.useEffect(() => {
+    if (yDoc != null && isRoomId(room.id)) {
+      const yProvider = new LiveblocksProvider<Presence, Storage, UserMeta, RoomEvent>(room, yDoc)
+
+      return () => {
+        yProvider.destroy()
+      }
+    }
+
+    return () => {}
+  }, [yDoc, room])
+
+  React.useEffect(() => {
+    document.title = projectName + ' - Utopia'
+  }, [projectName])
+
+  const forking = useEditorState(Substores.restOfEditor, (store) => store.editor.forking, '')
+
+  React.useEffect(() => {
+    if (IS_TEST_ENVIRONMENT) {
+      return
+    }
+    if (projectId != null) {
+      pushProjectURLToBrowserHistory(projectId, projectName, forking)
+      ;(window as any).utopiaProjectID = projectId
+    }
+  }, [projectName, projectId, forking])
+
+  const startDragInsertion = React.useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      const draggedTypes = event.nativeEvent?.dataTransfer?.types
+      const isDraggedFile =
+        draggedTypes != null && draggedTypes.length === 1 && draggedTypes[0] === 'Files'
+      if (isDraggedFile) {
+        const actions = [
+          EditorActions.setPanelVisibility('leftmenu', true),
+          EditorActions.setLeftMenuTab(LeftMenuTab.Project),
+        ]
+        dispatch(actions, 'everyone')
+      }
+    },
+    [dispatch],
+  )
+
+  useSelectorWithCallback(
+    Substores.userStateAndProjectServerState,
+    (store) => ({ projectServerState: store.projectServerState, userState: store.userState }),
+    (state) => {
+      queueMicrotask(() => {
+        let actions: EditorAction[] = []
+        const permissions = getPermissions(state)
+        if (!permissions.edit && permissions.comment) {
+          actions.push(
+            EditorActions.switchEditorMode(EditorModes.commentMode(null, 'not-dragging')),
+            EditorActions.setRightMenuTab(RightMenuTab.Comments),
+            EditorActions.setCodeEditorVisibility(false),
+          )
+        }
+        dispatch(actions)
+      })
+    },
+    'EditorComponentInner viewer mode',
+  )
+
+  useLiveblocksConnectionListener()
+
+  useDefaultCollapsedViews()
+
+  useGithubPolling()
+
+  useClearSelectionOnNavigation()
+
+  const portalTarget = document.getElementById(CanvasContextMenuPortalTargetID)
+
+  return (
+    <>
+      <ColorThemeComponent />
       <SimpleFlexRow
         className='editor-main-vertical-and-modals'
         style={{
-          height: '100%',
-          width: '100%',
+          height: '100vh',
+          width: '100vw',
           overscrollBehaviorX: 'contain',
+          color: colorTheme.fg1.value,
+          // the following line prevents user css overriding the editor font
+          fontFamily: 'utopian-inter',
         }}
         onDragEnter={startDragInsertion}
       >
@@ -241,9 +479,10 @@ export const EditorComponentInner = betterReactMemo(
             width: '100%',
           }}
         >
-          {(isChrome as boolean) ? null : <BrowserInfoBar />}
-          <LoginStatusBar />
-
+          <LowPriorityStoreProvider>
+            {(isChrome as boolean) ? null : <BrowserInfoBar />}
+            <LoginStatusBar />
+          </LowPriorityStoreProvider>
           <SimpleFlexRow
             className='editor-main-horizontal'
             style={{
@@ -253,28 +492,6 @@ export const EditorComponentInner = betterReactMemo(
               alignItems: 'stretch',
             }}
           >
-            <SimpleFlexColumn
-              style={{
-                height: '100%',
-                width: 44,
-                backgroundColor: colorTheme.leftMenuBackground.value,
-              }}
-            >
-              <Menubar />
-            </SimpleFlexColumn>
-            <div
-              className='LeftPaneShell'
-              style={{
-                height: '100%',
-                flexShrink: 0,
-                transition: 'all .1s ease-in-out',
-                width: leftMenuExpanded ? LeftPaneDefaultWidth : 0,
-                overflowX: 'scroll',
-                backgroundColor: colorTheme.leftPaneBackground.value,
-              }}
-            >
-              {delayedLeftMenuExpanded ? <LeftPaneComponent /> : null}
-            </div>
             <SimpleFlexRow
               className='editor-shell'
               style={{
@@ -296,107 +513,142 @@ export const EditorComponentInner = betterReactMemo(
                 <DesignPanelRoot />
               </SimpleFlexRow>
               {/* insert more columns here */}
-
-              {previewVisible ? (
-                <ResizableFlexColumn
-                  style={{ borderLeft: `1px solid ${colorTheme.secondaryBorder.value}` }}
-                  enable={{
-                    left: true,
-                    right: false,
-                  }}
-                  defaultSize={{
-                    width: 350,
-                    height: '100%',
-                  }}
-                >
-                  <SimpleFlexRow
-                    id='PreviewTabRail'
-                    style={{
-                      height: UtopiaTheme.layout.rowHeight.smaller,
-                      borderBottom: `1px solid ${colorTheme.subduedBorder.value}`,
-                      alignItems: 'stretch',
-                    }}
-                  >
-                    <TabComponent
-                      label='Preview'
-                      selected
-                      icon={<LargerIcons.PreviewPane color='primary' />}
-                      onClose={onClosePreview}
-                    />
-                  </SimpleFlexRow>
-                  <PreviewColumn />
-                </ResizableFlexColumn>
-              ) : null}
             </SimpleFlexRow>
           </SimpleFlexRow>
         </SimpleFlexColumn>
         <ModalComponent />
-        <ToastRenderer />
-        <CanvasCursorComponent />
-        {props.propertyControlsInfoSupported && props.vscodeBridgeReady ? (
-          <PropertyControlsInfoComponent />
-        ) : null}
+        <GithubRepositoryCloneFlow />
+        <ProjectForkFlow />
+        <LockedOverlay />
+        <SharingDialog />
+        <ImportWizard />
       </SimpleFlexRow>
-    )
-  },
-)
+      {portalTarget != null
+        ? ReactDOM.createPortal(<ComponentPickerContextMenu />, portalTarget)
+        : null}
+      <EditorCommon
+        mouseDown={onWindowMouseDown}
+        mouseUp={onWindowMouseUp}
+        keyDown={onWindowKeyDown}
+        keyUp={onWindowKeyUp}
+      />
+      <CommentMaintainer />
+    </>
+  )
+})
 
-const ModalComponent = betterReactMemo('ModalComponent', (): React.ReactElement<any> | null => {
-  const { modal, dispatch } = useEditorState((store) => {
-    return {
-      dispatch: store.dispatch,
-      modal: store.editor.modal,
-    }
-  }, 'ModalComponent')
+const ModalComponent = React.memo((): React.ReactElement<any> | null => {
+  const dispatch = useDispatch()
+  const currentBranch = useEditorState(
+    Substores.github,
+    (store) => {
+      return store.editor.githubSettings.branchName
+    },
+    'ModalComponent branchName',
+  )
+  const modal = useEditorState(
+    Substores.restOfEditor,
+    (store) => {
+      return store.editor.modal
+    },
+    'ModalComponent modal',
+  )
   if (modal != null) {
-    if (modal.type === 'file-delete') {
-      return <ConfirmDeleteDialog dispatch={dispatch} filePath={modal.filePath} />
+    switch (modal.type) {
+      case 'file-delete':
+        return <ConfirmDeleteDialog dispatch={dispatch} filePath={modal.filePath} />
+      case 'file-overwrite':
+        return <ConfirmOverwriteDialog dispatch={dispatch} files={modal.files} />
+      case 'file-revert':
+        return (
+          <ConfirmRevertDialog
+            dispatch={dispatch}
+            status={modal.status}
+            filePath={modal.filePath}
+          />
+        )
+      case 'file-revert-all':
+        return <ConfirmRevertAllDialog dispatch={dispatch} />
+      case 'disconnect-github-project':
+        if (currentBranch != null) {
+          return <ConfirmDisconnectBranchDialog dispatch={dispatch} branchName={currentBranch} />
+        }
+        break
     }
   }
   return null
 })
 
 export function EditorComponent(props: EditorProps) {
-  return (
-    <DndProvider backend={Backend}>
-      <EditorComponentInner {...props} />
-    </DndProvider>
+  const indexedDBFailed = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.indexedDBFailed,
+    'EditorComponent indexedDBFailed',
+  )
+
+  const projectId = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.id,
+    'EditorComponent projectId',
+  )
+
+  const forkedFromProjectId = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.forkedFromProjectId,
+    'EditorComponent forkedFromProjectId',
+  )
+
+  const loggedIn = useIsLoggedIn()
+
+  const dispatch = useDispatch()
+
+  useDataThemeAttributeOnBody()
+
+  useUpdateActiveRemixSceneOnSelectionChange()
+
+  const roomId = React.useMemo(
+    () => (projectId == null ? generateUUID() : projectIdToRoomId(projectId)),
+    [projectId],
+  )
+  return indexedDBFailed ? (
+    <FatalIndexedDBErrorComponent />
+  ) : (
+    <RoomProvider
+      id={roomId}
+      autoConnect={isLiveblocksEnabled()}
+      initialPresence={initialPresence()}
+      initialStorage={initialStorage()}
+    >
+      <DndProvider backend={HTML5Backend} context={window}>
+        <ProjectServerStateUpdater
+          projectId={projectId}
+          forkedFromProjectId={forkedFromProjectId}
+          dispatch={dispatch}
+          loggedIn={loggedIn}
+        >
+          <CollaborationStateUpdater projectId={projectId} dispatch={dispatch} loggedIn={loggedIn}>
+            <EditorComponentInner {...props} />
+          </CollaborationStateUpdater>
+        </ProjectServerStateUpdater>
+      </DndProvider>
+    </RoomProvider>
   )
 }
 
-const CanvasCursorComponent = betterReactMemo('CanvasCursorComponent', () => {
-  const cursor = useEditorState((store) => {
-    return Utils.defaultIfNull(store.editor.canvas.cursor, getCursorFromDragState(store.editor))
-  }, 'CanvasCursorComponent')
-  return cursor == null ? null : (
-    <div
-      key='cursor-area'
-      style={{
-        position: 'fixed',
-        left: 0,
-        top: 0,
-        width: '100vw',
-        height: '100vh',
-        cursor: cursor,
-      }}
-    />
+export const ToastRenderer = React.memo(() => {
+  const toasts = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.toasts,
+    'ToastRenderer',
   )
-})
-
-const ToastRenderer = betterReactMemo('ToastRenderer', () => {
-  const toasts = useEditorState((store) => store.editor.toasts, 'ToastRenderer')
 
   return (
     <FlexColumn
       key={'toast-stack'}
+      data-testid={'toast-stack'}
       style={{
-        position: 'fixed',
-        bottom: 40,
-        justifyContent: 'center',
-        left: '30%',
-        overflow: 'scroll',
-        maxHeight: '50%',
         zIndex: 100,
+        gap: 10,
       }}
     >
       {toasts.map((toast, index) => (
@@ -412,25 +664,127 @@ const ToastRenderer = betterReactMemo('ToastRenderer', () => {
   )
 })
 
-const PropertyControlsInfoComponent = betterReactMemo('PropertyControlsInfoComponent', () => {
-  const iframeSrc = createIframeUrl(PROPERTY_CONTROLS_INFO_BASE_URL, 'property-controls-info.html')
+function handleEventNoop(e: React.MouseEvent | React.KeyboardEvent) {
+  e.stopPropagation()
+  e.preventDefault()
+}
 
-  const url = new URL(iframeSrc)
-  setBranchNameFromURL(url.searchParams)
+const LockedOverlay = React.memo(() => {
+  const colorTheme = useColorTheme()
+
+  const githubOperations = useEditorState(
+    Substores.github,
+    (store) => store.editor.githubOperations.filter((op) => githubOperationLocksEditor(op)),
+    'LockedOverlay githubOperations',
+  )
+
+  const editorLocked = React.useMemo(() => githubOperations.length > 0, [githubOperations])
+
+  const refreshingDependencies = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.refreshingDependencies,
+    'LockedOverlay refreshingDependencies',
+  )
+
+  const importWizardOpen = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.importWizardOpen,
+    'LockedOverlay importWizardOpen',
+  )
+
+  const forking = useEditorState(
+    Substores.restOfEditor,
+    (store) => store.editor.forking,
+    'LockedOverlay forking',
+  )
+
+  const anim = keyframes`
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 0.2;
+    }
+  `
+
+  const locked = React.useMemo(() => {
+    return (editorLocked || refreshingDependencies || forking) && !importWizardOpen
+  }, [editorLocked, refreshingDependencies, forking, importWizardOpen])
+
+  const dialogContent = React.useMemo((): string | null => {
+    if (refreshingDependencies) {
+      return 'Refreshing dependencies…'
+    }
+    if (githubOperations.length > 0) {
+      return `${githubOperationPrettyNameForOverlay(githubOperations[0])}…`
+    }
+    if (forking) {
+      return 'Forking project…'
+    }
+    return null
+  }, [refreshingDependencies, githubOperations, forking])
+
+  if (!locked) {
+    return null
+  }
+
   return (
-    <iframe
-      key={PropertyControlsInfoIFrameID}
-      id={PropertyControlsInfoIFrameID}
-      width='0px'
-      height='0px'
-      src={url.toString()}
-      allow='autoplay'
+    <div
+      onMouseDown={handleEventNoop}
+      onMouseUp={handleEventNoop}
+      onClick={handleEventNoop}
+      onKeyDown={handleEventNoop}
+      onKeyUp={handleEventNoop}
       style={{
-        backgroundColor: 'transparent',
-        width: '0px',
-        height: '0px',
-        borderWidth: 0,
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: '#00000033',
+        zIndex: 30,
+        transition: 'all .1s ease-in-out',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        cursor: 'wait',
       }}
-    />
+      css={css`
+        animation: ${anim} 0.3s ease-in-out;
+      `}
+    >
+      {when(
+        dialogContent != null,
+        <div
+          style={{
+            opacity: 1,
+            fontSize: 12,
+            fontWeight: 500,
+            backgroundColor: colorTheme.bg2.value,
+            border: `1px solid ${colorTheme.neutralBorder.value}`,
+            padding: 30,
+            borderRadius: 2,
+            boxShadow: UtopiaStyles.shadowStyles.high.boxShadow,
+          }}
+        >
+          {dialogContent}
+        </div>,
+      )}
+    </div>
   )
 })
+
+const useClearSelectionOnNavigation = () => {
+  const dispatch = useDispatch()
+  const [remixNavigation] = useAtom(RemixNavigationAtom)
+  const paths = Object.values(remixNavigation)
+    .map((n) => n?.location.pathname ?? '')
+    .join('-')
+
+  React.useEffect(() => {
+    queueMicrotask(() => {
+      dispatch([EditorActions.clearSelection()])
+    })
+  }, [dispatch, paths])
+}

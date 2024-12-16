@@ -1,31 +1,40 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
 exports[`UiJsxCanvas #747 - DOM object constructor cannot be called as a function 1`] = `
-"<div style=\\"all: initial;\\">
+"<div style=\\"all: initial\\">
   <div
     id=\\"canvas-container\\"
-    style=\\"position: absolute;\\"
+    data-testid=\\"canvas-container\\"
+    style=\\"position: absolute\\"
     data-utopia-valid-paths=\\"sb sb/scene sb/scene/app\\"
     data-utopia-root-element-path=\\"sb\\"
   >
     <div
       data-utopia-scene-id=\\"sb/scene\\"
-      data-paths=\\"sb/scene sb\\"
+      data-path=\\"sb/scene\\"
       style=\\"
+        overflow: hidden;
+        container: scene / inline-size;
         position: absolute;
-        background-color: rgba(255, 255, 255, 1);
-        box-shadow: 0px 0px 1px 0px rgba(26, 26, 26, 0.3);
+        background-color: var(--utopitheme-emphasizedBackground);
+        box-shadow: 0px 1px 2px 0px var(--utopitheme-shadow90),
+          0px 2px 4px -1px var(--utopitheme-shadow50);
+        background-image: conic-gradient(
+          var(--utopitheme-checkerboardLight) 0.25turn,
+          var(--utopitheme-checkerboardDark) 0.25turn 0.5turn,
+          var(--utopitheme-checkerboardLight) 0.5turn 0.75turn,
+          var(--utopitheme-checkerboardDark) 0.75turn
+        );
+        background-size: 12px 12px, 12px 12px, 12px 12px, 12px 12px;
+        background-position: -9px 0px, -3px -6px, 3px 6px, -3px 0;
         left: 0;
         top: 0;
         width: 375px;
         height: 812px;
       \\"
-      data-uid=\\"scene sb\\"
+      data-uid=\\"scene\\"
     >
-      <div
-        data-uid=\\"comment-root 5c5~~~1 app\\"
-        data-paths=\\"5c5~~~1:comment-root 5c5~~~1 sb/scene/app\\"
-      >
+      <div data-uid=\\"comment-root\\" data-path=\\"sb/scene/app:comment-root\\">
         hat
       </div>
     </div>
@@ -37,9 +46,12 @@ exports[`UiJsxCanvas #747 - DOM object constructor cannot be called as a functio
 exports[`UiJsxCanvas #747 - DOM object constructor cannot be called as a function 2`] = `
 Object {
   "sb/scene": Object {
-    "attributeMetadatada": Object {},
-    "componentInstance": false,
+    "assignedToProp": null,
+    "attributeMetadata": Object {},
+    "componentInstance": true,
     "computedStyle": Object {},
+    "conditionValue": "not-a-conditional",
+    "earlyReturn": null,
     "element": Object {
       "type": "RIGHT",
       "value": Object {
@@ -66,12 +78,13 @@ Object {
                     "trailingComments": Array [],
                   },
                   "type": "ATTRIBUTE_VALUE",
+                  "uid": "",
                   "value": "app",
                 },
               },
             ],
             "type": "JSX_ELEMENT",
-            "uid": "app",
+            "uid": "",
           },
         ],
         "name": Object {
@@ -94,6 +107,7 @@ Object {
                 "trailingComments": Array [],
               },
               "type": "ATTRIBUTE_VALUE",
+              "uid": "",
               "value": "scene",
             },
           },
@@ -110,6 +124,7 @@ Object {
                 "trailingComments": Array [],
               },
               "type": "ATTRIBUTE_VALUE",
+              "uid": "",
               "value": Object {
                 "height": 812,
                 "left": 0,
@@ -121,7 +136,7 @@ Object {
           },
         ],
         "type": "JSX_ELEMENT",
-        "uid": "scene",
+        "uid": "",
       },
     },
     "elementPath": Object {
@@ -135,40 +150,75 @@ Object {
     },
     "globalFrame": null,
     "importInfo": Object {
-      "type": "RIGHT",
-      "value": Object {
-        "originalName": "Scene",
-        "path": "utopia-api",
-        "variableName": "Scene",
-      },
+      "exportedName": "Scene",
+      "filePath": "utopia-api",
+      "type": "IMPORTED_ORIGIN",
+      "variableName": "Scene",
     },
     "isEmotionOrStyledComponent": false,
     "label": null,
-    "localFrame": null,
-    "props": Object {
-      "data-paths": "sb/scene sb",
-      "data-uid": "scene sb",
-      "data-utopia-scene-id": "sb/scene",
-      "skipDeepFreeze": true,
-      "style": Object {
-        "height": 812,
-        "left": 0,
-        "position": "absolute",
-        "top": 0,
-        "width": 375,
-      },
-    },
+    "nonRoundedGlobalFrame": null,
     "specialSizeMeasurements": Object {
+      "alignContent": null,
+      "alignItems": null,
+      "alignSelf": null,
+      "borderRadius": null,
+      "borderWidths": Object {
+        "bottom": 0,
+        "left": 0,
+        "right": 0,
+        "top": 0,
+      },
       "clientHeight": 0,
       "clientWidth": 0,
-      "coordinateSystemBounds": Object {
-        "height": 0,
-        "width": 0,
-        "x": 0,
-        "y": 0,
+      "closestOffsetParentPath": Object {
+        "parts": Array [],
+        "type": "elementpath",
       },
+      "columnGap": null,
+      "computedHugProperty": Object {
+        "height": null,
+        "width": null,
+      },
+      "containerGridProperties": Object {
+        "gridAutoColumns": null,
+        "gridAutoFlow": null,
+        "gridAutoRows": null,
+        "gridTemplateColumns": null,
+        "gridTemplateRows": null,
+      },
+      "containerGridPropertiesFromProps": Object {
+        "gridAutoColumns": null,
+        "gridAutoFlow": null,
+        "gridAutoRows": null,
+        "gridTemplateColumns": null,
+        "gridTemplateRows": null,
+      },
+      "coordinateSystemBounds": null,
       "display": "initial",
+      "elementGridProperties": Object {
+        "gridColumnEnd": null,
+        "gridColumnStart": null,
+        "gridRowEnd": null,
+        "gridRowStart": null,
+      },
+      "elementGridPropertiesFromProps": Object {
+        "gridColumnEnd": null,
+        "gridColumnStart": null,
+        "gridRowEnd": null,
+        "gridRowStart": null,
+      },
       "flexDirection": null,
+      "float": "none",
+      "fontSize": null,
+      "fontStyle": null,
+      "fontWeight": null,
+      "gap": null,
+      "globalContentBoxForChildren": null,
+      "globalFrameWithTextContent": null,
+      "gridCellGlobalFrames": null,
+      "hasPositionOffset": false,
+      "hasTransform": false,
       "htmlElementName": "div",
       "immediateParentBounds": Object {
         "height": 0,
@@ -177,7 +227,10 @@ Object {
         "y": 0,
       },
       "immediateParentProvidesLayout": true,
-      "layoutSystemForChildren": "flow",
+      "justifyContent": null,
+      "justifySelf": null,
+      "layoutSystemForChildren": null,
+      "layoutSystemForChildrenInherited": false,
       "margin": Object {},
       "naturalHeight": null,
       "naturalWidth": null,
@@ -186,18 +239,46 @@ Object {
         "y": 0,
       },
       "padding": Object {},
+      "parentContainerGridProperties": Object {
+        "gridAutoColumns": null,
+        "gridAutoFlow": null,
+        "gridAutoRows": null,
+        "gridTemplateColumns": null,
+        "gridTemplateRows": null,
+      },
+      "parentContainerGridPropertiesFromProps": Object {
+        "gridAutoColumns": null,
+        "gridAutoFlow": null,
+        "gridAutoRows": null,
+        "gridTemplateColumns": null,
+        "gridTemplateRows": null,
+      },
       "parentFlexDirection": null,
+      "parentFlexGap": 0,
+      "parentGridCellGlobalFrames": null,
+      "parentGridFrame": null,
+      "parentHugsOnMainAxis": false,
+      "parentJustifyContent": null,
       "parentLayoutSystem": "flow",
-      "position": "static",
-      "providesBoundsForChildren": false,
+      "parentPadding": Object {},
+      "parentTextDirection": "ltr",
+      "position": null,
+      "providesBoundsForAbsoluteChildren": false,
       "renderedChildrenCount": 0,
+      "rowGap": null,
+      "textBounds": null,
+      "textDecorationLine": null,
       "usesParentBounds": false,
     },
+    "textContent": null,
   },
   "sb/scene/app": Object {
-    "attributeMetadatada": Object {},
-    "componentInstance": false,
+    "assignedToProp": null,
+    "attributeMetadata": Object {},
+    "componentInstance": true,
     "computedStyle": Object {},
+    "conditionValue": "not-a-conditional",
+    "earlyReturn": null,
     "element": Object {
       "type": "RIGHT",
       "value": Object {
@@ -222,12 +303,13 @@ Object {
                 "trailingComments": Array [],
               },
               "type": "ATTRIBUTE_VALUE",
+              "uid": "",
               "value": "app",
             },
           },
         ],
         "type": "JSX_ELEMENT",
-        "uid": "app",
+        "uid": "",
       },
     },
     "elementPath": Object {
@@ -242,28 +324,74 @@ Object {
     },
     "globalFrame": null,
     "importInfo": Object {
-      "type": "LEFT",
-      "value": "NOT_IMPORTED",
+      "filePath": "test.js",
+      "type": "SAME_FILE_ORIGIN",
+      "variableName": "App",
     },
     "isEmotionOrStyledComponent": false,
     "label": null,
-    "localFrame": null,
-    "props": Object {
-      "data-paths": "sb/scene/app",
-      "data-uid": "app",
-      "skipDeepFreeze": true,
-    },
+    "nonRoundedGlobalFrame": null,
     "specialSizeMeasurements": Object {
+      "alignContent": null,
+      "alignItems": null,
+      "alignSelf": null,
+      "borderRadius": null,
+      "borderWidths": Object {
+        "bottom": 0,
+        "left": 0,
+        "right": 0,
+        "top": 0,
+      },
       "clientHeight": 0,
       "clientWidth": 0,
-      "coordinateSystemBounds": Object {
-        "height": 0,
-        "width": 0,
-        "x": 0,
-        "y": 0,
+      "closestOffsetParentPath": Object {
+        "parts": Array [],
+        "type": "elementpath",
       },
+      "columnGap": null,
+      "computedHugProperty": Object {
+        "height": null,
+        "width": null,
+      },
+      "containerGridProperties": Object {
+        "gridAutoColumns": null,
+        "gridAutoFlow": null,
+        "gridAutoRows": null,
+        "gridTemplateColumns": null,
+        "gridTemplateRows": null,
+      },
+      "containerGridPropertiesFromProps": Object {
+        "gridAutoColumns": null,
+        "gridAutoFlow": null,
+        "gridAutoRows": null,
+        "gridTemplateColumns": null,
+        "gridTemplateRows": null,
+      },
+      "coordinateSystemBounds": null,
       "display": "initial",
+      "elementGridProperties": Object {
+        "gridColumnEnd": null,
+        "gridColumnStart": null,
+        "gridRowEnd": null,
+        "gridRowStart": null,
+      },
+      "elementGridPropertiesFromProps": Object {
+        "gridColumnEnd": null,
+        "gridColumnStart": null,
+        "gridRowEnd": null,
+        "gridRowStart": null,
+      },
       "flexDirection": null,
+      "float": "none",
+      "fontSize": null,
+      "fontStyle": null,
+      "fontWeight": null,
+      "gap": null,
+      "globalContentBoxForChildren": null,
+      "globalFrameWithTextContent": null,
+      "gridCellGlobalFrames": null,
+      "hasPositionOffset": false,
+      "hasTransform": false,
       "htmlElementName": "div",
       "immediateParentBounds": Object {
         "height": 0,
@@ -272,7 +400,10 @@ Object {
         "y": 0,
       },
       "immediateParentProvidesLayout": true,
-      "layoutSystemForChildren": "flow",
+      "justifyContent": null,
+      "justifySelf": null,
+      "layoutSystemForChildren": null,
+      "layoutSystemForChildrenInherited": false,
       "margin": Object {},
       "naturalHeight": null,
       "naturalWidth": null,
@@ -281,13 +412,38 @@ Object {
         "y": 0,
       },
       "padding": Object {},
+      "parentContainerGridProperties": Object {
+        "gridAutoColumns": null,
+        "gridAutoFlow": null,
+        "gridAutoRows": null,
+        "gridTemplateColumns": null,
+        "gridTemplateRows": null,
+      },
+      "parentContainerGridPropertiesFromProps": Object {
+        "gridAutoColumns": null,
+        "gridAutoFlow": null,
+        "gridAutoRows": null,
+        "gridTemplateColumns": null,
+        "gridTemplateRows": null,
+      },
       "parentFlexDirection": null,
+      "parentFlexGap": 0,
+      "parentGridCellGlobalFrames": null,
+      "parentGridFrame": null,
+      "parentHugsOnMainAxis": false,
+      "parentJustifyContent": null,
       "parentLayoutSystem": "flow",
-      "position": "static",
-      "providesBoundsForChildren": false,
+      "parentPadding": Object {},
+      "parentTextDirection": "ltr",
+      "position": null,
+      "providesBoundsForAbsoluteChildren": false,
       "renderedChildrenCount": 0,
+      "rowGap": null,
+      "textBounds": null,
+      "textDecorationLine": null,
       "usesParentBounds": false,
     },
+    "textContent": null,
   },
 }
 `;

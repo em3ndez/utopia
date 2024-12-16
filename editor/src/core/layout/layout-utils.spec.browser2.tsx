@@ -1,142 +1,51 @@
-import { sides } from 'utopia-api'
+import type { EditorRenderResult } from '../../components/canvas/ui-jsx.test-utils'
 import {
   getPrintedUiJsCode,
   makeTestProjectCodeWithSnippet,
   renderTestEditorWithCode,
   TestScenePath,
 } from '../../components/canvas/ui-jsx.test-utils'
-import { pasteJSXElements, selectComponents } from '../../components/editor/actions/action-creators'
 import * as EP from '../shared/element-path'
+import type { ElementPath } from '../shared/project-file-types'
 import {
-  jsxAttributeNestedObjectSimple,
-  jsxAttributeValue,
-  jsxElement,
-  specialSizeMeasurements,
-  emptyComputedStyle,
-  ElementInstanceMetadataMap,
-  jsxAttributesFromMap,
-  emptyAttributeMetadatada,
-  emptySpecialSizeMeasurements,
-  emptyComments,
-} from '../shared/element-template'
-import { FOR_TESTS_setNextGeneratedUid } from '../model/element-template-utils'
-import { left, right } from '../shared/either'
-import { CanvasRectangle, LocalRectangle } from '../shared/math-utils'
+  firePasteEvent,
+  MockClipboardHandlers,
+  pressKey,
+} from '../../components/canvas/event-helpers.test-utils'
+import { cmdModifier } from '../../utils/modifiers'
+import { selectComponentsForTest } from '../../utils/utils.test-utils'
 
-const NewUID = 'catdog'
+describe('pasteJSXElements', () => {
+  const clipboardMock = new MockClipboardHandlers().mock()
 
-describe('maybeSwitchLayoutProps', () => {
+  async function runPaste(
+    renderResult: EditorRenderResult,
+    paths: { elementToCopy: ElementPath; targetParent: ElementPath },
+  ) {
+    await selectComponentsForTest(renderResult, [paths.elementToCopy])
+    await pressKey('c', { modifiers: cmdModifier })
+
+    await selectComponentsForTest(renderResult, [paths.targetParent])
+
+    const canvasRoot = renderResult.renderedDOM.getByTestId('canvas-root')
+
+    firePasteEvent(canvasRoot)
+
+    // Wait for the next frame
+    await clipboardMock.pasteDone
+    await renderResult.getDispatchFollowUpActionsFinished()
+
+    await pressKey('Esc')
+    await renderResult.getDispatchFollowUpActionsFinished()
+  }
+
   it('removes pin related layout props when pasting to flex element', async () => {
-    // Code kept commented for any future person who needs it.
-    //const currentWindow = require('electron').remote.getCurrentWindow()
-    //currentWindow.show()
-    //currentWindow.setPosition(500, 200)
-    //currentWindow.setSize(2200, 1000)
-    //currentWindow.openDevTools()
-    // This is necessary because the test code races against the Electron process
-    // opening the window it would appear.
-    //await wait(20000)
-    const renderResult = await renderTestEditorWithCode(
-      makeTestProjectCodeWithSnippet(`
-      <View style={{ ...props.style }} data-uid='aaa'>
-        <View
-          style={{ backgroundColor: '#DDDDDD', left: 52, top: 61, width: 256, height: 202, display: 'flex' }}
-          data-uid='bbb'
-        />
-      </View>
-      `),
-      'await-first-dom-report',
-    )
+    const renderResult = await createStarterEditor()
 
-    await renderResult.dispatch(
-      [selectComponents([EP.appendNewElementPath(TestScenePath, ['aaa', 'bbb'])], false)],
-      false,
-    )
-    FOR_TESTS_setNextGeneratedUid(NewUID)
-    const elementToPaste = jsxElement(
-      'View',
-      NewUID,
-      jsxAttributesFromMap({
-        style: jsxAttributeNestedObjectSimple(
-          jsxAttributesFromMap({
-            bottom: jsxAttributeValue(50, emptyComments),
-            right: jsxAttributeValue(50, emptyComments),
-            width: jsxAttributeValue(100, emptyComments),
-            height: jsxAttributeValue(100, emptyComments),
-          }),
-          emptyComments,
-        ),
-        'data-uid': jsxAttributeValue(NewUID, emptyComments),
-      }),
-      [],
-    )
-    const elementPath = EP.appendNewElementPath(TestScenePath, [NewUID])
-
-    const metadata: ElementInstanceMetadataMap = {
-      [EP.toString(TestScenePath)]: {
-        elementPath: TestScenePath,
-        element: left('Scene'),
-        props: {
-          style: {
-            width: 375,
-            height: 812,
-          },
-        },
-        globalFrame: { x: 0, y: 0, width: 375, height: 812 } as CanvasRectangle,
-        localFrame: { x: 0, y: 0, width: 375, height: 812 } as LocalRectangle,
-        componentInstance: false,
-        isEmotionOrStyledComponent: false,
-        specialSizeMeasurements: emptySpecialSizeMeasurements,
-        computedStyle: emptyComputedStyle,
-        attributeMetadatada: emptyAttributeMetadatada,
-        label: null,
-        importInfo: null,
-      },
-      [EP.toString(elementPath)]: {
-        elementPath: elementPath,
-        element: right(elementToPaste),
-        props: {
-          'data-uid': NewUID,
-        },
-        globalFrame: { x: 0, y: 0, width: 375, height: 812 } as CanvasRectangle,
-        localFrame: { x: 0, y: 0, width: 375, height: 812 } as LocalRectangle,
-        componentInstance: true,
-        isEmotionOrStyledComponent: false,
-        specialSizeMeasurements: specialSizeMeasurements(
-          { x: 0, y: 0 } as any,
-          null,
-          null,
-          true,
-          true,
-          'none',
-          'none',
-          false,
-          'block',
-          'absolute',
-          sides(undefined, undefined, undefined, undefined),
-          sides(undefined, undefined, undefined, undefined),
-          null,
-          null,
-          0,
-          0,
-          null,
-          null,
-          'div',
-          0,
-        ),
-        computedStyle: emptyComputedStyle,
-        attributeMetadatada: emptyAttributeMetadatada,
-        label: null,
-        importInfo: null,
-      },
-    }
-
-    const pasteElements = pasteJSXElements(
-      [elementToPaste],
-      [EP.appendNewElementPath(TestScenePath, [NewUID])],
-      metadata,
-    )
-    await renderResult.dispatch([pasteElements], true)
+    await runPaste(renderResult, {
+      elementToCopy: EP.appendNewElementPath(TestScenePath, ['aaa', 'bbb', 'ccc']),
+      targetParent: EP.appendNewElementPath(TestScenePath, ['aaa', 'paste-target']),
+    })
 
     expect(getPrintedUiJsCode(renderResult.getEditorState())).toEqual(
       makeTestProjectCodeWithSnippet(
@@ -148,10 +57,71 @@ describe('maybeSwitchLayoutProps', () => {
             style={{ backgroundColor: '#DDDDDD', left: 52, top: 61, width: 256, height: 202, display: 'flex' }}
             data-uid='bbb'
           >
-            <View style={{ position: 'relative' }} data-uid='catdog' />
+            <View style={{ width: 100, height: 100 }} data-uid='ccc' />
+            <View style={{ width: 100, height: 100, position: 'absolute' }} data-uid='ddd' />
+          </View>
+          <View
+            style={{ backgroundColor: '#ffcccc', left: 52, top: 61, width: 150, height: 120, display: 'flex' }}
+            data-uid='paste-target'
+          >
+            <View style={{ width: 100, height: 100 }} data-uid='aaf' />
+          </View>
+        </View>`,
+      ),
+    )
+  })
+
+  it('removes pin related layout props when pasting to flex element, turns position absolute into contain layout', async () => {
+    const renderResult = await createStarterEditor()
+
+    await runPaste(renderResult, {
+      elementToCopy: EP.appendNewElementPath(TestScenePath, ['aaa', 'bbb', 'ddd']),
+      targetParent: EP.appendNewElementPath(TestScenePath, ['aaa', 'paste-target']),
+    })
+
+    expect(getPrintedUiJsCode(renderResult.getEditorState())).toEqual(
+      makeTestProjectCodeWithSnippet(
+        `<View
+          style={{ ...props.style }}
+          data-uid='aaa'
+        >
+          <View
+            style={{ backgroundColor: '#DDDDDD', left: 52, top: 61, width: 256, height: 202, display: 'flex' }}
+            data-uid='bbb'
+          >
+            <View style={{ width: 100, height: 100 }} data-uid='ccc' />
+            <View style={{ width: 100, height: 100, position: 'absolute' }} data-uid='ddd' />
+          </View>
+          <View
+            style={{ backgroundColor: '#ffcccc', left: 52, top: 61, width: 150, height: 120, display: 'flex' }}
+            data-uid='paste-target'
+          >
+            <View style={{ contain: 'layout', width: 100, height: 100 }} data-uid='aag' />
           </View>
         </View>`,
       ),
     )
   })
 })
+
+async function createStarterEditor() {
+  const renderResult = await renderTestEditorWithCode(
+    makeTestProjectCodeWithSnippet(`
+    <View style={{ ...props.style }} data-uid='aaa'>
+      <View
+        style={{ backgroundColor: '#DDDDDD', left: 52, top: 61, width: 256, height: 202, display: 'flex' }}
+        data-uid='bbb'
+      >
+        <View style={{ width: 100, height: 100 }} data-uid='ccc' />
+        <View style={{ width: 100, height: 100, position: 'absolute' }} data-uid='ddd' />
+      </View>
+      <View
+        style={{ backgroundColor: '#ffcccc', left: 52, top: 61, width: 150, height: 120, display: 'flex' }}
+        data-uid='paste-target'
+      />
+    </View>
+    `),
+    'await-first-dom-report',
+  )
+  return renderResult
+}

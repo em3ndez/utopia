@@ -9,8 +9,8 @@ import {
 } from '../core/workers/parser-printer/parser-printer'
 import { foldParsedTextFile } from '../core/shared/project-file-types'
 import * as Diff from 'diff'
+import type { GitRepoWithRevision } from './github-projects'
 import {
-  GitRepoWithRevision,
   downloadAndExtractRepo,
   githubProjects,
   githubProjectsFileFilters,
@@ -27,7 +27,14 @@ async function processFile(
 ): Promise<string> {
   const fileContents = FS.readFileSync(javascriptFilePath, 'utf8')
   const initialPrettifiedContents = applyPrettier(fileContents, false).formatted
-  const parsedContents = parseCode(javascriptFilePath, initialPrettifiedContents, null, emptySet())
+  const parsedContents = parseCode(
+    javascriptFilePath,
+    [],
+    initialPrettifiedContents,
+    null,
+    emptySet(),
+    'do-not-apply-steganography',
+  )
   const printedContents = foldParsedTextFile(
     (_) => initialPrettifiedContents,
     (success) => {
@@ -121,4 +128,4 @@ async function printAllDiffs(): Promise<void> {
   }
 }
 
-printAllDiffs()
+void printAllDiffs()

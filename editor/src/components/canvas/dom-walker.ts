@@ -1,79 +1,98 @@
 import React from 'react'
-import { sides } from 'utopia-api'
-import * as ResizeObserverSyntheticDefault from 'resize-observer-polyfill'
-const ResizeObserver = ResizeObserverSyntheticDefault.default ?? ResizeObserverSyntheticDefault
-
+import { sides } from 'utopia-api/core'
 import * as EP from '../../core/shared/element-path'
-import {
+import type {
   DetectedLayoutSystem,
-  ElementInstanceMetadata,
-  ComputedStyle,
-  elementInstanceMetadata,
   SpecialSizeMeasurements,
-  specialSizeMeasurements,
-  emptySpecialSizeMeasurements,
-  emptyComputedStyle,
-  StyleAttributeMetadata,
-  emptyAttributeMetadatada,
+  ElementInstanceMetadataMap,
+  GridContainerProperties,
+  GridElementProperties,
+  DomElementMetadata,
+  GridAutoOrTemplateBase,
+  BorderWidths,
+  GridPositionOrSpan,
 } from '../../core/shared/element-template'
-import { ElementPath } from '../../core/shared/project-file-types'
-import { getCanvasRectangleFromElement, getDOMAttribute } from '../../core/shared/dom-utils'
-import { applicative4Either, isRight, left } from '../../core/shared/either'
+import {
+  specialSizeMeasurements,
+  gridContainerProperties,
+  gridElementProperties,
+  gridAutoOrTemplateFallback,
+  domElementMetadata,
+  gridAutoOrTemplateDimensions,
+  isGridSpan,
+  isGridAutoOrTemplateDimensions,
+} from '../../core/shared/element-template'
+import type { ElementPath } from '../../core/shared/project-file-types'
+import type { ElementCanvasRectangleCache } from '../../core/shared/dom-utils'
+import {
+  getCanvasRectangleFromElement,
+  getDOMAttribute,
+  hugPropertiesFromStyleMap,
+} from '../../core/shared/dom-utils'
+import {
+  applicative4Either,
+  defaultEither,
+  isRight,
+  left,
+  eitherToMaybe,
+  mapEither,
+} from '../../core/shared/either'
 import Utils from '../../utils/utils'
+import type { CanvasPoint, CanvasRectangle, LocalPoint } from '../../core/shared/math-utils'
 import {
   canvasPoint,
-  CanvasPoint,
-  CanvasRectangle,
-  boundingRectangle,
-  LocalPoint,
-  LocalRectangle,
-  localRectangle,
   roundToNearestHalf,
-  zeroCanvasRect,
-  zeroLocalRect,
+  canvasRectangle,
+  stretchRect,
 } from '../../core/shared/math-utils'
+import type { CSSNumber, CSSPosition } from '../inspector/common/css-utils'
 import {
-  CSSNumber,
   parseCSSLength,
-  CSSPosition,
   positionValues,
+  parseDirection,
+  parseFlexDirection,
+  parseCSSPx,
+  parseGridPosition,
+  parseGridRange,
+  parseGridAutoOrTemplateBase,
+  parseGridAutoFlow,
+  isCSSKeyword,
+  isDynamicGridRepeat,
 } from '../inspector/common/css-utils'
-import { CanvasContainerProps } from './ui-jsx-canvas'
-import { camelCaseToDashed } from '../../core/shared/string-utils'
-import {
-  useEditorState,
-  useRefEditorState,
-  useSelectorWithCallback,
-} from '../editor/store/store-hook'
-import {
-  UTOPIA_DO_NOT_TRAVERSE_KEY,
-  UTOPIA_PATHS_KEY,
-  UTOPIA_SCENE_ID_KEY,
-} from '../../core/model/utopia-constants'
-
-import { MetadataUtils } from '../../core/model/element-metadata-utils'
-import { PERFORMANCE_MARKS_ALLOWED, PRODUCTION_ENV } from '../../common/env-vars'
-import { CanvasContainerID } from './canvas-types'
+import type { UtopiaStoreAPI } from '../editor/store/store-hook'
+import { UTOPIA_SCENE_ID_KEY, UTOPIA_UID_KEY } from '../../core/model/utopia-constants'
 import { emptySet } from '../../core/shared/set-utils'
-import { getPathWithStringsOnDomElement, PathWithString } from '../../core/shared/uid-utils'
-import { mapDropNulls, pluck, uniqBy } from '../../core/shared/array-utils'
-import { optionalMap } from '../../core/shared/optional-utils'
+import { getDeepestPathOnDomElement, getPathStringsOnDomElement } from '../../core/shared/uid-utils'
+import { forceNotNull } from '../../core/shared/optional-utils'
 import { fastForEach } from '../../core/shared/utils'
-import { MapLike } from 'typescript'
-import { isFeatureEnabled } from '../../utils/feature-switches'
+import type { EditorState, EditorStorePatched } from '../editor/store/editor-state'
+import { shallowEqual } from '../../core/shared/equality-utils'
+import {
+  getAlignContent,
+  getFlexAlignment,
+  getFlexJustifyContent,
+  getSelfAlignment,
+  MaxContent,
+} from '../inspector/inspector-common'
+import type { EditorDispatch } from '../editor/action-types'
+import { runDOMWalker } from '../editor/actions/action-creators'
+import { CanvasContainerOuterId } from './canvas-component-entry'
+import { ElementsToRerenderGLOBAL } from './ui-jsx-canvas'
+import type { GridCellGlobalFrames } from './canvas-strategies/strategies/grid-helpers'
+import { GridMeasurementHelperMap } from './controls/grid-controls-for-strategies'
+import { ObserversAvailable, ResizeObserver } from './observers'
 
 const MutationObserverConfig = { attributes: true, childList: true, subtree: true }
-const ObserversAvailable = (window as any).MutationObserver != null && ResizeObserver != null
 
 function elementLayoutSystem(computedStyle: CSSStyleDeclaration | null): DetectedLayoutSystem {
   if (computedStyle == null) {
     return 'none'
   }
   if (computedStyle.display != null) {
-    if (computedStyle.display === 'flex') {
+    if (computedStyle.display.includes('flex')) {
       return 'flex'
     }
-    if (computedStyle.display === 'grid') {
+    if (computedStyle.display.includes('grid')) {
       return 'grid'
     }
   }
@@ -92,14 +111,48 @@ function isElementNonStatic(computedStyle: CSSStyleDeclaration | null) {
   if (computedStyle.position != null && computedStyle.position !== 'static') {
     return true
   }
-  if (computedStyle.display != null && computedStyle.display === 'flex') {
-    return true
-  }
 
   return false
 }
 
-const applicativeSidesPxTransform = (t: CSSNumber, r: CSSNumber, b: CSSNumber, l: CSSNumber) =>
+function isElementAContainingBlockForAbsolute(computedStyle: CSSStyleDeclaration | null) {
+  // https://developer.mozilla.org/en-US/docs/Web/CSS/Containing_block#identifying_the_containing_block
+  if (computedStyle == null) {
+    return false
+  }
+  if (isElementNonStatic(computedStyle)) {
+    return true
+  }
+  if (computedStyle.transform != null && computedStyle.transform !== 'none') {
+    return true
+  }
+  if (computedStyle.perspective != null && computedStyle.perspective !== 'none') {
+    return true
+  }
+  if (computedStyle.willChange === 'transform' || computedStyle.willChange === 'perspective') {
+    return true
+  }
+  if (computedStyle.filter != null && computedStyle.filter !== 'none') {
+    return true
+  }
+  // https://developer.mozilla.org/en-US/docs/Web/CSS/contain
+  if (
+    computedStyle.contain.includes('layout') ||
+    computedStyle.contain.includes('paint') ||
+    computedStyle.contain.includes('strict') ||
+    computedStyle.contain.includes('content')
+  ) {
+    return true
+  }
+  return false
+}
+
+export const applicativeSidesPxTransform = (
+  t: CSSNumber,
+  r: CSSNumber,
+  b: CSSNumber,
+  l: CSSNumber,
+) =>
   sides(
     t.unit === 'px' ? t.value : undefined,
     r.unit === 'px' ? r.value : undefined,
@@ -113,20 +166,47 @@ function isScene(node: Node): node is HTMLElement {
   )
 }
 
-function findParentScene(target: HTMLElement): string | null {
+function findParentScene(target: Element): string | null {
+  // First check if the node is a Scene element, which could be nested at any level
   const sceneID = getDOMAttribute(target, UTOPIA_SCENE_ID_KEY)
   if (sceneID != null) {
     return sceneID
   } else {
-    if (target.parentElement != null) {
-      return findParentScene(target.parentElement)
-    } else {
-      return null
+    const parent = target.parentElement
+
+    if (parent != null) {
+      const parentPath = getDeepestPathOnDomElement(parent)
+      const parentIsStoryboard = parentPath == null || EP.isStoryboardPath(parentPath)
+      if (parentIsStoryboard) {
+        // If the parent element is the storyboard, then we've reached the top and have to stop
+        const allPaths = getPathStringsOnDomElement(target)
+        allPaths.sort((a, b) => a.length - b.length)
+        const shallowestPath = allPaths[0]
+        if (shallowestPath != null) {
+          return shallowestPath
+        }
+      } else {
+        return findParentScene(parent)
+      }
     }
   }
+
+  return null
 }
 
-function lazyValue<T>(getter: () => T) {
+function findNearestElementWithPath(element: Element | null): ElementPath | null {
+  if (element == null) {
+    return null
+  }
+  const path = getDeepestPathOnDomElement(element)
+  if (path != null) {
+    return path
+  }
+  const parent = element.parentElement
+  return findNearestElementWithPath(parent)
+}
+
+export function lazyValue<T>(getter: () => T) {
   let alreadyResolved = false
   let resolvedValue: T
   return () => {
@@ -138,11 +218,11 @@ function lazyValue<T>(getter: () => T) {
   }
 }
 
-function getAttributesComingFromStyleSheets(element: HTMLElement): Set<string> {
+export function getAttributesComingFromStyleSheets(element: HTMLElement): Set<string> {
   let appliedAttributes = new Set<string>()
   const sheets = document.styleSheets
-  try {
-    for (const i in sheets) {
+  for (const i in sheets) {
+    try {
       const sheet = sheets[i]
       const rules = sheet.rules ?? sheet.cssRules
       for (const r in rules) {
@@ -157,557 +237,464 @@ function getAttributesComingFromStyleSheets(element: HTMLElement): Set<string> {
           }
         }
       }
+    } catch (e) {
+      // ignore error, either JSDOM unit test related or we're trying to read one
+      // of the editor stylesheets from a CDN URL in a way that is blocked by our
+      // cross-origin policies
     }
-  } catch (e) {
-    // ignore error, probably JSDOM unit test related
   }
   return appliedAttributes
 }
 
-let AttributesFromStyleSheetsCache: Map<HTMLElement, Set<string>> = new Map()
-
-function getCachedAttributesComingFromStyleSheets(
-  invalidatedPathsForStylesheetCacheRef: React.MutableRefObject<Set<string>>,
-  elementPath: ElementPath,
-  element: HTMLElement,
-): Set<string> {
-  const pathAsString = EP.toString(elementPath)
-  const invalidated = invalidatedPathsForStylesheetCacheRef.current.has(pathAsString)
-  const inCache = AttributesFromStyleSheetsCache.has(element)
-  if (inCache && !invalidated) {
-    return AttributesFromStyleSheetsCache.get(element)!
-  }
-  invalidatedPathsForStylesheetCacheRef.current.delete(pathAsString) // Mutation!
-  const value = getAttributesComingFromStyleSheets(element)
-  AttributesFromStyleSheetsCache.set(element, value)
-  return value
-}
-
-function useResizeObserver(
-  updateInvalidatedPaths: SetValueCallback<Set<string>>,
-  updateInvalidatedScenes: SetValueCallback<Set<string>>,
-  selectedViews: React.MutableRefObject<Array<ElementPath>>,
-  canvasInteractionHappening: React.MutableRefObject<boolean>,
-) {
-  const resizeObserver = React.useMemo((): typeof ResizeObserver | null => {
-    if (ObserversAvailable) {
-      return new ResizeObserver((entries: any) => {
-        if (canvasInteractionHappening.current) {
-          // Only add the selected views
-          fastForEach(selectedViews.current, (v) =>
-            updateInvalidatedPaths((current) => current.add(EP.toString(v)), 'invalidate'),
-          )
-        } else {
-          for (let entry of entries) {
-            const sceneID = findParentScene(entry.target)
-            if (sceneID != null) {
-              updateInvalidatedScenes((current) => current.add(sceneID), 'invalidate')
-            }
-          }
-        }
-      })
-    } else {
-      return null
-    }
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, []) // the dependencies are empty because this should only evaluate once
-  React.useEffect(() => {
-    return function cleanup() {
-      if (resizeObserver != null) {
-        resizeObserver.disconnect()
-      }
-    }
-  }, [resizeObserver])
-  return resizeObserver
-}
-
-function useMutationObserver(
-  updateInvalidatedPaths: SetValueCallback<Set<string>>,
-  updateInvalidatedScenes: SetValueCallback<Set<string>>,
-  selectedViews: React.MutableRefObject<Array<ElementPath>>,
-  canvasInteractionHappening: React.MutableRefObject<boolean>,
-) {
-  const mutationObserver = React.useMemo((): MutationObserver | null => {
-    if (ObserversAvailable) {
-      return new (window as any).MutationObserver((mutations: MutationRecord[]) => {
-        if (canvasInteractionHappening.current) {
-          // Only add the selected views
-          fastForEach(selectedViews.current, (v) =>
-            updateInvalidatedPaths((current) => current.add(EP.toString(v)), 'invalidate'),
-          )
-        } else {
-          for (let mutation of mutations) {
-            if (
-              mutation.attributeName === 'style' ||
-              mutation.addedNodes.length > 0 ||
-              mutation.removedNodes.length > 0
-            ) {
-              if (mutation.target instanceof HTMLElement) {
-                const sceneID = findParentScene(mutation.target)
-                if (sceneID != null) {
-                  updateInvalidatedScenes((current) => current.add(sceneID), 'invalidate')
-                }
-              }
-            }
-          }
-        }
-      })
-    } else {
-      return null
-    }
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, []) // the dependencies are empty because this should only evaluate once
-  React.useEffect(() => {
-    return function cleanup() {
-      if (mutationObserver != null) {
-        mutationObserver.disconnect()
-      }
-    }
-  }, [mutationObserver])
-  return mutationObserver
-}
-
-function useInvalidateScenesWhenSelectedViewChanges(
-  updateInvalidatedScenes: SetValueCallback<Set<string>>,
-  invalidatedPathsForStylesheetCacheRef: React.MutableRefObject<Set<string>>,
-): void {
-  return useSelectorWithCallback(
-    (store) => store.editor.selectedViews,
-    (newSelectedViews) => {
-      newSelectedViews.forEach((sv) => {
-        const scenePath = EP.createBackwardsCompatibleScenePath(sv)
-        if (scenePath != null) {
-          const sceneID = EP.toString(scenePath)
-          updateInvalidatedScenes((current) => current.add(sceneID), 'invalidate')
-          invalidatedPathsForStylesheetCacheRef.current.add(EP.toString(sv))
-        }
-      })
-    },
-  )
-}
-
-function useInvalidateInitCompleteOnMountCount(
-  mountCount: number,
-  domWalkerInvalidateCount: number,
-): [boolean, () => void] {
-  const initCompleteRef = React.useRef<boolean>(false)
-  const previousMountCountRef = React.useRef<number>(mountCount)
-  const previousDomWalkerInvalidateCountRef = React.useRef<number>(domWalkerInvalidateCount)
-
-  const setInitComplete = React.useCallback(() => {
-    initCompleteRef.current = true
-  }, [])
-
-  if (
-    previousMountCountRef.current !== mountCount ||
-    previousDomWalkerInvalidateCountRef.current !== domWalkerInvalidateCount
-  ) {
-    // mount count increased, re-initialize dom-walker
-    initCompleteRef.current = false
-    previousMountCountRef.current = mountCount
-    previousDomWalkerInvalidateCountRef.current = domWalkerInvalidateCount
-  }
-
-  return [initCompleteRef.current, setInitComplete]
-}
-type ValueOrUpdater<S> = S | ((prevState: S) => S)
 // todo move to file
-export type SetValueCallback<S> = (
-  valueOrUpdater: ValueOrUpdater<S>,
-  invalidate: 'invalidate' | 'do-not-invalidate',
-) => void
-
-function isSimpleValue<S>(valueOrUpdater: ValueOrUpdater<S>): valueOrUpdater is S {
-  return typeof valueOrUpdater !== 'function'
-}
-function useStateAsyncInvalidate<S>(
-  onInvalidate: (immediate: 'immediate' | 'throttled') => void,
-  initialState: S,
-): [S, SetValueCallback<S>] {
-  const stateRef = React.useRef(initialState)
-  const setAndMarkInvalidated = React.useCallback(
-    (
-      valueOrUpdater: ValueOrUpdater<S>,
-      invalidate: 'invalidate' | 'do-not-invalidate' = 'invalidate',
-    ) => {
-      let resolvedNewValue: S
-      if (isSimpleValue(valueOrUpdater)) {
-        // TODO make this type nicer using a type guard
-        resolvedNewValue = valueOrUpdater
-      } else {
-        resolvedNewValue = valueOrUpdater(stateRef.current)
-      }
-      stateRef.current = resolvedNewValue
-
-      if (invalidate === 'invalidate') {
-        onInvalidate('throttled')
-      }
-    },
-    [stateRef, onInvalidate],
-  )
-
-  return [stateRef.current, setAndMarkInvalidated]
-}
-
-function useThrottledCallback(
-  callback: () => void,
-): (immediate: 'immediate' | 'throttled') => void {
-  const timeoutRef = React.useRef<NodeJS.Timeout | null>(null)
-
-  const callbackRef = React.useRef(callback)
-  callbackRef.current = callback
-
-  return React.useCallback((immediate: 'immediate' | 'throttled') => {
-    if (immediate === 'immediate') {
-      if (timeoutRef.current != null) {
-        clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
-      callbackRef.current()
-    } else if (timeoutRef.current == null) {
-      timeoutRef.current = setTimeout(() => {
-        timeoutRef.current = null
-        callbackRef.current()
-      }, 0)
-    }
-  }, [])
-}
+export type UpdateMutableCallback<S> = (updater: (mutableState: S) => void) => void
 
 export interface DomWalkerProps {
   selectedViews: Array<ElementPath>
   scale: number
   onDomReport: (
-    elementMetadata: ReadonlyArray<ElementInstanceMetadata>,
+    elementMetadata: ElementInstanceMetadataMap,
     cachedPaths: Array<ElementPath>,
   ) => void
   mountCount: number
   domWalkerInvalidateCount: number
   canvasInteractionHappening: boolean
+  additionalElementsToUpdate: Array<ElementPath>
 }
 
-function mergeFragmentMetadata(
-  metadata: ReadonlyArray<ElementInstanceMetadata>,
-): Array<ElementInstanceMetadata> {
-  let working: MapLike<ElementInstanceMetadata> = {}
+export interface DomWalkerMutableStateData {
+  invalidatedPaths: Set<string> // warning: all subtrees under each invalidated path should invalidated
+  invalidatedPathsForStylesheetCache: Set<string>
+  initComplete: boolean
+  mutationObserver: MutationObserver
+  resizeObserver: ResizeObserver
+  gridControlObserver: MutationObserver
+}
 
-  fastForEach(metadata, (elementMetadata) => {
-    const pathString = EP.toString(elementMetadata.elementPath)
-    const existingMetadata = working[pathString]
+export function createDomWalkerMutableState(
+  editorStoreApi: UtopiaStoreAPI,
+  dispatch: EditorDispatch,
+): DomWalkerMutableStateData {
+  const mutableData: DomWalkerMutableStateData = {
+    invalidatedPaths: emptySet(),
+    invalidatedPathsForStylesheetCache: emptySet(),
+    initComplete: true,
+    mutationObserver: null as any,
+    resizeObserver: null as any,
+    gridControlObserver: null as any,
+  }
 
-    if (existingMetadata == null) {
-      working[pathString] = elementMetadata
-    } else {
-      // We've hit a fragment, so remove the style etc., but keep the frames for selection
-      const merged = elementInstanceMetadata(
-        elementMetadata.elementPath,
-        left('fragment'),
-        {},
-        boundingRectangle(
-          existingMetadata.globalFrame ?? zeroCanvasRect,
-          elementMetadata.globalFrame ?? zeroCanvasRect,
-        ),
-        boundingRectangle(
-          existingMetadata.localFrame ?? zeroLocalRect,
-          elementMetadata.localFrame ?? zeroLocalRect,
-        ),
-        false,
-        false,
-        emptySpecialSizeMeasurements,
-        {},
-        {},
-        null,
-        null,
-      )
+  const observers = initDomWalkerObservers(mutableData, editorStoreApi, dispatch)
+  mutableData.mutationObserver = observers.mutationObserver
+  mutableData.resizeObserver = observers.resizeObserver
+  mutableData.gridControlObserver = observers.gridControlObserver
+  return mutableData
+}
 
-      working[pathString] = merged
+export const DomWalkerMutableStateCtx = React.createContext<DomWalkerMutableStateData | null>(null)
+function useDomWalkerMutableStateContext() {
+  return forceNotNull(
+    `DomWalkerMutableStateCtx needs a Provider`,
+    React.useContext(DomWalkerMutableStateCtx),
+  )
+}
+
+export function resubscribeObservers(domWalkerMutableState: {
+  mutationObserver: MutationObserver
+  resizeObserver: ResizeObserver
+  gridControlObserver: MutationObserver
+}) {
+  const canvasRootContainer = document.getElementById(CanvasContainerOuterId)
+  const gridControls = document.getElementById('grid-controls')
+
+  if (
+    ObserversAvailable &&
+    canvasRootContainer != null &&
+    domWalkerMutableState.resizeObserver != null &&
+    domWalkerMutableState.mutationObserver != null
+  ) {
+    document.querySelectorAll(`#${CanvasContainerOuterId} [${UTOPIA_UID_KEY}]`).forEach((elem) => {
+      domWalkerMutableState.resizeObserver.observe(elem)
+    })
+    domWalkerMutableState.mutationObserver.observe(canvasRootContainer, MutationObserverConfig)
+    if (gridControls != null) {
+      domWalkerMutableState.gridControlObserver.observe(gridControls, MutationObserverConfig)
     }
-  })
-
-  return Object.values(working)
+  }
 }
 
-export function useDomWalker(
-  props: DomWalkerProps,
-): [SetValueCallback<Set<string>>, SetValueCallback<Set<string>>, React.Ref<HTMLDivElement>] {
-  const containerRef = React.useRef<HTMLDivElement>(null)
+function isCanvasInteractionHappening(store: EditorStorePatched): boolean {
+  const interactionSessionActive = store.editor.canvas.interactionSession != null
+  return interactionSessionActive || ElementsToRerenderGLOBAL.current !== 'rerender-all-elements'
+}
 
-  const fireThrottledCallback = useThrottledCallback(() => {
-    const LogDomWalkerPerformance =
-      isFeatureEnabled('Debug mode – Performance Marks') && PERFORMANCE_MARKS_ALLOWED
-
-    if (containerRef.current != null) {
-      if (LogDomWalkerPerformance) {
-        performance.mark('DOM_WALKER_START')
-      }
-      // Get some base values relating to the div this component creates.
-      const refOfContainer = containerRef.current
-      if (ObserversAvailable && resizeObserver != null && mutationObserver != null) {
-        Array.from(document.querySelectorAll(`#${CanvasContainerID} *`)).map((elem) => {
-          resizeObserver.observe(elem)
-        })
-        mutationObserver.observe(refOfContainer, MutationObserverConfig)
-      }
-
-      // getCanvasRectangleFromElement is costly, so I made it lazy. we only need the value inside globalFrameForElement
-      const containerRect = lazyValue(() => {
-        return getCanvasRectangleFromElement(refOfContainer, props.scale)
+export function initDomWalkerObservers(
+  domWalkerMutableState: DomWalkerMutableStateData,
+  editorStore: UtopiaStoreAPI,
+  dispatch: EditorDispatch,
+): {
+  resizeObserver: ResizeObserver
+  mutationObserver: MutationObserver
+  gridControlObserver: MutationObserver
+} {
+  let domWalkerTimeoutID: number | null = null
+  function queueUpDomWalker(restrictToElements: Array<ElementPath> | null): void {
+    if (domWalkerTimeoutID == null) {
+      domWalkerTimeoutID = window.setTimeout(() => {
+        dispatch([runDOMWalker(restrictToElements)])
+        domWalkerTimeoutID = null
       })
+    }
+  }
 
-      // This assumes that the canvas root is rendering a Storyboard fragment.
-      // The necessary validPaths and the root fragment's template path comes from props,
-      // because the fragment is invisible in the DOM.
-      const { metadata, cachedPaths } = walkCanvasRootFragment(
-        refOfContainer,
-        0,
-        rootMetadataInStateRef,
-        invalidatedPaths as ReadonlySet<string>, // this is not the nicest type here, but it should be fine for now :)
-        updateInvalidatedPaths,
-        invalidatedScenes as ReadonlySet<string>,
-        updateInvalidatedScenes,
-        invalidatedPathsForStylesheetCacheRef,
-        props.selectedViews,
-        !initComplete,
-        props.scale,
-        containerRect,
-      )
-      if (LogDomWalkerPerformance) {
-        performance.mark('DOM_WALKER_END')
-        performance.measure('DOM WALKER', 'DOM_WALKER_START', 'DOM_WALKER_END')
+  // Warning: I modified this code so it runs in all modes, not just in live mode. We still don't trigger
+  // the DOM walker during canvas interactions, so the performance impact doesn't seem that bad. But it is
+  // necessary, because after remix navigation, and after dynamic changes coming from loaders sometimes the
+  // dom walker was not executed after all the changes.
+  //
+  // This was the original comment here when this only ran in live mode:
+  //
+  // Warning: These observers only trigger the DOM walker whilst in live mode to ensure metadata is up to date
+  // when interacting with the actual running application / components. There are likely edge cases where we
+  // also want these to trigger the DOM walker whilst in select mode, but if we find such a case we need to
+  // adequately assess the performance impact of doing so, and ideally find a way to only do so when the observed
+  // change was not triggered by a user interaction
+  const resizeObserver = new ResizeObserver((entries: ResizeObserverEntry[]) => {
+    const canvasInteractionHappening = isCanvasInteractionHappening(editorStore.getState())
+    const selectedViews = editorStore.getState().editor.selectedViews
+    if (canvasInteractionHappening) {
+      // Warning this only adds the selected views instead of the observed element
+      fastForEach(selectedViews, (v) => {
+        domWalkerMutableState.invalidatedPaths.add(EP.toString(v))
+      })
+    } else {
+      let shouldRunDOMWalker = false
+      for (let entry of entries) {
+        const sceneID = findParentScene(entry.target)
+        if (sceneID != null) {
+          domWalkerMutableState.invalidatedPaths.add(sceneID) // warning this invalidates the entire scene instead of just the observed element.
+          shouldRunDOMWalker = true
+        }
       }
-      setInitComplete()
-
-      // Fragments will appear as multiple separate entries with duplicate UIDs, so we need to handle those
-      const fixedMetadata = mergeFragmentMetadata(metadata)
-
-      props.onDomReport(fixedMetadata, cachedPaths)
+      if (shouldRunDOMWalker) {
+        queueUpDomWalker(null)
+      }
     }
   })
 
-  const rootMetadataInStateRef = useRefEditorState(
-    (store) => store.editor.domMetadata as ReadonlyArray<ElementInstanceMetadata>,
-  )
-  const [invalidatedPaths, updateInvalidatedPaths] = useStateAsyncInvalidate<Set<string>>(
-    fireThrottledCallback,
-    emptySet(),
-  ) // For invalidating specific paths only
-  const [invalidatedScenes, updateInvalidatedScenes] = useStateAsyncInvalidate<Set<string>>(
-    fireThrottledCallback,
-    emptySet(),
-  ) // For invalidating entire scenes and everything below them
-  const invalidatedPathsForStylesheetCacheRef = React.useRef<Set<string>>(emptySet())
-  const [initComplete, setInitComplete] = useInvalidateInitCompleteOnMountCount(
-    props.mountCount,
-    props.domWalkerInvalidateCount,
-  )
-  const selectedViewsRef = React.useRef(props.selectedViews)
-  const canvasInteractionHappeningRef = React.useRef(props.canvasInteractionHappening)
+  const mutationObserver = new window.MutationObserver((mutations: MutationRecord[]) => {
+    const canvasInteractionHappening = isCanvasInteractionHappening(editorStore.getState())
+    const selectedViews = editorStore.getState().editor.selectedViews
 
-  if (selectedViewsRef.current !== props.selectedViews) {
-    selectedViewsRef.current = props.selectedViews
-  }
-  if (canvasInteractionHappeningRef.current !== props.canvasInteractionHappening) {
-    canvasInteractionHappeningRef.current = props.canvasInteractionHappening
-  }
-
-  const resizeObserver = useResizeObserver(
-    updateInvalidatedPaths,
-    updateInvalidatedScenes,
-    selectedViewsRef,
-    canvasInteractionHappeningRef,
-  )
-  const mutationObserver = useMutationObserver(
-    updateInvalidatedPaths,
-    updateInvalidatedScenes,
-    selectedViewsRef,
-    canvasInteractionHappeningRef,
-  )
-  useInvalidateScenesWhenSelectedViewChanges(
-    updateInvalidatedScenes,
-    invalidatedPathsForStylesheetCacheRef,
-  )
-
-  React.useLayoutEffect(() => {
-    fireThrottledCallback('immediate')
+    if (canvasInteractionHappening) {
+      // Warning this only adds the selected views instead of the observed element
+      fastForEach(selectedViews, (v) => {
+        domWalkerMutableState.invalidatedPaths.add(EP.toString(v))
+      })
+    } else {
+      let shouldRunDOMWalker = false
+      for (let mutation of mutations) {
+        if (
+          mutation.attributeName === 'style' ||
+          mutation.addedNodes.length > 0 ||
+          mutation.removedNodes.length > 0
+        ) {
+          if (mutation.target instanceof HTMLElement) {
+            const sceneID = findParentScene(mutation.target)
+            if (sceneID != null) {
+              domWalkerMutableState.invalidatedPaths.add(sceneID) // warning this invalidates the entire scene instead of just the observed element.
+              shouldRunDOMWalker = true
+            }
+          }
+        }
+      }
+      if (shouldRunDOMWalker) {
+        queueUpDomWalker(null)
+      }
+    }
   })
 
-  return [updateInvalidatedPaths, updateInvalidatedScenes, containerRef]
+  const gridControlObserver = new window.MutationObserver((mutations: MutationRecord[]) => {
+    let shouldRunDOMWalkerOnPath = null
+    mutations.forEach((mutation) => {
+      if (mutation.target instanceof HTMLElement) {
+        for (const child of mutation.target.children) {
+          const gridPath = child.getAttribute('data-grid-path')
+          if (gridPath != null) {
+            shouldRunDOMWalkerOnPath = EP.fromString(gridPath)
+          }
+        }
+      }
+    })
+    if (shouldRunDOMWalkerOnPath != null) {
+      queueUpDomWalker([shouldRunDOMWalkerOnPath])
+    }
+  })
+
+  return { resizeObserver, mutationObserver, gridControlObserver }
+}
+
+export function invalidateDomWalkerIfNecessary(
+  domWalkerMutableState: DomWalkerMutableStateData,
+  oldEditorState: EditorState,
+  newEditorState: EditorState,
+): void {
+  // invalidate initComplete on mountCount increase
+  if (
+    newEditorState.canvas.domWalkerInvalidateCount >
+      oldEditorState.canvas.domWalkerInvalidateCount ||
+    newEditorState.canvas.mountCount > oldEditorState.canvas.mountCount
+  ) {
+    domWalkerMutableState.initComplete = false // Mutation!
+    domWalkerMutableState.invalidatedPaths.clear() // Mutation!
+  }
+
+  // invalidate scenes when selectedViews change
+  if (!shallowEqual(oldEditorState.selectedViews, newEditorState.selectedViews)) {
+    newEditorState.selectedViews.forEach((sv) => {
+      const scenePath = EP.createBackwardsCompatibleScenePath(sv)
+      if (scenePath != null) {
+        const sceneID = EP.toString(scenePath)
+        domWalkerMutableState.invalidatedPaths.add(sceneID) // Mutation!
+        domWalkerMutableState.invalidatedPathsForStylesheetCache.add(EP.toString(sv))
+      }
+    })
+  }
+}
+
+export function useDomWalkerInvalidateCallbacks(): [UpdateMutableCallback<Set<string>>] {
+  const domWalkerMutableState = useDomWalkerMutableStateContext()
+  // For invalidating specific paths only
+  const updateInvalidatedPaths: UpdateMutableCallback<Set<string>> = React.useCallback(
+    (callback) => {
+      callback(domWalkerMutableState.invalidatedPaths)
+    },
+    [domWalkerMutableState],
+  )
+
+  return [updateInvalidatedPaths]
 }
 
 function collectMetadataForElement(
   element: HTMLElement,
-  parentPoint: CanvasPoint,
+  closestOffsetParentPath: ElementPath | null,
   scale: number,
-  containerRectLazy: () => CanvasRectangle,
+  containerRectLazy: CanvasPoint | (() => CanvasPoint),
+  elementCanvasRectangleCache: ElementCanvasRectangleCache,
 ): {
   tagName: string
   globalFrame: CanvasRectangle
-  localFrame: LocalRectangle
+  nonRoundedGlobalFrame: CanvasRectangle
   specialSizeMeasurementsObject: SpecialSizeMeasurements
+  textContentsMaybe: string | null
 } {
   const tagName: string = element.tagName.toLowerCase()
-  const globalFrame = globalFrameForElement(element, scale, containerRectLazy)
-  const localFrame = localRectangle(Utils.offsetRect(globalFrame, Utils.negate(parentPoint)))
+  const globalFrame = globalFrameForElement(
+    element,
+    scale,
+    containerRectLazy,
+    'without-text-content',
+    'nearest-half',
+    elementCanvasRectangleCache,
+  )
+  const nonRoundedGlobalFrame = globalFrameForElement(
+    element,
+    scale,
+    containerRectLazy,
+    'without-text-content',
+    'no-rounding',
+    elementCanvasRectangleCache,
+  )
 
-  const specialSizeMeasurementsObject = getSpecialMeasurements(element, scale, containerRectLazy)
+  const textContentsMaybe = element.children.length === 0 ? element.textContent : null
+
+  const specialSizeMeasurementsObject = getSpecialMeasurements(
+    element,
+    closestOffsetParentPath,
+    scale,
+    containerRectLazy,
+    elementCanvasRectangleCache,
+  )
 
   return {
     tagName: tagName,
     globalFrame: globalFrame,
-    localFrame: localFrame,
+    nonRoundedGlobalFrame: nonRoundedGlobalFrame,
     specialSizeMeasurementsObject: specialSizeMeasurementsObject,
+    textContentsMaybe: textContentsMaybe,
   }
 }
 
-function isAnyPathInvalidated(
-  stringPathsForElement: Array<string>,
-  invalidatedPaths: ReadonlySet<string>,
-): boolean {
-  return invalidatedPaths.size > 0 && stringPathsForElement.some((p) => invalidatedPaths.has(p))
-}
-
-function collectMetadata(
+export function collectDomElementMetadataForElement(
   element: HTMLElement,
-  pathsForElement: Array<ElementPath>,
-  stringPathsForElement: Array<string>,
-  parentPoint: CanvasPoint,
-  allUnfilteredChildrenPaths: Array<ElementPath>,
   scale: number,
-  containerRectLazy: () => CanvasRectangle,
-  invalidatedPaths: ReadonlySet<string>,
-  updateInvalidatedPaths: SetValueCallback<Set<string>>,
-  invalidatedPathsForStylesheetCacheRef: React.MutableRefObject<Set<string>>,
-  rootMetadataInStateRef: React.MutableRefObject<ReadonlyArray<ElementInstanceMetadata>>,
-  invalidated: boolean,
-  selectedViews: Array<ElementPath>,
-): { collectedMetadata: Array<ElementInstanceMetadata>; cachedPaths: Array<ElementPath> } {
-  const shouldCollect = invalidated || isAnyPathInvalidated(stringPathsForElement, invalidatedPaths)
-  if (shouldCollect && pathsForElement.length > 0) {
-    const {
-      tagName,
-      globalFrame,
-      localFrame,
-      specialSizeMeasurementsObject,
-    } = collectMetadataForElement(element, parentPoint, scale, containerRectLazy)
+  containerRectX: number,
+  containerRectY: number,
+  elementCanvasRectangleCache: ElementCanvasRectangleCache,
+): DomElementMetadata {
+  const closestOffsetParentPath: ElementPath | null = findNearestElementWithPath(
+    element.offsetParent,
+  )
 
-    const { computedStyle, attributeMetadata } = getComputedStyle(
-      element,
-      pathsForElement,
-      invalidatedPathsForStylesheetCacheRef,
-      selectedViews,
-    )
+  const {
+    tagName,
+    globalFrame,
+    nonRoundedGlobalFrame,
+    specialSizeMeasurementsObject,
+    textContentsMaybe,
+  } = collectMetadataForElement(
+    element,
+    closestOffsetParentPath,
+    scale,
+    canvasPoint({ x: containerRectX, y: containerRectY }),
+    elementCanvasRectangleCache,
+  )
 
-    const collectedMetadata = pathsForElement.map((path) => {
-      updateInvalidatedPaths((current) => {
-        // sneaky mutation to improve performance
-        ;(current as Set<string>).delete(EP.toString(path))
-        return current
-      }, 'do-not-invalidate')
-
-      return elementInstanceMetadata(
-        path,
-        left(tagName),
-        {},
-        globalFrame,
-        localFrame,
-        false,
-        false,
-        specialSizeMeasurementsObject,
-        computedStyle,
-        attributeMetadata,
-        null,
-        null, // This comes from the Spy Wrapper
-      )
-    })
-
-    return {
-      collectedMetadata: collectedMetadata,
-      cachedPaths: [],
-    }
-  } else {
-    const cachedMetadata = mapDropNulls((path) => {
-      return MetadataUtils.findElementMetadata(path, rootMetadataInStateRef.current)
-    }, pathsForElement)
-
-    if (cachedMetadata.length === pathsForElement.length) {
-      return {
-        collectedMetadata: cachedMetadata,
-        cachedPaths: pathsForElement,
-      }
-    } else {
-      // If any path is missing cached metadata we must forcibly invalidate the element
-      return collectMetadata(
-        element,
-        pathsForElement,
-        stringPathsForElement,
-        parentPoint,
-        allUnfilteredChildrenPaths,
-        scale,
-        containerRectLazy,
-        invalidatedPaths,
-        updateInvalidatedPaths,
-        invalidatedPathsForStylesheetCacheRef,
-        rootMetadataInStateRef,
-        true,
-        selectedViews,
-      )
-    }
-  }
+  return domElementMetadata(
+    left(tagName),
+    globalFrame,
+    nonRoundedGlobalFrame,
+    specialSizeMeasurementsObject,
+    textContentsMaybe,
+  )
 }
 
-function getComputedStyle(
-  element: HTMLElement,
-  paths: Array<ElementPath>,
-  invalidatedPathsForStylesheetCacheRef: React.MutableRefObject<Set<string>>,
-  selectedViews: Array<ElementPath>,
-): { computedStyle: ComputedStyle | null; attributeMetadata: StyleAttributeMetadata | null } {
-  const isSelectedOnAnyPaths = selectedViews.some((sv) =>
-    paths.some((path) => EP.pathsEqual(sv, path)),
-  )
-  if (!isSelectedOnAnyPaths) {
-    // the element is not among the selected views, skip computing the style
+export function getGridContainerProperties(
+  elementStyle: CSSStyleDeclaration | null,
+  options?: {
+    dynamicCols: boolean
+    dynamicRows: boolean
+  },
+): GridContainerProperties {
+  if (elementStyle == null) {
     return {
-      computedStyle: null,
-      attributeMetadata: null,
+      gridTemplateColumns: null,
+      gridTemplateRows: null,
+      gridAutoColumns: null,
+      gridAutoRows: null,
+      gridAutoFlow: null,
     }
   }
-  const elementStyle = window.getComputedStyle(element)
-  const attributesSetByStylesheet = getCachedAttributesComingFromStyleSheets(
-    invalidatedPathsForStylesheetCacheRef,
-    paths[0], // TODO is this sufficient to use the first path element for caching?
-    element,
+
+  const gridTemplateColumns = trimDynamicEmptyDimensions(
+    defaultEither(
+      gridAutoOrTemplateFallback(elementStyle.gridTemplateColumns),
+      parseGridAutoOrTemplateBase(elementStyle.gridTemplateColumns),
+    ),
+    options?.dynamicCols === true,
   )
-  let computedStyle: ComputedStyle = {}
-  let attributeMetadata: StyleAttributeMetadata = {}
-  if (elementStyle != null) {
-    Object.keys(elementStyle).forEach((key) => {
-      // Accessing the value directly often doesn't work, and using `getPropertyValue` requires
-      // using dashed case rather than camel case
-      const caseCorrectedKey = camelCaseToDashed(key)
-      const propertyValue = elementStyle.getPropertyValue(caseCorrectedKey)
-      if (propertyValue != '') {
-        computedStyle[key] = propertyValue
-        const isSetFromStyleSheet = attributesSetByStylesheet.has(key)
-        if (isSetFromStyleSheet) {
-          attributeMetadata[key] = { fromStyleSheet: true }
-        }
-      }
-    })
+
+  const gridTemplateRows = trimDynamicEmptyDimensions(
+    defaultEither(
+      gridAutoOrTemplateFallback(elementStyle.gridTemplateRows),
+      parseGridAutoOrTemplateBase(elementStyle.gridTemplateRows),
+    ),
+    options?.dynamicRows === true,
+  )
+
+  const gridAutoColumns = defaultEither(
+    gridAutoOrTemplateFallback(elementStyle.gridAutoColumns),
+    parseGridAutoOrTemplateBase(elementStyle.gridAutoColumns),
+  )
+  const gridAutoRows = defaultEither(
+    gridAutoOrTemplateFallback(elementStyle.gridAutoRows),
+    parseGridAutoOrTemplateBase(elementStyle.gridAutoRows),
+  )
+  return gridContainerProperties(
+    gridTemplateColumns,
+    gridTemplateRows,
+    gridAutoColumns,
+    gridAutoRows,
+    parseGridAutoFlow(elementStyle.gridAutoFlow),
+  )
+}
+
+function trimDynamicEmptyDimensions(
+  template: GridAutoOrTemplateBase,
+  isDynamic: boolean,
+): GridAutoOrTemplateBase {
+  if (!isDynamic) {
+    return template
+  }
+  if (template.type !== 'DIMENSIONS') {
+    return template
   }
 
-  return {
-    computedStyle: computedStyle,
-    attributeMetadata: attributeMetadata,
+  const lastNonEmptyColumn = template.dimensions.findLastIndex(
+    (d) => d.type === 'KEYWORD' || (d.type === 'NUMBER' && d.value.value !== 0),
+  )
+  return gridAutoOrTemplateDimensions(template.dimensions.slice(0, lastNonEmptyColumn + 1))
+}
+
+export function getGridElementProperties(
+  container: GridContainerProperties,
+  elementStyle: CSSStyleDeclaration,
+): GridElementProperties {
+  function getPlacementPin(
+    value: GridPositionOrSpan | null,
+    axis: 'row' | 'column',
+    pin: 'start' | 'end',
+    style: string,
+  ) {
+    if (isGridSpan(value) || value != null) {
+      return value
+    }
+    return defaultEither(null, parseGridPosition(container, axis, pin, value ?? null, style))
   }
+
+  const gridColumn = defaultEither(
+    null,
+    parseGridRange(container, 'column', elementStyle.gridColumn),
+  )
+  const gridColumnStart = getPlacementPin(
+    gridColumn?.start ?? null,
+    'column',
+    'start',
+    elementStyle.gridColumnStart,
+  )
+  const gridColumnEnd = getPlacementPin(
+    gridColumn?.end ?? null,
+    'column',
+    'end',
+    elementStyle.gridColumnEnd,
+  )
+  const adjustedColumnEnd =
+    isGridSpan(gridColumn?.end) || (isCSSKeyword(gridColumnEnd) && gridColumn?.end != null)
+      ? gridColumn.end
+      : gridColumnEnd
+
+  const gridRow = defaultEither(null, parseGridRange(container, 'row', elementStyle.gridRow))
+  const gridRowStart = getPlacementPin(
+    gridRow?.start ?? null,
+    'row',
+    'start',
+    elementStyle.gridRowStart,
+  )
+  const gridRowEnd = getPlacementPin(gridRow?.end ?? null, 'row', 'end', elementStyle.gridRowEnd)
+  const adjustedRowEnd =
+    isGridSpan(gridRow?.end) || (isCSSKeyword(gridRowEnd) && gridRow?.end != null)
+      ? gridRow.end
+      : gridRowEnd
+
+  const result = gridElementProperties(
+    gridColumnStart,
+    adjustedColumnEnd,
+    gridRowStart,
+    adjustedRowEnd,
+  )
+  return result
 }
 
 function getSpecialMeasurements(
   element: HTMLElement,
+  closestOffsetParentPath: ElementPath | null,
   scale: number,
-  containerRectLazy: () => CanvasRectangle,
+  containerRectLazy: CanvasPoint | (() => CanvasPoint),
+  elementCanvasRectangleCache: ElementCanvasRectangleCache,
 ): SpecialSizeMeasurements {
-  const elementStyle = window.getComputedStyle(element)
-  const layoutSystemForChildren = elementLayoutSystem(elementStyle)
-  const position = getPosition(elementStyle)
+  const computedStyle = window.getComputedStyle(element)
+  const layoutSystemForChildren = elementLayoutSystem(computedStyle)
+  const position = getPosition(computedStyle)
 
   const offset = {
     x: roundToNearestHalf(element.offsetLeft),
@@ -716,39 +703,78 @@ function getSpecialMeasurements(
 
   const coordinateSystemBounds =
     element.offsetParent instanceof HTMLElement
-      ? globalFrameForElement(element.offsetParent, scale, containerRectLazy)
+      ? globalFrameForElement(
+          element.offsetParent,
+          scale,
+          containerRectLazy,
+          'without-text-content',
+          'nearest-half',
+          elementCanvasRectangleCache,
+        )
       : null
 
   const immediateParentBounds =
     element.parentElement instanceof HTMLElement
-      ? globalFrameForElement(element.parentElement, scale, containerRectLazy)
+      ? globalFrameForElement(
+          element.parentElement,
+          scale,
+          containerRectLazy,
+          'without-text-content',
+          'nearest-half',
+          elementCanvasRectangleCache,
+        )
       : null
 
   const parentElementStyle =
     element.parentElement == null ? null : window.getComputedStyle(element.parentElement)
   const isParentNonStatic = isElementNonStatic(parentElementStyle)
 
-  const providesBoundsForChildren = isElementNonStatic(elementStyle)
+  const providesBoundsForAbsoluteChildren = isElementAContainingBlockForAbsolute(computedStyle)
 
   const parentLayoutSystem = elementLayoutSystem(parentElementStyle)
   const parentProvidesLayout = element.parentElement === element.offsetParent
-  const parentFlexDirection = parentElementStyle?.flexDirection ?? null
-  const flexDirection = elementStyle.flexDirection ?? null
+  const parentFlexDirection = eitherToMaybe(
+    parseFlexDirection(parentElementStyle?.flexDirection, null),
+  )
+  const parentJustifyContent = getFlexJustifyContent(parentElementStyle?.justifyContent ?? null)
+
+  const sizeMainAxis = parentFlexDirection === 'row' ? 'width' : 'height'
+  const parentHugsOnMainAxis =
+    parentLayoutSystem === 'flex' &&
+    element.parentElement != null &&
+    element.parentElement.style[sizeMainAxis] === MaxContent
+
+  const flexDirection = eitherToMaybe(parseFlexDirection(computedStyle.flexDirection, null))
+  const parentTextDirection = eitherToMaybe(parseDirection(parentElementStyle?.direction, null))
+
+  const justifyContent = getFlexJustifyContent(computedStyle.justifyContent)
+  const alignContent = getAlignContent(computedStyle.alignContent)
+  const alignItems = getFlexAlignment(computedStyle.alignItems)
+  const alignSelf = getSelfAlignment(computedStyle.alignSelf)
+  const justifySelf = getSelfAlignment(computedStyle.justifySelf)
 
   const margin = applicative4Either(
     applicativeSidesPxTransform,
-    parseCSSLength(elementStyle.marginTop),
-    parseCSSLength(elementStyle.marginRight),
-    parseCSSLength(elementStyle.marginBottom),
-    parseCSSLength(elementStyle.marginLeft),
+    parseCSSLength(computedStyle.marginTop),
+    parseCSSLength(computedStyle.marginRight),
+    parseCSSLength(computedStyle.marginBottom),
+    parseCSSLength(computedStyle.marginLeft),
   )
 
   const padding = applicative4Either(
     applicativeSidesPxTransform,
-    parseCSSLength(elementStyle.paddingTop),
-    parseCSSLength(elementStyle.paddingRight),
-    parseCSSLength(elementStyle.paddingBottom),
-    parseCSSLength(elementStyle.paddingLeft),
+    parseCSSLength(computedStyle.paddingTop),
+    parseCSSLength(computedStyle.paddingRight),
+    parseCSSLength(computedStyle.paddingBottom),
+    parseCSSLength(computedStyle.paddingLeft),
+  )
+
+  const parentPadding = applicative4Either(
+    applicativeSidesPxTransform,
+    parseCSSLength(parentElementStyle?.paddingTop),
+    parseCSSLength(parentElementStyle?.paddingRight),
+    parseCSSLength(parentElementStyle?.paddingBottom),
+    parseCSSLength(parentElementStyle?.paddingLeft),
   )
 
   let naturalWidth: number | null = null
@@ -762,372 +788,341 @@ function getSpecialMeasurements(
   let clientHeight = roundToNearestHalf(element.clientHeight)
 
   const childrenCount = element.childElementCount
+
+  const borderTopWidth = parseCSSLength(computedStyle.borderTopWidth)
+  const borderRightWidth = parseCSSLength(computedStyle.borderRightWidth)
+  const borderBottomWidth = parseCSSLength(computedStyle.borderBottomWidth)
+  const borderLeftWidth = parseCSSLength(computedStyle.borderLeftWidth)
+  const border: BorderWidths = {
+    top: isRight(borderTopWidth) ? borderTopWidth.value.value : 0,
+    right: isRight(borderRightWidth) ? borderRightWidth.value.value : 0,
+    bottom: isRight(borderBottomWidth) ? borderBottomWidth.value.value : 0,
+    left: isRight(borderLeftWidth) ? borderLeftWidth.value.value : 0,
+  }
+
+  const offsetParent = getClosestOffsetParent(element) as HTMLElement | null
+  const elementOrContainingParent =
+    providesBoundsForAbsoluteChildren || offsetParent == null ? element : offsetParent
+
+  const globalFrame = globalFrameForElement(
+    elementOrContainingParent,
+    scale,
+    containerRectLazy,
+    'without-text-content',
+    'nearest-half',
+    elementCanvasRectangleCache,
+  )
+
+  const globalFrameWithTextContent = globalFrameForElement(
+    element,
+    scale,
+    containerRectLazy,
+    'with-text-content',
+    'nearest-half',
+    elementCanvasRectangleCache,
+  )
+
+  const globalContentBoxForChildren = canvasRectangle({
+    x: globalFrame.x + border.left,
+    y: globalFrame.y + border.top,
+    width: globalFrame.width - border.left - border.right,
+    height: globalFrame.height - border.top - border.bottom,
+  })
+
+  function positionValueIsDefault(value: string) {
+    return value === 'auto' || value === '0px'
+  }
+
+  const hasPositionOffset =
+    !positionValueIsDefault(computedStyle.top) ||
+    !positionValueIsDefault(computedStyle.right) ||
+    !positionValueIsDefault(computedStyle.bottom) ||
+    !positionValueIsDefault(computedStyle.left)
+  const hasTransform = computedStyle.transform !== 'none'
+
+  const gap = defaultEither(
+    null,
+    mapEither((n) => n.value, parseCSSLength(computedStyle.gap)),
+  )
+
+  const rowGap = defaultEither(
+    null,
+    mapEither((n) => n.value, parseCSSLength(computedStyle.rowGap)),
+  )
+
+  const columnGap = defaultEither(
+    null,
+    mapEither((n) => n.value, parseCSSLength(computedStyle.columnGap)),
+  )
+
+  const flexGapValue = parseCSSLength(parentElementStyle?.gap)
+  const parsedFlexGapValue = isRight(flexGapValue) ? flexGapValue.value.value : 0
+
+  const borderRadius = defaultEither(
+    null,
+    applicative4Either(
+      applicativeSidesPxTransform,
+      parseCSSLength(computedStyle.borderTopLeftRadius),
+      parseCSSLength(computedStyle.borderTopRightRadius),
+      parseCSSLength(computedStyle.borderBottomLeftRadius),
+      parseCSSLength(computedStyle.borderBottomRightRadius),
+    ),
+  )
+
+  const fontSize = computedStyle.fontSize
+  const fontWeight = computedStyle.fontWeight
+  const fontStyle = computedStyle.fontStyle
+  const textDecorationLine = computedStyle.textDecorationLine
+
+  const textBounds = elementContainsOnlyText(element)
+    ? stretchRect(
+        getCanvasRectangleFromElement(
+          element,
+          scale,
+          'only-text-content',
+          'nearest-half',
+          elementCanvasRectangleCache,
+        ),
+        {
+          w:
+            maybeValueFromComputedStyle(computedStyle.paddingLeft) +
+            maybeValueFromComputedStyle(computedStyle.paddingRight) +
+            maybeValueFromComputedStyle(computedStyle.marginLeft) +
+            maybeValueFromComputedStyle(computedStyle.marginRight),
+          h:
+            maybeValueFromComputedStyle(computedStyle.paddingTop) +
+            maybeValueFromComputedStyle(computedStyle.paddingBottom) +
+            maybeValueFromComputedStyle(computedStyle.marginTop) +
+            maybeValueFromComputedStyle(computedStyle.marginBottom),
+        },
+      )
+    : null
+
+  const computedStyleMap =
+    typeof element.computedStyleMap === 'function' ? element.computedStyleMap() : null // TODO: this is for jest tests, no computedStyleMap in jsdom :()
+  const computedHugProperty = hugPropertiesFromStyleMap(
+    (styleProp: string) => computedStyleMap?.get(styleProp)?.toString() ?? null,
+    globalFrame,
+  )
+
+  const paddingValue = isRight(padding)
+    ? padding.value
+    : sides(undefined, undefined, undefined, undefined)
+
+  const gridCellGlobalFrames =
+    layoutSystemForChildren === 'grid'
+      ? measureGlobalFramesOfGridCells(
+          element,
+          scale,
+          containerRectLazy,
+          elementCanvasRectangleCache,
+        )
+      : null
+
+  const parentGridCellGlobalFrames =
+    element.parentElement != null && elementLayoutSystem(parentElementStyle) === 'grid'
+      ? measureGlobalFramesOfGridCells(
+          element.parentElement,
+          scale,
+          containerRectLazy,
+          elementCanvasRectangleCache,
+        )
+      : null
+
+  const parentGridFrame =
+    element.parentElement != null && elementLayoutSystem(parentElementStyle) === 'grid'
+      ? globalFrameForElement(
+          element.parentElement,
+          scale,
+          containerRectLazy,
+          'without-text-content',
+          'nearest-half',
+          elementCanvasRectangleCache,
+        )
+      : null
+
+  const containerGridPropertiesFromProps = getGridContainerProperties(element.style)
+  const parentContainerGridPropertiesFromProps = getGridContainerProperties(
+    element.parentElement?.style ?? parentElementStyle,
+  )
+  const containerGridProperties = getGridContainerProperties(computedStyle, {
+    dynamicCols: isDynamicGridTemplate(containerGridPropertiesFromProps.gridTemplateColumns),
+    dynamicRows: isDynamicGridTemplate(containerGridPropertiesFromProps.gridTemplateRows),
+  })
+
+  const parentContainerGridProperties = getGridContainerProperties(parentElementStyle)
+  const containerElementPropertiesFromProps = getGridElementProperties(
+    parentContainerGridProperties,
+    element.style,
+  )
+  const containerElementProperties = getGridElementProperties(
+    parentContainerGridProperties,
+    computedStyle,
+  )
+
   return specialSizeMeasurements(
     offset,
     coordinateSystemBounds,
     immediateParentBounds,
+    globalFrameWithTextContent,
     parentProvidesLayout,
+    closestOffsetParentPath,
     isParentNonStatic,
     parentLayoutSystem,
     layoutSystemForChildren,
-    providesBoundsForChildren,
-    elementStyle.display,
+    false, // layoutSystemForChildrenInherited
+    providesBoundsForAbsoluteChildren,
+    computedStyle.display,
     position,
     isRight(margin) ? margin.value : sides(undefined, undefined, undefined, undefined),
-    isRight(padding) ? padding.value : sides(undefined, undefined, undefined, undefined),
+    paddingValue,
     naturalWidth,
     naturalHeight,
     clientWidth,
     clientHeight,
     parentFlexDirection,
+    parentJustifyContent,
+    parsedFlexGapValue,
+    isRight(parentPadding)
+      ? parentPadding.value
+      : sides(undefined, undefined, undefined, undefined),
+    parentHugsOnMainAxis,
+    gap,
     flexDirection,
+    justifyContent,
+    alignContent,
+    alignItems,
     element.localName,
     childrenCount,
+    globalContentBoxForChildren,
+    computedStyle.float,
+    hasPositionOffset,
+    parentTextDirection,
+    hasTransform,
+    borderRadius,
+    fontSize,
+    fontWeight,
+    fontStyle,
+    textDecorationLine,
+    textBounds,
+    computedHugProperty,
+    containerGridProperties,
+    parentContainerGridProperties,
+    containerElementProperties,
+    containerGridPropertiesFromProps,
+    parentContainerGridPropertiesFromProps,
+    containerElementPropertiesFromProps,
+    rowGap,
+    columnGap,
+    gridCellGlobalFrames,
+    parentGridCellGlobalFrames,
+    justifySelf,
+    alignSelf,
+    border,
+    parentGridFrame,
   )
+}
+
+export function isDynamicGridTemplate(template: GridAutoOrTemplateBase | null) {
+  return template?.type === 'DIMENSIONS' && template.dimensions.some((d) => isDynamicGridRepeat(d))
+}
+
+function elementContainsOnlyText(element: HTMLElement): boolean {
+  if (element.childNodes.length === 0) {
+    return false
+  }
+  for (const node of element.childNodes) {
+    const isForText =
+      node.nodeType === Node.TEXT_NODE ||
+      (node.nodeType === Node.ELEMENT_NODE && node.nodeName === 'BR')
+    if (!isForText) {
+      return false
+    }
+  }
+  return true
+}
+
+function maybeValueFromComputedStyle(property: string): number {
+  const parsed = parseCSSPx(property)
+  return isRight(parsed) ? parsed.value.value : 0
 }
 
 function globalFrameForElement(
   element: HTMLElement,
   scale: number,
-  containerRectLazy: () => CanvasRectangle,
+  containerRectLazy: CanvasPoint | (() => CanvasPoint),
+  withContent: 'without-text-content' | 'with-text-content',
+  rounding: 'nearest-half' | 'no-rounding',
+  elementCanvasRectangleCache: ElementCanvasRectangleCache,
 ) {
-  const elementRect = getCanvasRectangleFromElement(element, scale)
-  return Utils.offsetRect(elementRect, Utils.negate(containerRectLazy()))
-}
-
-function walkCanvasRootFragment(
-  canvasRoot: HTMLElement,
-  index: number,
-  rootMetadataInStateRef: React.MutableRefObject<ReadonlyArray<ElementInstanceMetadata>>,
-  invalidatedPaths: ReadonlySet<string>,
-  updateInvalidatedPaths: SetValueCallback<Set<string>>,
-  invalidatedScenes: ReadonlySet<string>,
-  updateInvalidatedScenes: SetValueCallback<Set<string>>,
-  invalidatedPathsForStylesheetCacheRef: React.MutableRefObject<Set<string>>,
-  selectedViews: Array<ElementPath>,
-  invalidated: boolean,
-  scale: number,
-  containerRectLazy: () => CanvasRectangle,
-): {
-  metadata: ReadonlyArray<ElementInstanceMetadata>
-  cachedPaths: Array<ElementPath>
-} {
-  const canvasRootPath: ElementPath | null = optionalMap(
-    EP.fromString,
-    canvasRoot.getAttribute('data-utopia-root-element-path'),
-  )
-  const validPaths: Array<ElementPath> | null = optionalMap(
-    (paths) => paths.split(' ').map(EP.fromString),
-    canvasRoot.getAttribute('data-utopia-valid-paths'),
+  const elementRect = getCanvasRectangleFromElement(
+    element,
+    scale,
+    withContent,
+    rounding,
+    elementCanvasRectangleCache,
   )
 
-  if (canvasRootPath == null || validPaths == null) {
-    throw new Error(
-      'Utopia Internal Error: Running DOM-walker without canvasRootPath or validRootPaths',
-    )
-  }
-
-  if (
-    ObserversAvailable &&
-    invalidatedPaths.size === 0 &&
-    invalidatedScenes.size === 0 &&
-    rootMetadataInStateRef.current.length > 0 &&
-    !invalidated
-  ) {
-    // no mutation happened on the entire canvas, just return the old metadata
-    return { metadata: rootMetadataInStateRef.current, cachedPaths: [canvasRootPath] }
-  } else {
-    const { childPaths: rootElements, rootMetadata, cachedPaths } = walkSceneInner(
-      canvasRoot,
-      index,
-      validPaths,
-      rootMetadataInStateRef,
-      invalidatedPaths,
-      updateInvalidatedPaths,
-      invalidatedScenes,
-      updateInvalidatedScenes,
-      invalidatedPathsForStylesheetCacheRef,
-      selectedViews,
-      invalidated,
-      scale,
-      containerRectLazy,
-    )
-    // The Storyboard root being a fragment means it is invisible to us in the DOM walker,
-    // so walkCanvasRootFragment will create a fake root ElementInstanceMetadata
-    // to provide a home for the the (really existing) childMetadata
-    const metadata: ElementInstanceMetadata = elementInstanceMetadata(
-      canvasRootPath,
-      left('Storyboard'),
-      {},
-      { x: 0, y: 0, width: 0, height: 0 } as CanvasRectangle,
-      { x: 0, y: 0, width: 0, height: 0 } as LocalRectangle,
-      false,
-      false,
-      emptySpecialSizeMeasurements,
-      emptyComputedStyle,
-      emptyAttributeMetadatada,
-      null,
-      null, // this comes from the Spy Wrapper
-    )
-    return { metadata: [...rootMetadata, metadata], cachedPaths: cachedPaths }
-  }
+  return Utils.offsetRect(
+    elementRect,
+    Utils.negate(typeof containerRectLazy === 'function' ? containerRectLazy() : containerRectLazy),
+  )
 }
 
-function walkScene(
-  scene: HTMLElement,
-  index: number,
-  validPaths: Array<ElementPath>,
-  rootMetadataInStateRef: React.MutableRefObject<ReadonlyArray<ElementInstanceMetadata>>,
-  invalidatedPaths: ReadonlySet<string>,
-  updateInvalidatedPaths: SetValueCallback<Set<string>>,
-  invalidatedScenes: ReadonlySet<string>,
-  updateInvalidatedScenes: SetValueCallback<Set<string>>,
-  invalidatedPathsForStylesheetCacheRef: React.MutableRefObject<Set<string>>,
-  selectedViews: Array<ElementPath>,
-  invalidated: boolean,
+function getClosestOffsetParent(element: HTMLElement): Element | null {
+  let currentElement: HTMLElement | null = element
+
+  while (currentElement != null) {
+    if (currentElement.offsetParent != null) {
+      return currentElement.offsetParent
+    }
+    currentElement = currentElement.parentElement
+  }
+  return null
+}
+
+function measureGlobalFramesOfGridCells(
+  element: HTMLElement,
   scale: number,
-  containerRectLazy: () => CanvasRectangle,
-): {
-  metadata: ReadonlyArray<ElementInstanceMetadata>
-  cachedPaths: Array<ElementPath>
-} {
-  if (scene instanceof HTMLElement) {
-    // Right now this assumes that only UtopiaJSXComponents can be rendered via scenes,
-    // and that they can only have a single root element
-    const sceneIndexAttr = scene.attributes.getNamedItemNS(null, UTOPIA_SCENE_ID_KEY)
-    const sceneID = sceneIndexAttr?.value ?? null
-    const instancePath = sceneID == null ? null : EP.fromString(sceneID)
+  containerRectLazy: CanvasPoint | (() => CanvasPoint),
+  elementCanvasRectangleCache: ElementCanvasRectangleCache,
+): GridCellGlobalFrames | null {
+  let gridCellGlobalFrames: GridCellGlobalFrames | null = null
 
-    if (sceneID != null && instancePath != null && EP.isElementPath(instancePath)) {
-      const invalidatedScene =
-        invalidated ||
-        (ObserversAvailable && invalidatedScenes.size > 0 && invalidatedScenes.has(sceneID))
+  const gridMeasurementHelperId = GridMeasurementHelperMap.current.get(element)
 
-      updateInvalidatedScenes((current) => {
-        // mutating here and skipping invalidation
-        current.delete(sceneID)
-        return current
-      }, 'do-not-invalidate')
+  const gridControlElement =
+    gridMeasurementHelperId != null ? document.getElementById(gridMeasurementHelperId) : null
 
-      const { childPaths: rootElements, rootMetadata, cachedPaths } = walkSceneInner(
-        scene,
-        index,
-        validPaths,
-        rootMetadataInStateRef,
-        invalidatedPaths,
-        updateInvalidatedPaths,
-        invalidatedScenes,
-        updateInvalidatedScenes,
-        invalidatedPathsForStylesheetCacheRef,
-        selectedViews,
-        invalidatedScene,
-        scale,
-        containerRectLazy,
-      )
-
-      const { collectedMetadata: sceneMetadata, cachedPaths: sceneCachedPaths } = collectMetadata(
-        scene,
-        [instancePath],
-        [sceneID],
-        canvasPoint({ x: 0, y: 0 }),
-        rootElements,
-        scale,
-        containerRectLazy,
-        invalidatedPaths,
-        updateInvalidatedPaths,
-        invalidatedPathsForStylesheetCacheRef,
-        rootMetadataInStateRef,
-        invalidatedScene,
-        selectedViews,
-      )
-      return {
-        metadata: [...rootMetadata, ...sceneMetadata],
-        cachedPaths: [...cachedPaths, ...sceneCachedPaths],
+  if (gridControlElement != null) {
+    gridCellGlobalFrames = []
+    for (const cell of gridControlElement.children) {
+      if (!(cell instanceof HTMLElement)) {
+        continue
       }
+      const rowIndexAttr = cell.getAttribute('data-grid-row')
+      const columnIndexAttr = cell.getAttribute('data-grid-column')
+      if (rowIndexAttr == null || columnIndexAttr == null) {
+        continue
+      }
+      const rowIndex = parseInt(rowIndexAttr)
+      const columnIndex = parseInt(columnIndexAttr)
+      if (!isFinite(rowIndex) || !isFinite(columnIndex)) {
+        continue
+      }
+      const row = gridCellGlobalFrames[rowIndex - 1]
+      if (row == null) {
+        gridCellGlobalFrames[rowIndex - 1] = []
+      }
+      gridCellGlobalFrames[rowIndex - 1][columnIndex - 1] = globalFrameForElement(
+        cell,
+        scale,
+        containerRectLazy,
+        'without-text-content',
+        'nearest-half',
+        elementCanvasRectangleCache,
+      )
     }
   }
-  return { metadata: [], cachedPaths: [] } // verify
-}
-
-function walkSceneInner(
-  scene: HTMLElement,
-  index: number,
-  validPaths: Array<ElementPath>,
-  rootMetadataInStateRef: React.MutableRefObject<ReadonlyArray<ElementInstanceMetadata>>,
-  invalidatedPaths: ReadonlySet<string>,
-  updateInvalidatedPaths: SetValueCallback<Set<string>>,
-  invalidatedScenes: ReadonlySet<string>,
-  updateInvalidatedScenes: SetValueCallback<Set<string>>,
-  invalidatedPathsForStylesheetCacheRef: React.MutableRefObject<Set<string>>,
-  selectedViews: Array<ElementPath>,
-  invalidated: boolean,
-  scale: number,
-  containerRectLazy: () => CanvasRectangle,
-): {
-  childPaths: Array<ElementPath>
-  rootMetadata: ReadonlyArray<ElementInstanceMetadata>
-  cachedPaths: Array<ElementPath>
-} {
-  const globalFrame: CanvasRectangle = globalFrameForElement(scene, scale, containerRectLazy)
-
-  let childPaths: Array<ElementPath> = []
-  let rootMetadataAccumulator: Array<ElementInstanceMetadata> = []
-  let cachedPathsAccumulator: Array<ElementPath> = []
-
-  scene.childNodes.forEach((childNode) => {
-    const { childPaths: childNodePaths, rootMetadata, cachedPaths } = walkElements(
-      childNode,
-      index,
-      0,
-      globalFrame,
-      validPaths,
-      rootMetadataInStateRef,
-      invalidatedPaths,
-      updateInvalidatedPaths,
-      invalidatedScenes,
-      updateInvalidatedScenes,
-      invalidatedPathsForStylesheetCacheRef,
-      selectedViews,
-      invalidated,
-      scale,
-      containerRectLazy,
-    )
-
-    childPaths.push(...childNodePaths)
-    rootMetadataAccumulator.push(...rootMetadata)
-    cachedPathsAccumulator.push(...cachedPaths)
-  })
-
-  return {
-    childPaths: childPaths,
-    rootMetadata: rootMetadataAccumulator,
-    cachedPaths: cachedPathsAccumulator,
-  }
-}
-
-// Walks through the DOM producing the structure and values from within.
-function walkElements(
-  element: Node,
-  index: number,
-  depth: number,
-  parentPoint: CanvasPoint,
-  validPaths: Array<ElementPath>,
-  rootMetadataInStateRef: React.MutableRefObject<ReadonlyArray<ElementInstanceMetadata>>,
-  invalidatedPaths: ReadonlySet<string>,
-  updateInvalidatedPaths: SetValueCallback<Set<string>>,
-  invalidatedScenes: ReadonlySet<string>,
-  updateInvalidatedScenes: SetValueCallback<Set<string>>,
-  invalidatedPathsForStylesheetCacheRef: React.MutableRefObject<Set<string>>,
-  selectedViews: Array<ElementPath>,
-  invalidated: boolean,
-  scale: number,
-  containerRectLazy: () => CanvasRectangle,
-): {
-  childPaths: ReadonlyArray<ElementPath>
-  rootMetadata: ReadonlyArray<ElementInstanceMetadata>
-  cachedPaths: Array<ElementPath>
-} {
-  if (isScene(element)) {
-    // we found a nested scene, restart the walk
-    const { metadata, cachedPaths: cachedPaths } = walkScene(
-      element,
-      index,
-      validPaths,
-      rootMetadataInStateRef,
-      invalidatedPaths,
-      updateInvalidatedPaths,
-      invalidatedScenes,
-      updateInvalidatedScenes,
-      invalidatedPathsForStylesheetCacheRef,
-      selectedViews,
-      invalidated,
-      scale,
-      containerRectLazy,
-    )
-
-    const result = {
-      childPaths: [],
-      rootMetadata: metadata,
-      cachedPaths: cachedPaths,
-    }
-    return result
-  }
-  if (element instanceof HTMLElement) {
-    // Determine the uid of this element if it has one.
-    const pathsWithStrings = getPathWithStringsOnDomElement(element)
-
-    const doNotTraverseAttribute = getDOMAttribute(element, UTOPIA_DO_NOT_TRAVERSE_KEY)
-    const traverseChildren: boolean = doNotTraverseAttribute !== 'true'
-
-    const globalFrame = globalFrameForElement(element, scale, containerRectLazy)
-
-    // Check this is a path we're interested in, otherwise skip straight to the children
-    const foundValidPaths = pathsWithStrings.filter((pathWithString) => {
-      const staticPath = EP.makeLastPartOfPathStatic(pathWithString.path)
-      return validPaths.some((validPath) => {
-        return EP.pathsEqual(staticPath, validPath)
-      })
-    })
-
-    // Build the metadata for the children of this DOM node.
-    let childPaths: Array<ElementPath> = []
-    let rootMetadataAccumulator: ReadonlyArray<ElementInstanceMetadata> = []
-    let cachedPathsAccumulator: Array<ElementPath> = []
-    if (traverseChildren) {
-      element.childNodes.forEach((child, childIndex) => {
-        const {
-          childPaths: childNodePaths,
-          rootMetadata: rootMetadataInner,
-          cachedPaths,
-        } = walkElements(
-          child,
-          childIndex,
-          depth + 1,
-          globalFrame,
-          validPaths,
-          rootMetadataInStateRef,
-          invalidatedPaths,
-          updateInvalidatedPaths,
-          invalidatedScenes,
-          updateInvalidatedScenes,
-          invalidatedPathsForStylesheetCacheRef,
-          selectedViews,
-          invalidated,
-          scale,
-          containerRectLazy,
-        )
-        childPaths.push(...childNodePaths)
-        rootMetadataAccumulator = [...rootMetadataAccumulator, ...rootMetadataInner]
-        cachedPathsAccumulator.push(...cachedPaths)
-      })
-    }
-
-    const uniqueChildPaths = uniqBy(childPaths, EP.pathsEqual)
-
-    const { collectedMetadata, cachedPaths } = collectMetadata(
-      element,
-      pluck(foundValidPaths, 'path'),
-      pluck(foundValidPaths, 'asString'),
-      parentPoint,
-      uniqueChildPaths,
-      scale,
-      containerRectLazy,
-      invalidatedPaths,
-      updateInvalidatedPaths,
-      invalidatedPathsForStylesheetCacheRef,
-      rootMetadataInStateRef,
-      invalidated,
-      selectedViews,
-    )
-
-    rootMetadataAccumulator = [...rootMetadataAccumulator, ...collectedMetadata]
-    cachedPathsAccumulator = [...cachedPathsAccumulator, ...cachedPaths]
-    return {
-      rootMetadata: rootMetadataAccumulator,
-      childPaths: collectedMetadata.map((metadata) => metadata.elementPath), // TODO why not extract childPaths from the metadata?
-      cachedPaths: cachedPathsAccumulator,
-    }
-  } else {
-    return { childPaths: [], rootMetadata: [], cachedPaths: [] }
-  }
+  return gridCellGlobalFrames
 }
